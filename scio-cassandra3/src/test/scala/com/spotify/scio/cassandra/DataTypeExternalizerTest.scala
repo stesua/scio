@@ -15,20 +15,22 @@
  * under the License.
  */
 
-package com.spotify.scio.testing;
+package com.spotify.scio.cassandra
 
-import org.apache.beam.sdk.options.Description;
-import org.apache.beam.sdk.options.PipelineOptions;
-import org.apache.beam.sdk.options.Validation;
-import scala.reflect.ClassTag;
+import com.datastax.driver.core.DataType
+import org.apache.beam.sdk.util.SerializableUtils
+import org.scalatest._
 
-/**
- * Options provided to test {@link com.spotify.scio.ScioContext#parseArguments(String[], boolean, ClassTag)}
- */
-public interface TestValidationOptions extends PipelineOptions {
+class DataTypeExternalizerTest extends FlatSpec with Matchers {
 
-  @Validation.Required
-  @Description("Required argument to test validation")
-  String getRequiredArgument();
-  void setRequiredArgument(String requiredArgument);
+  "DataTypeExternalizer" should "support ImmutableList" in {
+    val dt = DataType.list(DataType.text())
+    SerializableUtils.ensureSerializable(DataTypeExternalizer(dt)).get shouldBe dt
+  }
+
+  it should "support ImmutableSet" in {
+    val dt = DataType.set(DataType.text())
+    SerializableUtils.ensureSerializable(DataTypeExternalizer(dt)).get shouldBe dt
+  }
+
 }

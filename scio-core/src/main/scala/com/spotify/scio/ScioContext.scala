@@ -163,7 +163,7 @@ object ScioContext {
     val (optArgs, appArgs) =
       cmdlineArgs.partition(arg => optPatterns.exists(_.findFirstIn(arg).isDefined))
 
-    val pipelineOpts = if(withValidation) {
+    val pipelineOpts = if (withValidation) {
       PipelineOptionsFactory.fromArgs(optArgs: _*).withValidation().as(optClass)
     } else {
       PipelineOptionsFactory.fromArgs(optArgs: _*).as(optClass)

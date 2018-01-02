@@ -284,6 +284,14 @@ class SCollectionTest extends PipelineSpec {
       p2(0).count.map(round) should containSingleValue (200L)
       p2(1).count.map(round) should containSingleValue (300L)
       p2(2).count.map(round) should containSingleValue (500L)
+
+      val (pa, pb) = sc.parallelize(0 to 1000).randomSplit(0.3)
+      val (pc, pd, pe) = sc.parallelize(0 to 1000).randomSplit(0.2, 0.3)
+      pa.count.map(round) should containSingleValue (300L)
+      pb.count.map(round) should containSingleValue (700L)
+      pc.count.map(round) should containSingleValue (200L)
+      pd.count.map(round) should containSingleValue (300L)
+      pe.count.map(round) should containSingleValue (500L)
     }
   }
 
@@ -534,7 +542,7 @@ class SCollectionTest extends PipelineSpec {
   }
 
   it should "support debug to a file" in {
-    val outFile = Files.createTempFile("debug_test", "txt")
+    val outFile = Files.createTempFile("debug-test-", "txt")
     val fileStream = new PrintStream(outFile.toFile)
     Console.withOut(fileStream){
       runWithContext { sc =>
