@@ -20,7 +20,7 @@ package com.spotify.scio.bigtable
 import com.google.cloud.bigtable.grpc.BigtableSession
 import com.google.common.cache.{Cache, CacheBuilder}
 import com.google.common.util.concurrent.{Futures, ListenableFuture}
-import com.spotify.scio.bigtable.BigtableDoFn.CacheSupplier
+import com.spotify.scio.transforms.AsyncLookupDoFn.CacheSupplier
 import org.apache.beam.sdk.transforms.DoFnTester
 import org.scalatest._
 
@@ -66,13 +66,13 @@ object BigtableDoFnTest {
 }
 
 class TestBigtableDoFn extends BigtableDoFn[Int, String](null) {
-  override protected def newSession(): BigtableSession = null
+  override def newClient(): BigtableSession = null
   override def asyncLookup(session: BigtableSession, input: Int): ListenableFuture[String] =
     Futures.immediateFuture(input.toString)
 }
 
 class TestCachingBigtableDoFn extends BigtableDoFn[Int, String](null, 100, new TestCacheSupplier) {
-  override protected def newSession(): BigtableSession = null
+  override def newClient(): BigtableSession = null
   override def asyncLookup(session: BigtableSession, input: Int): ListenableFuture[String] = {
     BigtableDoFnTest.queue.enqueue(input)
     Futures.immediateFuture(input.toString)
@@ -80,7 +80,7 @@ class TestCachingBigtableDoFn extends BigtableDoFn[Int, String](null, 100, new T
 }
 
 class TestFailingBigtableDoFn extends BigtableDoFn[Int, String](null) {
-  override protected def newSession(): BigtableSession = null
+  override def newClient(): BigtableSession = null
   override def asyncLookup(session: BigtableSession, input: Int): ListenableFuture[String] =
     if (input % 2 == 0) {
       Futures.immediateFuture("success" + input)

@@ -19,10 +19,10 @@ package com.spotify.scio.coders
 
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.esotericsoftware.kryo.{Kryo, Serializer}
-import org.joda.time.{LocalDate, LocalDateTime}
+import org.joda.time.{LocalDate, LocalDateTime, LocalTime, DateTime, DateTimeZone}
 import org.joda.time.chrono.ISOChronology
 
-class JodaLocalDateTimeSerializer extends Serializer[LocalDateTime] {
+private class JodaLocalDateTimeSerializer extends Serializer[LocalDateTime] {
   setImmutable(true)
 
   def write(kryo: Kryo, output: Output, ldt: LocalDateTime): Unit = {
@@ -52,7 +52,25 @@ class JodaLocalDateTimeSerializer extends Serializer[LocalDateTime] {
   }
 }
 
-class JodaLocalDateSerializer extends Serializer[LocalDate] {
+private class JodaLocalTimeSerializer extends Serializer[LocalTime] {
+  setImmutable(true)
+
+  def write(kryo: Kryo, output: Output, lt: LocalTime): Unit = {
+    output.writeInt(lt.getMillisOfDay, /*optimizePositive=*/ false)
+
+    val chronology = lt.getChronology
+    if (chronology != null && chronology != ISOChronology.getInstanceUTC) {
+      sys.error(s"Unsupported chronology: $chronology")
+    }
+  }
+
+  def read(kryo: Kryo, input: Input, tpe: Class[LocalTime]): LocalTime = {
+    LocalTime.fromMillisOfDay(input.readInt(/*optimizePositive=*/ false))
+  }
+}
+
+
+private class JodaLocalDateSerializer extends Serializer[LocalDate] {
   setImmutable(true)
 
   def write(kryo: Kryo, output: Output, ld: LocalDate): Unit = {
@@ -72,5 +90,20 @@ class JodaLocalDateSerializer extends Serializer[LocalDate] {
     val day = input.readByte().toInt
 
     new LocalDate(year, month, day)
+  }
+}
+
+private class JodaDateTimeSerializer extends Serializer[DateTime] {
+  setImmutable(true)
+
+  def write(kryo: Kryo, output: Output, dt: DateTime): Unit = {
+    output.writeLong(dt.getMillis)
+    output.writeString(dt.getZone.getID)
+  }
+
+  def read(kryo: Kryo, input: Input, tpe: Class[DateTime]): DateTime = {
+    val millis = input.readLong()
+    val zone = DateTimeZone.forID(input.readString())
+    new DateTime(millis,zone)
   }
 }

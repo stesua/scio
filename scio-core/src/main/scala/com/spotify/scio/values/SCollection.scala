@@ -24,7 +24,6 @@ import java.lang.{Boolean => JBoolean, Double => JDouble, Iterable => JIterable}
 import java.util.concurrent.ThreadLocalRandom
 
 import com.google.api.services.bigquery.model.{TableReference, TableRow, TableSchema}
-import com.google.common.collect.Lists
 import com.google.datastore.v1.Entity
 import com.google.protobuf.Message
 import com.spotify.scio.ScioContext
@@ -47,7 +46,7 @@ import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO.Write.{CreateDisposition, 
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubMessage
 import org.apache.beam.sdk.io.gcp.{bigquery => bqio, datastore => dsio, pubsub => psio}
 import org.apache.beam.sdk.io.{Compression, FileBasedSink}
-import org.apache.beam.sdk.transforms.DoFn.{ProcessElement, Setup}
+import org.apache.beam.sdk.transforms.DoFn.ProcessElement
 import org.apache.beam.sdk.transforms._
 import org.apache.beam.sdk.transforms.windowing._
 import org.apache.beam.sdk.util.CoderUtils
@@ -130,8 +129,23 @@ sealed trait SCollection[T] extends PCollectionWrapper[T] {
    * [[SCollection]].
    */
   def applyTransform[U: ClassTag](transform: PTransform[_ >: PCollection[T], PCollection[U]])
-  : SCollection[U] =
+  : SCollection[U] = {
+    val uCls = implicitly[ClassTag[U]].runtimeClass
+    require(
+      !(classOf[KV[_, _]] isAssignableFrom uCls),
+      "Applying a transform with KV[K, V] output, use applyKvTransform instead")
     this.pApply(transform).setCoder(this.getCoder[U])
+  }
+
+  /**
+   * Apply a [[org.apache.beam.sdk.transforms.PTransform PTransform]] and wrap the output in an
+   * [[SCollection]]. This is a special case of [[applyTransform]] for transforms with [[KV]]
+   * output.
+   */
+  def applyKvTransform[K: ClassTag, V: ClassTag]
+  (transform: PTransform[_ >: PCollection[T], PCollection[KV[K, V]]])
+  : SCollection[KV[K, V]] =
+    this.pApply(transform).setCoder(this.getKvCoder[K, V])
 
   /** Apply a transform. */
   private[scio] def transform[U: ClassTag](f: SCollection[T] => SCollection[U])
@@ -514,39 +528,7 @@ sealed trait SCollection[T] extends PCollectionWrapper[T] {
    * Return a sampled subset of any `num` elements of the SCollection.
    * @group transform
    */
-  def take(num: Long): SCollection[T] = this.transform { in =>
-    val limit = num
-    in
-      .applyTransform(ParDo.of(new DoFn[T, T] {
-        private var count = 0L
-        @Setup
-        private[scio] def setup(): Unit = {
-          count = 0L
-        }
-
-        @ProcessElement
-        private[scio] def processElement(c: DoFn[T, T]#ProcessContext): Unit = {
-          if (count < limit) {
-            c.output(c.element())
-          }
-          count += 1
-        }
-      }))
-      .combine(Lists.newArrayList(_))((c, t) => {
-        if (c.size() < limit) {
-          c.add(t)
-        }
-        c
-      })((c1, c2) => {
-        val (large, small) = if (c1.size() > c2.size()) (c1, c2) else (c2, c1)
-        val i = small.iterator()
-        while (large.size() < limit && i.hasNext) {
-          large.add(i.next())
-        }
-        large
-      })
-      .flatMap(_.asScala)
-  }
+  def take(num: Long): SCollection[T] = this.pApply(Sample.any(num))
 
   /**
    * Return the top k (largest) elements from this SCollection as defined by the specified
@@ -757,10 +739,15 @@ sealed trait SCollection[T] extends PCollectionWrapper[T] {
    * @group window
    */
   def withSlidingWindows(size: Duration,
-                         period: Duration = Duration.millis(1),
+                         period: Duration = null,
                          offset: Duration = Duration.ZERO,
-                         options: WindowOptions = WindowOptions()): SCollection[T] =
-    this.withWindowFn(SlidingWindows.of(size).every(period).withOffset(offset), options)
+                         options: WindowOptions = WindowOptions()): SCollection[T] = {
+    var transform = SlidingWindows.of(size).withOffset(offset)
+    if (period != null) {
+      transform = transform.every(period)
+    }
+    this.withWindowFn(transform, options)
+  }
 
   /**
    * Window values based on sessions.
@@ -915,6 +902,17 @@ sealed trait SCollection[T] extends PCollectionWrapper[T] {
       .withCodec(codec)
       .withMetadata(metadata.asJava)
 
+  private def typedAvroOut[U](write: gio.AvroIO.TypedWrite[U, Void, GenericRecord],
+                         path: String, numShards: Int, suffix: String,
+                         codec: CodecFactory,
+                         metadata: Map[String, AnyRef]) =
+    write
+      .to(pathWithShards(path))
+      .withNumShards(numShards)
+      .withSuffix(suffix + ".avro")
+      .withCodec(codec)
+      .withMetadata(metadata.asJava)
+
   private[scio] def textOut(path: String,
                             suffix: String,
                             numShards: Int,
@@ -966,17 +964,17 @@ sealed trait SCollection[T] extends PCollectionWrapper[T] {
                          (implicit ct: ClassTag[T], tt: TypeTag[T], ev: T <:< HasAvroAnnotation)
   : Future[Tap[T]] = {
     val avroT = AvroType[T]
-
-    import scala.concurrent.ExecutionContext.Implicits.global
-    this
-      .map(avroT.toGenericRecord)
-      .saveAsAvroFile(path,
-        numShards,
-        avroT.schema,
-        suffix,
-        codec,
-        metadata)
-      .map(_.map(avroT.fromGenericRecord))
+    if (context.isTest) {
+      context.testOut(AvroIO(path))(this)
+      saveAsInMemoryTap
+    } else {
+      val t = gio.AvroIO.writeCustomTypeToGenericRecords()
+        .withFormatFunction(new SerializableFunction[T, GenericRecord] {
+          override def apply(input: T): GenericRecord = avroT.toGenericRecord(input)
+        })
+      this.applyInternal(typedAvroOut(t, path, numShards, suffix, codec, metadata))
+      context.makeFuture(AvroTap(ScioUtil.addPartSuffix(path), avroT.schema))
+    }
   }
 
   /**
@@ -1011,7 +1009,7 @@ sealed trait SCollection[T] extends PCollectionWrapper[T] {
                     (implicit ev: T <:< TableRow): Future[Tap[TableRow]] = {
     val tableSpec = bqio.BigQueryHelpers.toTableSpec(table)
     if (context.isTest) {
-      context.testOut(BigQueryIO(tableSpec))(this.asInstanceOf[SCollection[TableRow]])
+      context.testOut(BigQueryIO[TableRow](tableSpec))(this.asInstanceOf[SCollection[TableRow]])
 
       if (writeDisposition == WriteDisposition.WRITE_APPEND) {
         Future.failed(new NotImplementedError("BigQuery future with append not implemented"))
@@ -1060,17 +1058,29 @@ sealed trait SCollection[T] extends PCollectionWrapper[T] {
                           createDisposition: CreateDisposition)
                          (implicit ct: ClassTag[T], tt: TypeTag[T], ev: T <:< HasAnnotation)
   : Future[Tap[T]] = {
-    val bqt = BigQueryType[T]
-    import scala.concurrent.ExecutionContext.Implicits.global
-    this
-      .map(bqt.toTableRow)
-      .saveAsBigQuery(
-        table,
-        bqt.schema,
-        writeDisposition,
-        createDisposition,
-        bqt.tableDescription.orNull)
-      .map(_.map(bqt.fromTableRow))
+    val tableSpec = bqio.BigQueryHelpers.toTableSpec(table)
+    if (context.isTest) {
+      context.testOut(BigQueryIO[T](tableSpec))(this.asInstanceOf[SCollection[T]])
+
+      if (writeDisposition == WriteDisposition.WRITE_APPEND) {
+        Future.failed(new NotImplementedError("BigQuery future with append not implemented"))
+      } else {
+        saveAsInMemoryTap
+      }
+    } else {
+      val bqt = BigQueryType[T]
+      val initialTfName = this.tfName
+      import scala.concurrent.ExecutionContext.Implicits.global
+      this
+        .map(bqt.toTableRow)
+        .withName(s"$initialTfName$$Write").saveAsBigQuery(
+          table,
+          bqt.schema,
+          writeDisposition,
+          createDisposition,
+          bqt.tableDescription.orNull)
+        .map(_.map(bqt.fromTableRow))
+    }
   }
 
   /**

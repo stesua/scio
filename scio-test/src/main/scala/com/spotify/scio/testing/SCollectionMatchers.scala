@@ -202,6 +202,29 @@ trait SCollectionMatchers {
         }
     }
 
+  /** Assert that the SCollection in question contains the provided element without making
+   *  assumptions about other elements in the collection. */
+  def containValue[T: ClassTag](value: T): IterableMatcher[SCollection[T], T] =
+    new IterableMatcher[SCollection[T], T] {
+      override def matcher(builder: AssertBuilder): Matcher[SCollection[T]] =
+        new Matcher[SCollection[T]] {
+          override def apply(left: SCollection[T]): MatchResult = {
+            val v = value // defeat closure
+            val (should, shouldNot) = {
+              import org.hamcrest.Matchers
+              import org.junit.Assert
+              (
+                makeFn[T] { in => Assert.assertThat(in, Matchers.hasItem(v)) },
+                makeFn[T] { in => Assert.assertThat(in, Matchers.not(Matchers.hasItem(v))) }
+              )
+            }
+            m(
+              () => builder(PAssert.that(serDeCycle(left).internal).satisfies(should)),
+              () => builder(PAssert.that(serDeCycle(left).internal).satisfies(shouldNot)))
+          }
+        }
+    }
+
   /** Assert that the SCollection in question is empty. */
   val beEmpty: IterableMatcher[SCollection[_], Any] =
     new IterableMatcher[SCollection[_], Any] {
@@ -292,11 +315,15 @@ trait SCollectionMatchers {
     }
 
   /** Assert that all elements of the SCollection in question satisfy the provided function. */
-  def forAll[T: ClassTag](predicate: T => Boolean): IterableMatcher[SCollection[T], T] =
-    satisfy(_.forall(predicate))
+  def forAll[T: ClassTag](predicate: T => Boolean): IterableMatcher[SCollection[T], T] = {
+    val f = ClosureCleaner(predicate)
+    satisfy(_.forall(f))
+  }
 
   /** Assert that some elements of the SCollection in question satisfy the provided function. */
-  def exist[T: ClassTag](predicate: T => Boolean): IterableMatcher[SCollection[T], T] =
-    satisfy(_.exists(predicate))
+  def exist[T: ClassTag](predicate: T => Boolean): IterableMatcher[SCollection[T], T] = {
+    val f = ClosureCleaner(predicate)
+    satisfy(_.exists(f))
+  }
 
 }

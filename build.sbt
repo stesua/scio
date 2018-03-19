@@ -20,47 +20,49 @@ import Keys._
 import sbtassembly.AssemblyPlugin.autoImport._
 import com.typesafe.sbt.SbtGit.GitKeys.gitRemoteRepo
 
-val beamVersion = "2.2.0"
+val beamVersion = "2.3.0"
 
-val algebirdVersion = "0.13.3"
-val annoy4sVersion = "0.5.0"
+val algebirdVersion = "0.13.4"
+val annoy4sVersion = "0.6.0"
 val annoyVersion = "0.2.5"
 val asmVersion = "4.5"
 val autoServiceVersion = "1.0-rc3"
-val autoValueVersion = "1.5.3"
+val autoValueVersion = "1.4.1"
 val avroVersion = "1.8.2"
-val breezeVersion ="0.13.1"
+val breezeVersion ="1.0-RC2"
 val chillVersion = "0.9.2"
-val circeVersion = "0.8.0"
-val commonsIoVersion = "2.5"
+val circeVersion = "0.9.1"
+val commonsIoVersion = "2.6"
 val commonsMath3Version = "3.6.1"
 val elasticsearch2Version = "2.1.0"
 val elasticsearch5Version = "5.5.0"
+val featranVersion = "0.1.18"
 val gcsConnectorVersion = "1.6.1-hadoop2"
+val gcsVersion = "1.8.0"
 val guavaVersion = "20.0"
 val hadoopVersion = "2.7.3"
 val hamcrestVersion = "1.3"
 val jacksonScalaModuleVersion = "2.9.2"
 val javaLshVersion = "0.10"
-val jlineVersion = "2.14.3"
+val jlineVersion = "2.14.5"
 val jodaConvertVersion = "1.8.1"
 val jodaTimeVersion = "2.9.9"
 val junitInterfaceVersion = "0.11"
 val junitVersion = "4.12"
-val kantanCsvVersion = "0.3.0"
+val kantanCsvVersion = "0.4.0"
 val kryoVersion = "4.0.1" // explicitly depend on 4.0.1 due to https://github.com/EsotericSoftware/kryo/pull/516
 val mockitoVersion = "1.10.19"
 val parquetAvroExtraVersion = "0.2.2"
 val parquetVersion = "1.9.0"
-val protobufGenericVersion = "0.2.2"
+val protobufGenericVersion = "0.2.4"
 val protobufVersion = "3.3.1"
-val scalacheckShapelessVersion = "1.1.7"
+val scalacheckShapelessVersion = "1.1.8"
 val scalacheckVersion = "1.13.5"
-val scalaMacrosVersion = "2.1.0"
-val scalatestVersion = "3.0.4"
-val shapelessDatatypeVersion = "0.1.7"
+val scalaMacrosVersion = "2.1.1"
+val scalatestVersion = "3.0.5"
+val shapelessDatatypeVersion = "0.1.8"
 val slf4jVersion = "1.7.25"
-val sparkeyVersion = "2.2.0"
+val sparkeyVersion = "2.2.1"
 val tensorFlowVersion = "1.3.0"
 
 val commonSettings = Sonatype.sonatypeSettings ++ assemblySettings ++ Seq(
@@ -118,7 +120,8 @@ val commonSettings = Sonatype.sonatypeSettings ++ assemblySettings ++ Seq(
     Developer(id="sinisa_lyh", name="Neville Li", email="neville.lyh@gmail.com", url=url("https://twitter.com/sinisa_lyh")),
     Developer(id="ravwojdyla", name="Rafal Wojdyla", email="ravwojdyla@gmail.com", url=url("https://twitter.com/ravwojdyla")),
     Developer(id="andrewsmartin", name="Andrew Martin", email="andrewsmartin.mg@gmail.com", url=url("https://twitter.com/andrew_martin92")),
-    Developer(id="fallonfofallon", name="Fallon Chen", email="fallon@spotify.com", url=url("https://twitter.com/fallonfofallon"))
+    Developer(id="fallonfofallon", name="Fallon Chen", email="fallon@spotify.com", url=url("https://twitter.com/fallonfofallon")),
+    Developer(id="regadas", name="Filipe Regadas", email="filiperegadas@gmail.com", url=url("https://twitter.com/regadas"))
   ),
 
   credentials ++= (for {
@@ -258,7 +261,9 @@ lazy val scioCore: Project = Project(
 ).settings(
   commonSettings ++ macroSettings,
   description := "Scio - A Scala API for Apache Beam and Google Cloud Dataflow",
-  resources in Compile += (baseDirectory in ThisBuild).value / "version.sbt",
+  resources in Compile ++= Seq(
+    (baseDirectory in ThisBuild).value / "build.sbt",
+    (baseDirectory in ThisBuild).value / "version.sbt"),
   libraryDependencies ++= Seq(
     "org.apache.beam" % "beam-sdks-java-core" % beamVersion,
     "org.apache.beam" % "beam-runners-google-cloud-dataflow-java" % beamVersion % "provided",
@@ -269,7 +274,6 @@ lazy val scioCore: Project = Project(
     "com.esotericsoftware" % "kryo-shaded" % kryoVersion,
     "commons-io" % "commons-io" % commonsIoVersion,
     "org.apache.commons" % "commons-math3" % commonsMath3Version,
-    "org.tensorflow" % "proto" % tensorFlowVersion,
     "com.fasterxml.jackson.module" %% "jackson-module-scala" % jacksonScalaModuleVersion,
     "com.google.auto.service" % "auto-service" % autoServiceVersion,
     "com.google.guava" % "guava" % guavaVersion,
@@ -293,7 +297,8 @@ lazy val scioTest: Project = Project(
     "org.apache.beam" % "beam-runners-google-cloud-dataflow-java" % beamVersion % "it",
     "org.apache.beam" % "beam-sdks-java-core" % beamVersion % "test" classifier "tests",
     "org.scalatest" %% "scalatest" % scalatestVersion,
-    "org.scalacheck" %% "scalacheck" % scalacheckVersion % "test",
+    "org.scalacheck" %% "scalacheck" % scalacheckVersion % "test,it",
+    "com.github.alexarchambault" %% "scalacheck-shapeless_1.13" % scalacheckShapelessVersion % "test,it",
     // DataFlow testing requires junit and hamcrest
     "org.hamcrest" % "hamcrest-all" % hamcrestVersion,
     "com.spotify" % "annoy" % annoyVersion % "test",
@@ -306,7 +311,7 @@ lazy val scioTest: Project = Project(
   IntegrationTest
 ).dependsOn(
   scioCore,
-  scioSchemas % "test"
+  scioSchemas % "test,it"
 )
 
 lazy val scioAvro: Project = Project(
@@ -340,6 +345,7 @@ lazy val scioBigQuery: Project = Project(
     "org.slf4j" % "slf4j-api" % slf4jVersion,
     "org.slf4j" % "slf4j-simple" % slf4jVersion % "test,it",
     "org.scalatest" %% "scalatest" % scalatestVersion % "test,it",
+    "com.google.cloud" % "google-cloud-storage" % gcsVersion % "test,it",
     "com.github.alexarchambault" %% "scalacheck-shapeless_1.13" % scalacheckShapelessVersion % "test",
     "me.lyh" %% "shapeless-datatype-core" % shapelessDatatypeVersion % "test"
   )
@@ -486,6 +492,7 @@ lazy val scioParquet: Project = Project(
   description := "Scio add-on for Parquet",
   libraryDependencies ++= Seq(
     "me.lyh" %% "parquet-avro-extra" % parquetAvroExtraVersion,
+    "com.google.auto.value" % "auto-value" % autoValueVersion % "provided",
     "com.google.cloud.bigdataoss" % "gcs-connector" % gcsConnectorVersion,
     "org.apache.beam" % "beam-sdks-java-io-hadoop-input-format" % beamVersion,
     "org.apache.hadoop" % "hadoop-client" % hadoopVersion,
@@ -506,8 +513,16 @@ lazy val scioTensorFlow: Project = Project(
   libraryDependencies ++= Seq(
     "org.tensorflow" % "tensorflow" % tensorFlowVersion,
     "org.tensorflow" % "proto" % tensorFlowVersion,
-    "me.lyh" %% "shapeless-datatype-tensorflow" % shapelessDatatypeVersion
-  )
+    "me.lyh" %% "shapeless-datatype-tensorflow" % shapelessDatatypeVersion,
+    "com.spotify" %% "featran-core" % featranVersion,
+    "com.spotify" %% "featran-scio" % featranVersion,
+    "com.spotify" %% "featran-tensorflow" % featranVersion
+  ),
+  libraryDependencies ++= Seq(
+    "io.circe" %% "circe-core",
+    "io.circe" %% "circe-generic",
+    "io.circe" %% "circe-parser"
+  ).map(_ % circeVersion)
 ).dependsOn(
   scioCore,
   scioTest % "test->test"

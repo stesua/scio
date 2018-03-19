@@ -31,7 +31,7 @@ import com.spotify.scio.avro.types.AvroType
 import com.spotify.scio.avro.types.AvroType.HasAvroAnnotation
 import com.spotify.scio.bigquery._
 import com.spotify.scio.bigquery.types.BigQueryType.HasAnnotation
-import com.spotify.scio.coders.AvroBytesUtil
+import com.spotify.scio.coders.{AvroBytesUtil, KryoAtomicCoder, KryoOptions}
 import com.spotify.scio.io.Tap
 import com.spotify.scio.metrics.Metrics
 import com.spotify.scio.options.ScioOptions
@@ -43,10 +43,12 @@ import org.apache.avro.generic.GenericRecord
 import org.apache.avro.specific.SpecificRecordBase
 import org.apache.beam.sdk.PipelineResult.State
 import org.apache.beam.sdk.extensions.gcp.options.{GcpOptions, GcsOptions}
+import org.apache.beam.sdk.io.gcp.bigquery.SchemaAndRecord
 import org.apache.beam.sdk.io.gcp.{bigquery => bqio, datastore => dsio, pubsub => psio}
+import org.apache.beam.sdk.metrics.Counter
 import org.apache.beam.sdk.options._
 import org.apache.beam.sdk.transforms.DoFn.ProcessElement
-import org.apache.beam.sdk.transforms.{Create, DoFn, PTransform}
+import org.apache.beam.sdk.transforms.{Create, DoFn, PTransform, SerializableFunction}
 import org.apache.beam.sdk.util.CoderUtils
 import org.apache.beam.sdk.values._
 import org.apache.beam.sdk.{Pipeline, PipelineResult, io => gio}
@@ -56,6 +58,7 @@ import org.slf4j.LoggerFactory
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
 import scala.collection.mutable.{Buffer => MBuffer}
+import scala.concurrent.duration.Duration
 import scala.concurrent.{Future, Promise}
 import scala.io.Source
 import scala.reflect.ClassTag
@@ -230,6 +233,7 @@ class ScioContext private[scio] (val options: PipelineOptions,
 
   {
     VersionUtil.checkVersion()
+    VersionUtil.checkRunnerVersion(options.getRunner)
     val o = optionsAs[ScioOptions]
     o.setScalaVersion(scalaVersion)
     o.setScioVersion(scioVersion)
@@ -253,6 +257,20 @@ class ScioContext private[scio] (val options: PipelineOptions,
         None
       }
     }
+
+  /** Amount of time to block job for. */
+  private[scio] val awaitDuration: Duration = {
+    val blockFor = optionsAs[ScioOptions].getBlockFor
+    try {
+      Option(blockFor)
+        .map(Duration(_))
+        .getOrElse(Duration.Inf)
+    } catch {
+      case e: NumberFormatException =>
+        throw new IllegalArgumentException(s"blockFor param $blockFor cannot be cast to " +
+          s"type scala.concurrent.duration.Duration")
+    }
+  }
 
   // if in local runner, temp location may be needed, but is not currently required by
   // the runner, which may end up with NPE. If not set but user generate new temp dir
@@ -297,6 +315,7 @@ class ScioContext private[scio] (val options: PipelineOptions,
   private val _promises: MBuffer[(Promise[Tap[_]], Tap[_])] = MBuffer.empty
   private val _queryJobs: MBuffer[QueryJob] = MBuffer.empty
   private val _preRunFns: MBuffer[() => Unit] = MBuffer.empty
+  private val _counters: MBuffer[Counter] = MBuffer.empty
 
   /** Wrap a [[org.apache.beam.sdk.values.PCollection PCollection]]. */
   def wrap[T: ClassTag](p: PCollection[T]): SCollection[T] =
@@ -337,6 +356,13 @@ class ScioContext private[scio] (val options: PipelineOptions,
       bigQueryClient.waitForJobs(_queryJobs: _*)
     }
 
+    if (_counters.nonEmpty) {
+      val counters = _counters.toArray
+      this.parallelize(Seq(0)).map { _ =>
+        counters.foreach(_.inc(0))
+      }
+    }
+
     _isClosed = true
 
     _preRunFns.foreach(_())
@@ -346,8 +372,8 @@ class ScioContext private[scio] (val options: PipelineOptions,
       TestDataManager.closeTest(testId.get, result)
     }
 
-    if (this.isTest || this.optionsAs[ScioOptions].isBlocking) {
-      result.waitUntilDone()  // block local runner for JobTest to work
+    if (this.isTest || (this.optionsAs[ScioOptions].isBlocking && awaitDuration == Duration.Inf)) {
+      result.waitUntilDone()
     } else {
       result
     }
@@ -380,6 +406,8 @@ class ScioContext private[scio] (val options: PipelineOptions,
         context.optionsAs[ApplicationNameOptions].getAppName,
         state.toString,
         getBeamMetrics)
+
+    override def getAwaitDuration: Duration = awaitDuration
   }
 
   /** Whether the context is closed. */
@@ -487,11 +515,15 @@ class ScioContext private[scio] (val options: PipelineOptions,
     *
     * @group input
     */
-  def typedAvroFile[T <: HasAvroAnnotation : ClassTag : TypeTag](path: String): SCollection[T] = {
-    val avroT = AvroType[T]
-
-    this.avroFile[GenericRecord](path, avroT.schema)
-      .map(avroT.fromGenericRecord)
+  def typedAvroFile[T <: HasAvroAnnotation : ClassTag : TypeTag](path: String)
+  : SCollection[T] = requireNotClosed {
+    if (this.isTest) {
+      this.getTestInput(AvroIO[T](path))
+    } else {
+      val avroT = AvroType[T]
+      val t = gio.AvroIO.readGenericRecords(avroT.schema).from(path)
+      wrap(this.applyInternal(t)).setName(path).map(avroT.fromGenericRecord)
+    }
   }
 
   /**
@@ -510,28 +542,31 @@ class ScioContext private[scio] (val options: PipelineOptions,
       }
     }
 
-  /**
-   * Get an SCollection for a BigQuery SELECT query.
-   * Both [[https://cloud.google.com/bigquery/docs/reference/legacy-sql Legacy SQL]] and
-   * [[https://cloud.google.com/bigquery/docs/reference/standard-sql/ Standard SQL]] dialects are
-   * supported. By default the query dialect will be automatically detected. To override this
-   * behavior, start the query string with `#legacysql` or `#standardsql`.
-   * @group input
-   */
-  def bigQuerySelect(sqlQuery: String,
-                     flattenResults: Boolean = false): SCollection[TableRow] = requireNotClosed {
+  private def avroBigQueryRead[T <: HasAnnotation : ClassTag : TypeTag] = {
+    val fn = BigQueryType[T].fromAvro
+    bqio.BigQueryIO
+      .read(new SerializableFunction[SchemaAndRecord, T] {
+        override def apply(input: SchemaAndRecord): T = fn(input.getRecord)
+      })
+      .withCoder(new KryoAtomicCoder[T](KryoOptions(this.options)))
+  }
+
+  private def bqReadQuery[T: ClassTag](typedRead: bqio.BigQueryIO.TypedRead[T],
+                                       sqlQuery: String,
+                                       flattenResults: Boolean  = false)
+  : SCollection[T] = requireNotClosed {
     if (this.isTest) {
-      this.getTestInput(BigQueryIO(sqlQuery))
+      this.getTestInput(BigQueryIO[T](sqlQuery))
     } else if (this.bigQueryClient.isCacheEnabled) {
       val queryJob = this.bigQueryClient.newQueryJob(sqlQuery, flattenResults)
       _queryJobs.append(queryJob)
-      val read = bqio.BigQueryIO.readTableRows().from(queryJob.table).withoutValidation()
+      val read = typedRead.from(queryJob.table).withoutValidation()
       wrap(this.applyInternal(read)).setName(sqlQuery)
     } else {
       val baseQuery = if (!flattenResults) {
-        bqio.BigQueryIO.readTableRows().fromQuery(sqlQuery).withoutResultFlattening()
+        typedRead.fromQuery(sqlQuery).withoutResultFlattening()
       } else {
-        bqio.BigQueryIO.readTableRows().fromQuery(sqlQuery)
+        typedRead.fromQuery(sqlQuery)
       }
       val query = if (this.bigQueryClient.isLegacySql(sqlQuery, flattenResults)) {
         baseQuery
@@ -542,18 +577,35 @@ class ScioContext private[scio] (val options: PipelineOptions,
     }
   }
 
+  private def bqReadTable[T: ClassTag](typedRead: bqio.BigQueryIO.TypedRead[T],
+                                       table: TableReference)
+  : SCollection[T] = requireNotClosed {
+    val tableSpec: String = bqio.BigQueryHelpers.toTableSpec(table)
+    if (this.isTest) {
+      this.getTestInput(BigQueryIO[T](tableSpec))
+    } else {
+      wrap(this.applyInternal(typedRead.from(table))).setName(tableSpec)
+    }
+  }
+
+  /**
+   * Get an SCollection for a BigQuery SELECT query.
+   * Both [[https://cloud.google.com/bigquery/docs/reference/legacy-sql Legacy SQL]] and
+   * [[https://cloud.google.com/bigquery/docs/reference/standard-sql/ Standard SQL]] dialects are
+   * supported. By default the query dialect will be automatically detected. To override this
+   * behavior, start the query string with `#legacysql` or `#standardsql`.
+   * @group input
+   */
+  def bigQuerySelect(sqlQuery: String,
+                     flattenResults: Boolean = false): SCollection[TableRow] =
+    bqReadQuery(bqio.BigQueryIO.readTableRows(), sqlQuery, flattenResults)
+
   /**
    * Get an SCollection for a BigQuery table.
    * @group input
    */
-  def bigQueryTable(table: TableReference): SCollection[TableRow] = requireNotClosed {
-    val tableSpec: String = bqio.BigQueryHelpers.toTableSpec(table)
-    if (this.isTest) {
-      this.getTestInput(BigQueryIO(tableSpec))
-    } else {
-      wrap(this.applyInternal(bqio.BigQueryIO.readTableRows().from(table))).setName(tableSpec)
-    }
-  }
+  def bigQueryTable(table: TableReference): SCollection[TableRow] =
+    bqReadTable(bqio.BigQueryIO.readTableRows(), table)
 
   /**
    * Get an SCollection for a BigQuery table.
@@ -596,12 +648,13 @@ class ScioContext private[scio] (val options: PipelineOptions,
   def typedBigQuery[T <: HasAnnotation : ClassTag : TypeTag](newSource: String = null)
   : SCollection[T] = {
     val bqt = BigQueryType[T]
-    val rows = if (newSource == null) {
+    val typedRead = avroBigQueryRead[T]
+    if (newSource == null) {
       // newSource is missing, T's companion object must have either table or query
       if (bqt.isTable) {
-        this.bigQueryTable(bqt.table.get)
+        this.bqReadTable(typedRead, bqio.BigQueryHelpers.parseTableSpec(bqt.table.get))
       } else if (bqt.isQuery) {
-        this.bigQuerySelect(bqt.query.get)
+        this.bqReadQuery(typedRead, bqt.query.get)
       } else {
         throw new IllegalArgumentException(s"Missing table or query field in companion object")
       }
@@ -609,12 +662,11 @@ class ScioContext private[scio] (val options: PipelineOptions,
       // newSource can be either table or query
       val table = scala.util.Try(bqio.BigQueryHelpers.parseTableSpec(newSource)).toOption
       if (table.isDefined) {
-        this.bigQueryTable(table.get)
+        this.bqReadTable(typedRead, table.get)
       } else {
-        this.bigQuerySelect(newSource)
+        this.bqReadQuery(typedRead, newSource)
       }
     }
-    rows.map(bqt.fromTableRow)
   }
 
   /**
@@ -832,6 +884,27 @@ class ScioContext private[scio] (val options: PipelineOptions,
     val v = elems.zip(timestamps).map(t => TimestampedValue.of(t._1, t._2))
     wrap(this.applyInternal(Create.timestamped(v.asJava).withCoder(coder)))
       .setName(truncate(elems.toString()))
+  }
+
+  // =======================================================================
+  // Metrics
+  // =======================================================================
+
+  /**
+   * Initialize a new [[org.apache.beam.sdk.metrics.Counter Counter]] metric using `T` as namespace.
+   * Default is "com.spotify.scio.ScioMetrics" if `T` is not specified.
+   */
+  def initCounter[T : ClassTag](name: String): Counter = {
+    val counter = ScioMetrics.counter[T](name)
+    _counters.append(counter)
+    counter
+  }
+
+  /** Initialize a new [[org.apache.beam.sdk.metrics.Counter Counter]] metric. */
+  def initCounter(namespace: String, name: String): Counter = {
+    val counter = ScioMetrics.counter(namespace, name)
+    _counters.append(counter)
+    counter
   }
 
 }

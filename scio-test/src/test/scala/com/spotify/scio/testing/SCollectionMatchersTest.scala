@@ -31,7 +31,7 @@ import org.joda.time.{Duration, Instant}
 // scalastyle:off no.whitespace.before.left.bracket
 class SCollectionMatchersTest extends PipelineSpec {
 
-  "SCollectionMatch" should "support containInAnyOrder" in {
+  "SCollectionMatchers" should "support containInAnyOrder" in {
     // should cases
     runWithContext {
       _.parallelize(1 to 100) should containInAnyOrder (1 to 100)
@@ -82,6 +82,21 @@ class SCollectionMatchersTest extends PipelineSpec {
     }
     an [PipelineExecutionException] should be thrownBy {
       runWithContext { _.parallelize(Seq.empty[Int]) shouldNot containSingleValue (1) }
+    }
+  }
+
+  it should "support containValue" in {
+    // should cases
+    runWithContext { _.parallelize(Seq(1, 2, 3)) should containValue (1) }
+
+    an [AssertionError] should be thrownBy {
+      runWithContext { _.parallelize(Seq(1)) should containValue (10) }
+    }
+    // shouldNot cases
+    runWithContext { _.parallelize(Seq(1, 2, 3)) shouldNot containValue (4) }
+
+    an [AssertionError] should be thrownBy {
+      runWithContext { _.parallelize(Seq(1, 2, 3)) shouldNot containValue (1) }
     }
   }
 
@@ -204,33 +219,67 @@ class SCollectionMatchersTest extends PipelineSpec {
 
   it should "support forAll" in {
     // should cases
-    runWithContext { _.parallelize(1 to 100) should forAll[Int] (_ > 0)}
+    runWithContext { _.parallelize(1 to 100) should forAll[Int] (_ > 0) }
 
     an [AssertionError] should be thrownBy {
-      runWithContext { _.parallelize(1 to 100) should forAll[Int] (_ > 10)}
+      runWithContext { _.parallelize(1 to 100) should forAll[Int] (_ > 10) }
     }
 
     // shouldNot cases
-    runWithContext { _.parallelize(1 to 100) shouldNot forAll[Int] (_ > 10)}
+    runWithContext { _.parallelize(1 to 100) shouldNot forAll[Int] (_ > 10) }
 
     an [AssertionError] should be thrownBy {
-      runWithContext { _.parallelize(1 to 100) shouldNot forAll[Int] (_ > 0)}
+      runWithContext { _.parallelize(1 to 100) shouldNot forAll[Int] (_ > 0) }
+    }
+  }
+
+  it should "support tolerance" in {
+    val xs = Seq(1.4, 1.5, 1.6)
+
+    // should cases
+    runWithContext { _.parallelize(xs) should forAll[Double] (_ === 1.5+-0.1) }
+    runWithContext { _.parallelize(xs) should exist[Double] (_ === 1.5+-0.1) }
+    runWithContext { _.parallelize(xs) should satisfy[Double] (_.sum === 5.0+-0.5) }
+
+    an [AssertionError] should be thrownBy {
+      runWithContext { _.parallelize(xs) should forAll[Double] (_ === 1.4+-0.1) }
+    }
+    an [AssertionError] should be thrownBy {
+      runWithContext { _.parallelize(xs) should exist[Double] (_ === 1.0+-0.1) }
+    }
+    an [AssertionError] should be thrownBy {
+      runWithContext { _.parallelize(xs) should satisfy[Double] (_.sum === 1.0+-0.5) }
+    }
+
+    // shouldNot cases
+    runWithContext { _.parallelize(xs) shouldNot forAll[Double] (_ === 1.4+-0.1) }
+    runWithContext { _.parallelize(xs) shouldNot exist[Double] (_ === 1.0+-0.1) }
+    runWithContext { _.parallelize(xs) shouldNot satisfy[Double] (_.sum === 1.0+-0.5) }
+
+    an [AssertionError] should be thrownBy {
+      runWithContext { _.parallelize(xs) shouldNot forAll[Double] (_ === 1.5+-0.1) }
+    }
+    an [AssertionError] should be thrownBy {
+      runWithContext { _.parallelize(xs) shouldNot exist[Double] (_ === 1.5+-0.1) }
+    }
+    an [AssertionError] should be thrownBy {
+      runWithContext { _.parallelize(xs) shouldNot satisfy[Double] (_.sum === 5.0+-0.5) }
     }
   }
 
   it should "support exist" in {
     // should cases
-    runWithContext { _.parallelize(1 to 100) should exist[Int] (_ > 99)}
+    runWithContext { _.parallelize(1 to 100) should exist[Int] (_ > 99) }
 
     an [AssertionError] should be thrownBy {
-      runWithContext { _.parallelize(1 to 100) should exist[Int] (_ > 100)}
+      runWithContext { _.parallelize(1 to 100) should exist[Int] (_ > 100) }
     }
 
     // shouldNot cases
-    runWithContext { _.parallelize(1 to 100) shouldNot exist[Int] (_ > 100)}
+    runWithContext { _.parallelize(1 to 100) shouldNot exist[Int] (_ > 100) }
 
     an [AssertionError] should be thrownBy {
-      runWithContext { _.parallelize(1 to 100) shouldNot exist[Int] (_ > 99)}
+      runWithContext { _.parallelize(1 to 100) shouldNot exist[Int] (_ > 99) }
     }
   }
 

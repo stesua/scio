@@ -65,7 +65,7 @@ class JsonTest extends TapSpec {
     val t = runWithFileFuture {
       _
         .parallelize(data)
-        .saveAsJsonFile(dir.getPath, printer = Printer.noSpaces.copy(dropNullKeys = true))
+        .saveAsJsonFile(dir.getPath, printer = Printer.noSpaces.copy(dropNullValues = true))
     }
     verifyTap(t, data.toSet)
     val result = Files.list(dir.toPath).iterator().asScala
@@ -84,7 +84,7 @@ class JsonTest extends TapSpec {
     JobTest[JsonJob.type]
       .args("--input=in.json", "--output=out.json")
       .input(JsonIO("in.json"), data)
-      .output[Record](JsonIO("out.json"))(_ should containInAnyOrder (data))
+      .output(JsonIO[Record]("out.json"))(_ should containInAnyOrder (data))
       .run()
   }
 
