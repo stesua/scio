@@ -214,6 +214,16 @@ class SCollectionTest extends PipelineSpec {
     }
   }
 
+  it should "support distinct with representative value function" in {
+
+    runWithContext { sc =>
+      val p = sc.parallelize(
+        Seq(("a", 1), ("b", 2), ("b", 3), ("c", 4), ("c", 5), ("c", 6))).distinct(_._1)
+
+      p.map(_._1) should containInAnyOrder (Seq("a", "b", "c"))
+    }
+  }
+
   it should "support filter()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3, 4, 5)).filter(_ % 2 == 0)

@@ -314,6 +314,17 @@ sealed trait SCollection[T] extends PCollectionWrapper[T] {
   def distinct: SCollection[T] = this.pApply(Distinct.create[T]())
 
   /**
+    * Return a new SCollection containing the distinct elements in this SCollection that uses a
+    * function to obtain a representative value for each input element as defined in
+    * [[org.apache.beam.sdk.transforms.Distinct.WithRepresentativeValues]].
+    *
+    * @param f the representative value function
+    * @group transform
+    */
+  def distinct[U: ClassTag](f: T => U): SCollection[T] =
+    this.pApply(Distinct.withRepresentativeValueFn(Functions.serializableFn(f)))
+
+  /**
    * Return a new SCollection containing only the elements that satisfy a predicate.
    * @group transform
    */
