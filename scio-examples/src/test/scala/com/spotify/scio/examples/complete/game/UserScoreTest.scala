@@ -17,7 +17,9 @@
 
 package com.spotify.scio.examples.complete.game
 
+import com.spotify.scio.bigquery._
 import com.spotify.scio.examples.complete.game.UserScore.UserScoreSums
+import com.spotify.scio.io._
 import com.spotify.scio.testing._
 
 class UserScoreTest extends PipelineSpec {
@@ -32,12 +34,14 @@ class UserScoreTest extends PipelineSpec {
     "user7_AndroidGreenKookaburra,AndroidGreenKookaburra,11,1447955630000,2015-11-19 09:53:53.444",
     "THIS IS A PARSE ERROR,2015-11-19 09:53:53.444",
     "user19_BisqueBilby,BisqueBilby,6,1447955630000,2015-11-19 09:53:53.444",
-    "user19_BisqueBilby,BisqueBilby,8,1447955630000,2015-11-19 09:53:53.444")
+    "user19_BisqueBilby,BisqueBilby,8,1447955630000,2015-11-19 09:53:53.444"
+  )
 
   val inData2 = Seq(
     "user6_AliceBlueDingo,AliceBlueDingo,4,xxxxxxx,2015-11-19 09:53:53.444",
     "THIS IS A PARSE ERROR,2015-11-19 09:53:53.444",
-    "user13_BisqueBilby,BisqueBilby,xxx,1447955630000,2015-11-19 09:53:53.444")
+    "user13_BisqueBilby,BisqueBilby,xxx,1447955630000,2015-11-19 09:53:53.444"
+  )
 
   val expected = Seq(
     UserScoreSums("user0_MagentaKangaroo", 3),
@@ -46,13 +50,13 @@ class UserScoreTest extends PipelineSpec {
     UserScoreSums("user7_AlmondWallaby", 15),
     UserScoreSums("user7_AndroidGreenKookaburra", 23),
     UserScoreSums("user19_BisqueBilby", 14)
-  ).map(UserScoreSums.toTableRow)
+  )
 
   "UserScore" should "work" in {
     JobTest[com.spotify.scio.examples.complete.game.UserScore.type]
       .args("--input=in.txt", "--output=dataset.table")
       .input(TextIO("in.txt"), inData1)
-      .output(BigQueryIO("dataset.table"))(_ should containInAnyOrder (expected))
+      .output(BigQueryIO[UserScoreSums]("dataset.table"))(_ should containInAnyOrder(expected))
       .run()
   }
 
@@ -60,7 +64,7 @@ class UserScoreTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.complete.game.UserScore.type]
       .args("--input=in.txt", "--output=dataset.table")
       .input(TextIO("in.txt"), inData2)
-      .output(BigQueryIO("dataset.table"))(_ should beEmpty)
+      .output(BigQueryIO[UserScoreSums]("dataset.table"))(_ should beEmpty)
       .run()
   }
 

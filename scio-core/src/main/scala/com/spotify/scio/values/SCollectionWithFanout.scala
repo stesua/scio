@@ -19,39 +19,38 @@ package com.spotify.scio.values
 
 import com.spotify.scio.ScioContext
 import com.spotify.scio.util.Functions
+import com.spotify.scio.coders.Coder
 import com.twitter.algebird.{Aggregator, Monoid, Semigroup}
 import org.apache.beam.sdk.transforms.Combine
 import org.apache.beam.sdk.values.PCollection
-
-import scala.reflect.ClassTag
 
 /**
  * An enhanced SCollection that uses an intermediate node to combine parts of the data to reduce
  * load on the final global combine step.
  */
-class SCollectionWithFanout[T: ClassTag] private[values] (val internal: PCollection[T],
-                                                          val context: ScioContext,
-                                                          private val fanout: Int)
-  extends PCollectionWrapper[T] {
-
-  val ct: ClassTag[T] = implicitly[ClassTag[T]]
+class SCollectionWithFanout[T: Coder] private[values] (val internal: PCollection[T],
+                                                       val context: ScioContext,
+                                                       private val fanout: Int)
+    extends PCollectionWrapper[T] {
 
   /** [[SCollection.aggregate[U]* SCollection.aggregate]] with fan out. */
-  def aggregate[U: ClassTag](zeroValue: U)(seqOp: (U, T) => U,
-                                           combOp: (U, U) => U): SCollection[U] =
+  def aggregate[U: Coder](zeroValue: U)(seqOp: (U, T) => U, combOp: (U, U) => U): SCollection[U] =
     this.pApply(
-      Combine.globally(Functions.aggregateFn(zeroValue)(seqOp, combOp)).withFanout(fanout))
+      Combine
+        .globally(Functions.aggregateFn(zeroValue)(seqOp, combOp))
+        .withFanout(fanout))
 
   /** [[SCollection.aggregate[A,U]* SCollection.aggregate]] with fan out. */
-  def aggregate[A: ClassTag, U: ClassTag](aggregator: Aggregator[T, A, U]): SCollection[U] = {
-    val a = aggregator  // defeat closure
-    context.wrap(internal).transform(_.map(a.prepare).sum(a.semigroup).map(a.present))
+  def aggregate[A: Coder, U: Coder](aggregator: Aggregator[T, A, U]): SCollection[U] = {
+    val a = aggregator // defeat closure
+    context
+      .wrap(internal)
+      .transform(_.map(a.prepare).sum(a.semigroup, Coder[A]).map(a.present))
   }
 
   /** [[SCollection.combine]] with fan out. */
-  def combine[C: ClassTag](createCombiner: T => C)
-                          (mergeValue: (C, T) => C)
-                          (mergeCombiners: (C, C) => C): SCollection[C] =
+  def combine[C: Coder](createCombiner: T => C)(mergeValue: (C, T) => C)(
+    mergeCombiners: (C, C) => C): SCollection[C] =
     this.pApply(
       Combine
         .globally(Functions.combineFn(createCombiner, mergeValue, mergeCombiners))
@@ -59,7 +58,10 @@ class SCollectionWithFanout[T: ClassTag] private[values] (val internal: PCollect
 
   /** [[SCollection.fold(zeroValue:T)* SCollection.fold]] with fan out. */
   def fold(zeroValue: T)(op: (T, T) => T): SCollection[T] =
-    this.pApply(Combine.globally(Functions.aggregateFn(zeroValue)(op, op)).withFanout(fanout))
+    this.pApply(
+      Combine
+        .globally(Functions.aggregateFn(zeroValue)(op, op))
+        .withFanout(fanout))
 
   /** [[SCollection.fold(implicit* SCollection.fold]] with fan out. */
   def fold(implicit mon: Monoid[T]): SCollection[T] =

@@ -15,13 +15,14 @@
  * under the License.
  */
 
+// Example: Reading and writing tsv data
 package com.spotify.scio.examples.extra
 
 import com.spotify.scio._
 import com.spotify.scio.examples.common.ExampleData
-import org.apache.beam.sdk.{io => gio}
+import org.apache.beam.sdk.{io => beam}
 
-// Example: Word Count Example writing to TSV file
+// ## Writing TSV data example
 // Usage:
 
 // `sbt runMain "com.spotify.scio.examples.extra.TsvExampleWrite
@@ -37,8 +38,9 @@ object TsvExampleWrite {
     val input = args.getOrElse("input", ExampleData.KING_LEAR)
     val output = args("output")
 
-    // Create a Write Transformation with tsv suffix, single file and specific header.
-    val transform = gio.TextIO.write()
+    // Create a `Write` Transformation with tsv suffix, single file and specific header.
+    val transform = beam.TextIO
+      .write()
       .to(pathWithShards(output))
       .withSuffix(".tsv")
       .withNumShards(1)
@@ -64,7 +66,7 @@ object TsvExampleWrite {
     path.replaceAll("\\/+$", "") + "/part"
 }
 
-// # Reading TSV data Example
+// ## Reading TSV data example
 // Usage:
 
 // `sbt runMain "com.spotify.scio.examples.extra.TsvExampleRead

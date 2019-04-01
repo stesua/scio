@@ -17,7 +17,8 @@
 
 package com.spotify.scio.examples.cookbook
 
-import com.spotify.scio.testing.{JobTest, PipelineSpec, TextIO}
+import com.spotify.scio.io._
+import com.spotify.scio.testing._
 
 class DistinctExampleTest extends PipelineSpec {
 
@@ -39,7 +40,7 @@ class DistinctExampleTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.cookbook.DistinctExample.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), input)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder (expected))
+      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
       .run()
   }
 

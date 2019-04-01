@@ -15,7 +15,7 @@
  * under the License.
  */
 
-// Example: DoFn Example
+// Example: Mix Beam DoFn and Scio
 // Usage:
 
 // `sbt runMain "com.spotify.scio.examples.extra.DoFnExample
@@ -34,7 +34,7 @@ object DoFnExample {
     val (sc, args) = ContextAndArgs(cmdlineArgs)
     sc.textFile(args.getOrElse("input", ExampleData.KING_LEAR))
       .flatMap(_.split("[^a-zA-Z']+").filter(_.nonEmpty))
-      // Apply a native Java Beam SDK `Transform[PCollection[InputT], PCollection[OutputT]]`, in
+      // Apply a native Java Beam SDK `PTransform[PCollection[InputT], PCollection[OutputT]]`, in
       // this case a `ParDo` of `DoFn[InputT, OutputT]`
       //
       // Create one `DoFn` instance in `main`. The instance is serialized, sent to each worker, and
@@ -44,7 +44,7 @@ object DoFnExample {
       //
       // `private[<package>]` is required for anonymous instance methods to be publicly visible
       // in compiled class file, which is a requirement for the annotated methods.
-      .applyTransform(ParDo.of(new DoFn[String, Int]{
+      .applyTransform(ParDo.of(new DoFn[String, Int] {
         // `@Setup` (optional) is called once per worker thread before any processing starts.
         @Setup
         private[extra] def setup(): Unit = Unit

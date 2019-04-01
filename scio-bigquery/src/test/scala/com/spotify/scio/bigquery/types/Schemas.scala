@@ -24,32 +24,44 @@ object Schemas {
 
   // primitives
   case class Required(boolF: Boolean,
-                      intF: Int, longF: Long,
-                      floatF: Float, doubleF: Double,
+                      intF: Int,
+                      longF: Long,
+                      floatF: Float,
+                      doubleF: Double,
                       stringF: String,
-                      byteArrayF: Array[Byte], byteStringF: ByteString,
+                      byteArrayF: Array[Byte],
+                      byteStringF: ByteString,
                       timestampF: Instant,
                       dateF: LocalDate,
                       timeF: LocalTime,
-                      datetimeF: LocalDateTime)
+                      datetimeF: LocalDateTime,
+                      bigDecimalF: BigDecimal)
   case class Optional(boolF: Option[Boolean],
-                      intF: Option[Int], longF: Option[Long],
-                      floatF: Option[Float], doubleF: Option[Double],
+                      intF: Option[Int],
+                      longF: Option[Long],
+                      floatF: Option[Float],
+                      doubleF: Option[Double],
                       stringF: Option[String],
-                      byteArrayF: Option[Array[Byte]], byteStringF: Option[ByteString],
+                      byteArrayF: Option[Array[Byte]],
+                      byteStringF: Option[ByteString],
                       timestampF: Option[Instant],
                       dateF: Option[LocalDate],
                       timeF: Option[LocalTime],
-                      datetimeF: Option[LocalDateTime])
+                      datetimeF: Option[LocalDateTime],
+                      bigDecimalF: Option[BigDecimal])
   case class Repeated(boolF: List[Boolean],
-                      intF: List[Int], longF: List[Long],
-                      floatF: List[Float], doubleF: List[Double],
+                      intF: List[Int],
+                      longF: List[Long],
+                      floatF: List[Float],
+                      doubleF: List[Double],
                       stringF: List[String],
-                      byteArrayF: List[Array[Byte]], byteStringF: List[ByteString],
+                      byteArrayF: List[Array[Byte]],
+                      byteStringF: List[ByteString],
                       timestampF: List[Instant],
                       dateF: List[LocalDate],
                       timeF: List[LocalTime],
-                      datetimeF: List[LocalDateTime])
+                      datetimeF: List[LocalDateTime],
+                      bigDecimalF: List[BigDecimal])
 
   // records
   case class RequiredNested(required: Required, optional: Optional, repeated: Repeated)
@@ -60,4 +72,7 @@ object Schemas {
                             optional: List[Optional],
                             repeated: List[Repeated])
 
+  case class User(@description("user name") name: String, @description("user age") age: Int)
+  case class Account(@description("account user") user: User,
+                     @description("in USD") balance: Double)
 }

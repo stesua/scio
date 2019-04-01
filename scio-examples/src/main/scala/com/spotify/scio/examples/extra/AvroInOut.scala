@@ -16,10 +16,15 @@
  */
 
 // Example: Avro Input and Output
+// Usage:
+
+// `sbt runMain "com.spotify.scio.examples.extra.AvroInOut
+// --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
+// --input=[INPUT].avro --output=[OUTPUT].avro --method=[METHOD]"`
 package com.spotify.scio.examples.extra
 
 import com.spotify.scio._
-import com.spotify.scio.avro.{Account, TestRecord}
+import com.spotify.scio.avro._
 
 object AvroInOut {
   def main(cmdlineArgs: Array[String]): Unit = {
@@ -32,7 +37,8 @@ object AvroInOut {
       .map { r =>
         // Create a new `Account` Avro specific record. It is recommended to use the builder over
         // constructor since it's more backwards compatible.
-        Account.newBuilder()
+        Account
+          .newBuilder()
           .setId(r.getIntField)
           .setType("checking")
           .setName(r.getStringField)

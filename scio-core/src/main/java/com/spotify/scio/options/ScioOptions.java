@@ -18,6 +18,7 @@
 package com.spotify.scio.options;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import org.apache.beam.sdk.options.Default;
 import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.PipelineOptions;
 
@@ -39,6 +40,10 @@ public interface ScioOptions extends PipelineOptions, KryoOptions {
   boolean isBlocking();
   void setBlocking(boolean value);
 
+  @Description("Time period in scala.concurrent.duration.Duration style to block for job completion")
+  String getBlockFor();
+  void setBlockFor(String value);
+
   @Description("Custom application arguments")
   String getAppArguments();
   void setAppArguments(String arguments);
@@ -47,4 +52,21 @@ public interface ScioOptions extends PipelineOptions, KryoOptions {
   @Description("Path to newline separated file with command line options")
   String getOptionsFile();
   void setOptionsFile(String optionsFile);
+
+  @Description("Whether to check for chained cogroups")
+  @Default.Enum("WARNING")
+  CheckEnabled getChainedCogroups();
+
+  void setChainedCogroups(CheckEnabled enabled);
+
+  enum CheckEnabled {
+    OFF,
+    WARNING,
+    ERROR
+  }
+
+  @Description("Should scio use NullableCoder to serialize data.")
+  @Default.Boolean(false)
+  boolean getNullableCoders();
+  void setNullableCoders(boolean value);
 }

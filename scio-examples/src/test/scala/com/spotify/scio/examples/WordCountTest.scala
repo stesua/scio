@@ -17,6 +17,7 @@
 
 package com.spotify.scio.examples
 
+import com.spotify.scio.io._
 import com.spotify.scio.testing._
 
 class WordCountTest extends PipelineSpec {
@@ -28,7 +29,7 @@ class WordCountTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.WordCount.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), inData)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder (expected))
+      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
       .run()
   }
 
@@ -36,16 +37,29 @@ class WordCountTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.MinimalWordCount.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), inData)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder (expected))
+      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
+      .run()
+  }
+
+  "MinimalWordCountTypedArguments" should "work" in {
+    JobTest[com.spotify.scio.examples.MinimalWordCountTypedArguments.type]
+      .args("--input=in.txt", "--output=out.txt")
+      .input(TextIO("in.txt"), inData)
+      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
+      .run()
+  }
+
+  "MinimalBeamSqlWordCount" should "work" in {
+    JobTest[com.spotify.scio.examples.MinimalBeamSqlWordCountExample.type]
+      .args("--input=in.txt", "--output=out.txt")
+      .input(TextIO("in.txt"), inData)
+      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
       .run()
   }
 
   "DebuggingWordCount" should "work" in {
-    val in = Seq(
-      "Flourish a b",
-      "Flourish c d",
-      "Flourish e",
-      "stomach a") ++ (1 to 100).map("x" * _)
+    val in = Seq("Flourish a b", "Flourish c d", "Flourish e", "stomach a") ++ (1 to 100)
+      .map("x" * _)
     JobTest[com.spotify.scio.examples.DebuggingWordCount.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), in)

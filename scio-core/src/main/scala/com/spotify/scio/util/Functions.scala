@@ -18,181 +18,287 @@
 package com.spotify.scio.util
 
 import java.lang.{Iterable => JIterable}
-import java.util.{List => JList}
+import java.util.{ArrayList => JArrayList, List => JList}
 
-import com.google.common.collect.Lists
-import com.spotify.scio.coders.{KryoAtomicCoder, KryoOptions}
+import com.spotify.scio.coders.{Coder, CoderMaterializer}
 import com.twitter.algebird.{Monoid, Semigroup}
-import org.apache.beam.sdk.coders.{Coder, CoderRegistry}
-import org.apache.beam.sdk.transforms.Combine.CombineFn
+import org.apache.beam.sdk.coders.{CoderRegistry, Coder => BCoder}
+import org.apache.beam.sdk.transforms.Combine.{CombineFn => BCombineFn}
 import org.apache.beam.sdk.transforms.DoFn.ProcessElement
 import org.apache.beam.sdk.transforms.Partition.PartitionFn
-import org.apache.beam.sdk.transforms.{DoFn, SerializableFunction}
+import org.apache.beam.sdk.transforms.{DoFn, ProcessFunction, SerializableFunction}
 
 import scala.collection.JavaConverters._
-import scala.reflect.ClassTag
 
 private[scio] object Functions {
 
-  private val BUFFER_SIZE = 20
+  private[this] val BufferSize = 20
 
-  private abstract class KryoCombineFn[VI, VA, VO] extends CombineFn[VI, VA, VO] with NamedFn {
-
-    override def getAccumulatorCoder(registry: CoderRegistry, inputCoder: Coder[VI]): Coder[VA] =
-      new KryoAtomicCoder[VA](KryoOptions())
-
-    override def getDefaultOutputCoder(registry: CoderRegistry, inputCoder: Coder[VI]): Coder[VO] =
-      new KryoAtomicCoder[VO](KryoOptions())
-
-  }
-
-  def aggregateFn[T, U: ClassTag](zeroValue: U)(seqOp: (U, T) => U, combOp: (U, U) => U)
-  : CombineFn[T, (U, JList[T]), U] = new KryoCombineFn[T, (U, JList[T]), U] {
-
-    // defeat closure
-    val s = ClosureCleaner(seqOp)
-    val c = ClosureCleaner(combOp)
-
-    private def fold(accumulator: (U, JList[T])): U = {
-      val (a, l) = accumulator
-      l.asScala.foldLeft(a)(s)
+  private object Fns {
+    def fold[A, B](accumulator: A, list: JIterable[B])(f: (A, B) => A): A = {
+      val iter = list.iterator()
+      var acc: A = accumulator
+      while (iter.hasNext) {
+        acc = f(acc, iter.next())
+      }
+      acc
     }
 
-    override def createAccumulator(): (U, JList[T]) = (zeroValue, Lists.newArrayList())
+    def reduce[A](list: JIterable[A])(op: (A, A) => A): A = {
+      val iter = list.iterator()
+      var acc = iter.next()
+      while (iter.hasNext) {
+        acc = op(acc, iter.next())
+      }
+      acc
+    }
 
-    override def addInput(accumulator: (U, JList[T]), input: T): (U, JList[T]) = {
-      val (a, l) = accumulator
-      l.add(input)
-      if (l.size() >= BUFFER_SIZE) {
-        (fold(accumulator), Lists.newArrayList())
+    def reduceOption[A](list: JIterable[A])(op: (A, A) => A): Option[A] = {
+      val iter = list.iterator()
+      if (iter.hasNext) {
+        Some(reduce(list)(op))
       } else {
-        accumulator
+        None
       }
     }
-
-    override def extractOutput(accumulator: (U, JList[T])): U =
-      accumulator._2.asScala.foldLeft(accumulator._1)(s)
-
-    override def mergeAccumulators(accumulators: JIterable[(U, JList[T])]): (U, JList[T]) = {
-      val combined = accumulators.asScala.map(fold).reduce(c)
-      (combined, Lists.newArrayList())
-    }
-
   }
 
-  def combineFn[T, C: ClassTag](createCombiner: T => C,
-                                mergeValue: (C, T) => C,
-                                mergeCombiners: (C, C) => C)
-  : CombineFn[T, (Option[C], JList[T]), C] = new KryoCombineFn[T, (Option[C], JList[T]), C] {
+  private abstract class CombineFn[VI, VA, VO] extends BCombineFn[VI, VA, VO] with NamedFn {
+    val vacoder: Coder[VA]
+    val vocoder: Coder[VO]
 
-    // defeat closure
-    val cc = ClosureCleaner(createCombiner)
-    val mv = ClosureCleaner(mergeValue)
-    val mc = ClosureCleaner(mergeCombiners)
+    override def getAccumulatorCoder(registry: CoderRegistry, inputCoder: BCoder[VI]): BCoder[VA] =
+      CoderMaterializer.beamWithDefault(vacoder, registry)
 
-    private def foldOption(accumulator: (Option[C], JList[T])): Option[C] = accumulator match {
-      case (Some(a), l) => Some(l.asScala.foldLeft(a)(mv))
-      case (None, l) if l.isEmpty => None
-      case (None, l) =>
-        var c = cc(l.get(0))
-        var i = 1
-        while (i < l.size) {
-          c = mv(c, l.get(i))
-          i += 1
+    override def getDefaultOutputCoder(registry: CoderRegistry,
+                                       inputCoder: BCoder[VI]): BCoder[VO] =
+      CoderMaterializer.beamWithDefault(vocoder, registry)
+  }
+
+  def aggregateFn[T: Coder, U: Coder](
+    zeroValue: U)(seqOp: (U, T) => U, combOp: (U, U) => U): BCombineFn[T, (U, JList[T]), U] =
+    new CombineFn[T, (U, JList[T]), U] {
+
+      val vacoder = Coder[(U, JList[T])]
+      val vocoder = Coder[U]
+
+      // defeat closure
+      private[this] val s = ClosureCleaner(seqOp)
+      private[this] val c = ClosureCleaner(combOp)
+
+      private def fold(accumulator: (U, JList[T])): U = {
+        val (a, l) = accumulator
+        Fns.fold(a, l)(s)
+      }
+
+      override def createAccumulator(): (U, JList[T]) =
+        (zeroValue, new JArrayList[T])
+
+      override def addInput(accumulator: (U, JList[T]), input: T): (U, JList[T]) = {
+        val (_, l) = accumulator
+        l.add(input)
+        if (l.size() >= BufferSize) {
+          (fold(accumulator), new JArrayList[T]())
+        } else {
+          accumulator
         }
-        Some(c)
+      }
+
+      override def extractOutput(accumulator: (U, JList[T])): U = fold(accumulator)
+
+      override def mergeAccumulators(accumulators: JIterable[(U, JList[T])]): (U, JList[T]) = {
+        val empty = new JArrayList[T]()
+        Fns.reduce(accumulators) { case (a, b) => (c(fold(a), fold(b)), empty) }
+      }
+
     }
 
-    override def createAccumulator(): (Option[C], JList[T]) = (None, Lists.newArrayList())
+  def combineFn[T: Coder, C: Coder](
+    createCombiner: T => C,
+    mergeValue: (C, T) => C,
+    mergeCombiners: (C, C) => C): BCombineFn[T, (Option[C], JList[T]), C] =
+    new CombineFn[T, (Option[C], JList[T]), C] {
 
-    override def addInput(accumulator: (Option[C], JList[T]), input: T): (Option[C], JList[T]) = {
-      val (a, l) = accumulator
-      l.add(input)
-      if (l.size() >= BUFFER_SIZE) {
-        (foldOption(accumulator), Lists.newArrayList())
-      } else {
-        accumulator
+      val vacoder = Coder[(Option[C], JList[T])]
+      val vocoder = Coder[C]
+
+      // defeat closure
+      private[this] val cc = ClosureCleaner(createCombiner)
+      private[this] val mv = ClosureCleaner(mergeValue)
+      private[this] val mc = ClosureCleaner(mergeCombiners)
+
+      private def foldOption(accumulator: (Option[C], JList[T])): Option[C] = {
+        val (opt, l) = accumulator
+        if (opt.isDefined) {
+          Some(Fns.fold(opt.get, l)(mv))
+        } else {
+          if (opt.isEmpty && l.isEmpty) {
+            None
+          } else {
+            var c = cc(l.get(0))
+            var i = 1
+            while (i < l.size) {
+              c = mv(c, l.get(i))
+              i += 1
+            }
+            Some(c)
+          }
+        }
+      }
+
+      override def createAccumulator(): (Option[C], JList[T]) =
+        (None, new JArrayList[T]())
+
+      override def addInput(accumulator: (Option[C], JList[T]), input: T): (Option[C], JList[T]) = {
+        val (_, l) = accumulator
+        l.add(input)
+        if (l.size() >= BufferSize) {
+          (foldOption(accumulator), new JArrayList[T]())
+        } else {
+          accumulator
+        }
+      }
+
+      override def extractOutput(accumulator: (Option[C], JList[T])): C =
+        foldOption(accumulator).get
+
+      override def mergeAccumulators(
+        accumulators: JIterable[(Option[C], JList[T])]): (Option[C], JList[T]) = {
+        val iter = accumulators.iterator()
+        val empty = new JArrayList[T]()
+
+        if (!iter.hasNext) {
+          (None, empty)
+        } else {
+          Fns.reduce(accumulators) { (a, b) =>
+            val aa = foldOption(a)
+            val bb = foldOption(b)
+
+            val result = if (aa.isDefined && bb.isDefined) {
+              Some(mc(aa.get, bb.get))
+            } else {
+              if (aa.isDefined || bb.isDefined) {
+                aa.orElse(bb)
+              } else {
+                None
+              }
+            }
+
+            (result, empty)
+          }
+        }
       }
     }
 
-    override def extractOutput(accumulator: (Option[C], JList[T])): C = foldOption(accumulator).get
-
-    override def mergeAccumulators(accumulators: JIterable[(Option[C], JList[T])])
-    : (Option[C], JList[T]) = {
-      val combined = accumulators.asScala.flatMap(foldOption).reduce(mc)
-      (Some(combined), Lists.newArrayList())
+  def flatMapFn[T, U](f: T => TraversableOnce[U]): DoFn[T, U] =
+    new NamedDoFn[T, U] {
+      private[this] val g = ClosureCleaner(f) // defeat closure
+      @ProcessElement
+      private[scio] def processElement(c: DoFn[T, U]#ProcessContext): Unit = {
+        val i = g(c.element()).toIterator
+        while (i.hasNext) c.output(i.next())
+      }
     }
 
-  }
+  def processFn[T, U](f: T => U): ProcessFunction[T, U] = new NamedProcessFn[T, U] {
+    private[this] val g = ClosureCleaner(f) // defeat closure
 
-  def flatMapFn[T, U](f: T => TraversableOnce[U]): DoFn[T, U] = new NamedDoFn[T, U] {
-    val g = ClosureCleaner(f)  // defeat closure
-    @ProcessElement
-    private[scio] def processElement(c: DoFn[T, U]#ProcessContext): Unit = {
-      val i = g(c.element()).toIterator
-      while (i.hasNext) c.output(i.next())
-    }
-  }
-
-  def serializableFn[T, U](f: T => U): SerializableFunction[T, U] = new NamedSerializableFn[T, U] {
-    val g = ClosureCleaner(f)  // defeat closure
+    @throws[Exception]
     override def apply(input: T): U = g(input)
   }
 
+  def serializableFn[T, U](f: T => U): SerializableFunction[T, U] =
+    new NamedSerializableFn[T, U] {
+      private[this] val g = ClosureCleaner(f) // defeat closure
+      override def apply(input: T): U = g(input)
+    }
+
   def mapFn[T, U](f: T => U): DoFn[T, U] = new NamedDoFn[T, U] {
-    val g = ClosureCleaner(f)  // defeat closure
+    private[this] val g = ClosureCleaner(f) // defeat closure
     @ProcessElement
-    private[scio] def processElement(c: DoFn[T, U]#ProcessContext): Unit = c.output(g(c.element()))
+    private[scio] def processElement(c: DoFn[T, U]#ProcessContext): Unit =
+      c.output(g(c.element()))
   }
 
-  def partitionFn[T](numPartitions: Int, f: T => Int): PartitionFn[T] = new NamedPartitionFn[T] {
-    val g = ClosureCleaner(f)  // defeat closure
-    override def partitionFor(elem: T, numPartitions: Int): Int = g(elem)
-  }
+  def partitionFn[T](numPartitions: Int, f: T => Int): PartitionFn[T] =
+    new NamedPartitionFn[T] {
+      private[this] val g = ClosureCleaner(f) // defeat closure
+      override def partitionFor(elem: T, numPartitions: Int): Int = g(elem)
+    }
 
-  private abstract class ReduceFn[T] extends KryoCombineFn[T, JList[T], T] {
+  private abstract class ReduceFn[T: Coder] extends CombineFn[T, JList[T], T] {
 
-    override def createAccumulator(): JList[T] = Lists.newArrayList()
+    override def createAccumulator(): JList[T] = new JArrayList[T]()
 
     override def addInput(accumulator: JList[T], input: T): JList[T] = {
       accumulator.add(input)
-      if (accumulator.size > BUFFER_SIZE) {
-        val v = reduceOption(accumulator.asScala).get
+      if (accumulator.size > BufferSize) {
+        val v = reduceOption(accumulator).get
         accumulator.clear()
         accumulator.add(v)
       }
       accumulator
     }
 
-    override def extractOutput(accumulator: JList[T]): T = reduceOption(accumulator.asScala).get
+    override def extractOutput(accumulator: JList[T]): T =
+      reduceOption(accumulator).get
 
     override def mergeAccumulators(accumulators: JIterable[JList[T]]): JList[T] = {
-      val partial: Iterable[T] = accumulators.asScala.flatMap(a => reduceOption(a.asScala))
-      reduceOption(partial).toList.asJava
+      val iter = accumulators.iterator()
+      val partial: JArrayList[T] = new JArrayList[T]()
+      while (iter.hasNext) {
+        reduceOption(iter.next()).foreach(partial.add(_))
+      }
+      val r = new JArrayList[T]()
+      reduceOption(partial).foreach(r.add)
+      r
     }
 
-    def reduceOption(accumulator: Iterable[T]): Option[T]
+    def reduceOption(accumulator: JIterable[T]): Option[T]
 
   }
 
-  def reduceFn[T](f: (T, T) => T): CombineFn[T, JList[T], T] = new ReduceFn[T] {
-    val g = ClosureCleaner(f)  // defeat closure
-    override def reduceOption(accumulator: Iterable[T]): Option[T] = accumulator.reduceOption(g)
-  }
+  def reduceFn[T: Coder](f: (T, T) => T): BCombineFn[T, JList[T], T] =
+    new ReduceFn[T] {
+      val vacoder = Coder[JList[T]]
+      val vocoder = Coder[T]
+      private[this] val g = ClosureCleaner(f) // defeat closure
 
-  def reduceFn[T](sg: Semigroup[T]): CombineFn[T, JList[T], T] = new ReduceFn[T] {
-    val _sg = ClosureCleaner(sg)  // defeat closure
-    override def mergeAccumulators(accumulators: JIterable[JList[T]]): JList[T] = {
-      val partial = accumulators.asScala.flatMap(a => _sg.sumOption(a.asScala))
-      val combined = _sg.sumOption(partial).get
-      Lists.newArrayList(combined)
+      override def reduceOption(accumulator: JIterable[T]): Option[T] =
+        Fns.reduceOption(accumulator)(g)
     }
-    override def reduceOption(accumulator: Iterable[T]): Option[T] = _sg.sumOption(accumulator)
-  }
 
-  def reduceFn[T](mon: Monoid[T]): CombineFn[T, JList[T], T] = new ReduceFn[T] {
-    val _mon = ClosureCleaner(mon)  // defeat closure
-    override def reduceOption(accumulator: Iterable[T]): Option[T] =
-      _mon.sumOption(accumulator).orElse(Some(_mon.zero))
-  }
+  def reduceFn[T: Coder](sg: Semigroup[T]): BCombineFn[T, JList[T], T] =
+    new ReduceFn[T] {
+      val vacoder = Coder[JList[T]]
+      val vocoder = Coder[T]
+      private[this] val _sg = ClosureCleaner(sg) // defeat closure
+
+      override def mergeAccumulators(accumulators: JIterable[JList[T]]): JList[T] = {
+        val iter = accumulators.iterator()
+        val acc: JArrayList[T] = new JArrayList[T]()
+        while (iter.hasNext) {
+          Fns.reduceOption(iter.next())(_sg.plus(_, _)).foreach(acc.add(_))
+        }
+
+        val combined: T = _sg.sumOption(acc.asScala).get
+        val list = new JArrayList[T]()
+        list.add(combined)
+        list
+      }
+
+      override def reduceOption(accumulator: JIterable[T]): Option[T] =
+        Fns.reduceOption(accumulator)(_sg.plus(_, _))
+    }
+
+  def reduceFn[T: Coder](mon: Monoid[T]): BCombineFn[T, JList[T], T] =
+    new ReduceFn[T] {
+      val vacoder = Coder[JList[T]]
+      val vocoder = Coder[T]
+      private[this] val _mon = ClosureCleaner(mon) // defeat closure
+
+      override def reduceOption(accumulator: JIterable[T]): Option[T] =
+        Fns.reduceOption(accumulator)(_mon.plus(_, _)).orElse(Some(_mon.zero))
+    }
+
 }

@@ -18,7 +18,8 @@
 package com.spotify.scio.examples.extra
 
 import com.google.datastore.v1.client.DatastoreHelper.{makeKey, makeValue}
-import com.google.datastore.v1.{Entity, Query}
+import com.google.datastore.v1.Entity
+import com.spotify.scio.io._
 import com.spotify.scio.testing._
 
 class ShapelessDatastoreExampleTest extends PipelineSpec {
@@ -26,7 +27,8 @@ class ShapelessDatastoreExampleTest extends PipelineSpec {
   val textIn = Seq("a b c d e", "a b a b")
   val wordCount = Seq(("a", 3L), ("b", 3L), ("c", 1L), ("d", 1L), ("e", 1L))
   val entities = wordCount.map { kv =>
-    Entity.newBuilder()
+    Entity
+      .newBuilder()
       .setKey(makeKey(ShapelessDatastoreExample.kind, kv._1))
       .putProperties("word", makeValue(kv._1).build())
       .putProperties("count", makeValue(kv._2).build())
@@ -38,15 +40,15 @@ class ShapelessDatastoreExampleTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.extra.ShapelessDatastoreWriteExample.type]
       .args("--input=in.txt", "--output=project")
       .input(TextIO("in.txt"), textIn)
-      .output(DatastoreIO("project"))(_ should containInAnyOrder (entities))
+      .output(DatastoreIO("project"))(_ should containInAnyOrder(entities))
       .run()
   }
 
   "ShapelessDatastoreReadExample" should "work" in {
     JobTest[com.spotify.scio.examples.extra.ShapelessDatastoreReadExample.type]
       .args("--input=project", "--output=out.txt")
-      .input(DatastoreIO("project", Query.getDefaultInstance), entities)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder (textOut))
+      .input(DatastoreIO("project"), entities)
+      .output(TextIO("out.txt"))(_ should containInAnyOrder(textOut))
       .run()
   }
 

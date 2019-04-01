@@ -17,6 +17,8 @@
 
 package com.spotify.scio.examples.extra
 
+import com.spotify.scio.avro.AvroIO
+import com.spotify.scio.io._
 import com.spotify.scio.testing._
 import org.apache.avro.generic.{GenericData, GenericRecord}
 
@@ -38,7 +40,7 @@ class ShapelessAvroExampleTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.extra.ShapelessAvroWriteExample.type]
       .args("--input=in.txt", "--output=wc.avro")
       .input(TextIO("in.txt"), textIn)
-      .output[GenericRecord](AvroIO[GenericRecord]("wc.avro"))(_ should containInAnyOrder (records))
+      .output(AvroIO[GenericRecord]("wc.avro"))(_ should containInAnyOrder(records))
       .run()
   }
 
@@ -46,7 +48,7 @@ class ShapelessAvroExampleTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.extra.ShapelessAvroReadExample.type]
       .args("--input=wc.avro", "--output=out.txt")
       .input(AvroIO[GenericRecord]("wc.avro"), records)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder (textOut))
+      .output(TextIO("out.txt"))(_ should containInAnyOrder(textOut))
       .run()
   }
 

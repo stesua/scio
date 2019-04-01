@@ -18,6 +18,8 @@
 package com.spotify.scio.avro.types
 
 import java.util.Collections.{emptyList, emptyMap}
+import java.util.concurrent.ConcurrentHashMap
+import java.util.function
 
 import com.google.protobuf.ByteString
 import com.spotify.scio.avro.types.MacroUtil._
@@ -25,9 +27,13 @@ import org.apache.avro.{JsonProperties, Schema}
 import org.apache.avro.Schema.Field
 
 import scala.collection.JavaConverters._
+import scala.reflect.runtime.universe
 import scala.reflect.runtime.universe._
 
 private[types] object SchemaProvider {
+
+  private[this] val m: ConcurrentHashMap[Type, Schema] =
+    new ConcurrentHashMap[Type, Schema]()
 
   def schemaOf[T: TypeTag]: Schema = {
     val tpe = typeOf[T]
@@ -36,24 +42,30 @@ private[types] object SchemaProvider {
       throw new RuntimeException(s"Unsupported type $tpe.erasure")
     }
 
-    toSchema(tpe)._1
+    m.computeIfAbsent(tpe, new function.Function[Type, Schema] {
+      override def apply(t: universe.Type): Schema = toSchema(tpe)._1
+    })
   }
 
   // scalastyle:off cyclomatic.complexity
   private def toSchema(tpe: Type): (Schema, Any) = tpe match {
-    case t if t =:= typeOf[Boolean] => (Schema.create(Schema.Type.BOOLEAN), null)
-    case t if t =:= typeOf[Int] => (Schema.create(Schema.Type.INT), null)
-    case t if t =:= typeOf[Long] => (Schema.create(Schema.Type.LONG), null)
-    case t if t =:= typeOf[Float] => (Schema.create(Schema.Type.FLOAT), null)
+    case t if t =:= typeOf[Boolean] =>
+      (Schema.create(Schema.Type.BOOLEAN), null)
+    case t if t =:= typeOf[Int]    => (Schema.create(Schema.Type.INT), null)
+    case t if t =:= typeOf[Long]   => (Schema.create(Schema.Type.LONG), null)
+    case t if t =:= typeOf[Float]  => (Schema.create(Schema.Type.FLOAT), null)
     case t if t =:= typeOf[Double] => (Schema.create(Schema.Type.DOUBLE), null)
     case t if t =:= typeOf[String] => (Schema.create(Schema.Type.STRING), null)
-    case t if t =:= typeOf[ByteString] => (Schema.create(Schema.Type.BYTES), null)
+    case t if t =:= typeOf[ByteString] =>
+      (Schema.create(Schema.Type.BYTES), null)
+    case t if t =:= typeOf[Array[Byte]] =>
+      (Schema.create(Schema.Type.BYTES), null)
 
     case t if t.erasure =:= typeOf[Option[_]].erasure =>
       val s = toSchema(t.typeArgs.head)._1
       (Schema.createUnion(Schema.create(Schema.Type.NULL), s), JsonProperties.NULL_VALUE)
 
-    case t if t.erasure <:< typeOf[scala.collection.Map[String,_]].erasure =>
+    case t if t.erasure <:< typeOf[scala.collection.Map[String, _]].erasure =>
       val s = toSchema(t.typeArgs.tail.head)._1
       (Schema.createMap(s), emptyMap())
 
@@ -80,7 +92,8 @@ private[types] object SchemaProvider {
     new Field(name, schema, doc.orNull, default)
   }
 
-  private def toFields(t: Type): List[Field] = getFields(t).map(toField)(scala.collection.breakOut)
+  private def toFields(t: Type): List[Field] =
+    getFields(t).map(toField)(scala.collection.breakOut)
 
   private def getFields(t: Type): Iterable[(Symbol, Option[String])] =
     t.decls.filter(isField) zip fieldDoc(t)

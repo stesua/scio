@@ -21,6 +21,7 @@ import java.io.PrintWriter
 import java.nio.file.Files
 
 import com.google.common.collect.Lists
+import com.spotify.scio.io.TextIO
 import com.spotify.scio.metrics.Metrics
 import com.spotify.scio.options.ScioOptions
 import com.spotify.scio.testing.{PipelineSpec, TestValidationOptions}
@@ -29,6 +30,8 @@ import org.apache.beam.runners.direct.DirectRunner
 import org.apache.beam.sdk.options.{PipelineOptions, PipelineOptionsFactory}
 import org.apache.beam.sdk.testing.PAssert
 import org.apache.beam.sdk.transforms.Create
+
+import scala.concurrent.duration.Duration
 
 class ScioContextTest extends PipelineSpec {
 
@@ -98,25 +101,39 @@ class ScioContextTest extends PipelineSpec {
     output.delete()
   }
 
+  it should "[io] create local output directory on close()" in {
+    val output = Files.createTempDirectory("scio-output-").toFile
+    output.delete()
+
+    val sc = ScioContext()
+    val textIO = TextIO(output.getAbsolutePath)
+    sc.parallelize(Seq("a", "b", "c")).write(textIO)(TextIO.WriteParam())
+    output.exists() shouldBe false
+
+    sc.close()
+    output.exists() shouldBe true
+    output.delete()
+  }
+
   it should "support save metrics on close for finished pipeline" in {
     val metricsFile = Files.createTempFile("scio-metrics-dump-", ".json").toFile
     val opts = PipelineOptionsFactory.create()
     opts.setRunner(classOf[DirectRunner])
     opts.as(classOf[ScioOptions]).setMetricsLocation(metricsFile.toString)
     val sc = ScioContext(opts)
-    sc.close().waitUntilFinish()  // block non-test runner
+    sc.close().waitUntilFinish() // block non-test runner
 
     val mapper = ScioUtil.getScalaJsonMapper
 
     val metrics = mapper.readValue(metricsFile, classOf[Metrics])
-    metrics.version shouldBe scioVersion
+    metrics.version shouldBe BuildInfo.version
   }
 
   // scalastyle:off no.whitespace.before.left.bracket
   it should "fail to close() on closed context" in {
     val sc = ScioContext()
     sc.close()
-    the [IllegalArgumentException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       sc.close()
     } should have message "requirement failed: ScioContext already closed"
   }
@@ -142,4 +159,20 @@ class ScioContextTest extends PipelineSpec {
     }
   }
 
+  it should "parse valid, invalid, and missing blockFor argument passed from command line" in {
+    val (validOpts, _) =
+      ScioContext.parseArguments[PipelineOptions](Array(s"--blockFor=1h"))
+    ScioContext.apply(validOpts).close().getAwaitDuration shouldBe Duration("1h")
+
+    val (missingOpts, _) = ScioContext.parseArguments[PipelineOptions](Array())
+    ScioContext
+      .apply(missingOpts)
+      .close()
+      .getAwaitDuration shouldBe Duration.Inf
+
+    val (invalidOpts, _) =
+      ScioContext.parseArguments[PipelineOptions](Array(s"--blockFor=foo"))
+    the[IllegalArgumentException] thrownBy { ScioContext.apply(invalidOpts) } should have message
+      s"blockFor param foo cannot be cast to type scala.concurrent.duration.Duration"
+  }
 }

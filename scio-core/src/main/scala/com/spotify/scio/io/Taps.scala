@@ -17,24 +17,12 @@
 
 package com.spotify.scio.io
 
-import com.google.api.services.bigquery.model.TableReference
-import com.google.protobuf.Message
-import com.spotify.scio.avro.types.AvroType
-import com.spotify.scio.avro.types.AvroType.HasAvroAnnotation
-import com.spotify.scio.bigquery.types.BigQueryType
-import com.spotify.scio.bigquery.types.BigQueryType.HasAnnotation
-import com.spotify.scio.bigquery.{BigQueryClient, TableRow}
-import org.apache.avro.Schema
-import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers
+import com.spotify.scio.{registerSysProps, SysProp}
 import org.apache.beam.sdk.util.{BackOff, BackOffUtils, FluentBackoff, Sleeper}
-import org.apache.avro.generic.GenericRecord
 import org.joda.time.Duration
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.{Future, Promise}
-import scala.reflect.ClassTag
-import scala.reflect.runtime.universe._
-import scala.util.Try
 
 /** Exception for when a tap is not available. */
 class TapNotAvailableException(msg: String) extends Exception(msg)
@@ -42,87 +30,11 @@ class TapNotAvailableException(msg: String) extends Exception(msg)
 /** Utility for managing `Future[Tap[T]]`s. */
 trait Taps {
 
-  private lazy val bqc = BigQueryClient.defaultInstance()
-
-  /** Get a `Future[Tap[T]]` for an Avro file. */
-  def avroFile[T: ClassTag](path: String, schema: Schema = null): Future[Tap[T]] =
-    mkTap(s"Avro: $path", () => isPathDone(path), () => AvroTap[T](path, schema))
-
-  /** Get a `Future[Tap[T]]` for typed Avro source. */
-  def typedAvroFile[T <: HasAvroAnnotation : TypeTag: ClassTag](path: String): Future[Tap[T]] = {
-    val avroT = AvroType[T]
-
-    import scala.concurrent.ExecutionContext.Implicits.global
-    avroFile[GenericRecord](path, avroT.schema)
-      .map(_.map(avroT.fromGenericRecord))
-  }
-
-  /** Get a `Future[Tap[TableRow]]` for BigQuery SELECT query. */
-  def bigQuerySelect(sqlQuery: String, flattenResults: Boolean = false): Future[Tap[TableRow]] =
-    mkTap(
-      s"BigQuery SELECT: $sqlQuery",
-      () => isQueryDone(sqlQuery),
-      () => bigQueryTap(sqlQuery, flattenResults))
-
-  /** Get a `Future[Tap[TableRow]]` for BigQuery table. */
-  def bigQueryTable(table: TableReference): Future[Tap[TableRow]] =
-    mkTap(s"BigQuery Table: $table", () => bqc.tableExists(table), () => BigQueryTap(table))
-
-  /** Get a `Future[Tap[TableRow]]` for BigQuery table. */
-  def bigQueryTable(tableSpec: String): Future[Tap[TableRow]] =
-    bigQueryTable(BigQueryHelpers.parseTableSpec(tableSpec))
-
-  /** Get a `Future[Tap[T]]` for typed BigQuery source. */
-  def typedBigQuery[T <: HasAnnotation : TypeTag : ClassTag](newSource: String = null)
-  : Future[Tap[T]] = {
-    val bqt = BigQueryType[T]
-    val rows = if (newSource == null) {
-      // newSource is missing, T's companion object must have either table or query
-      if (bqt.isTable) {
-        bigQueryTable(bqt.table.get)
-      } else if (bqt.isQuery) {
-        bigQuerySelect(bqt.query.get)
-      } else {
-        throw new IllegalArgumentException(s"Missing table or query field in companion object")
-      }
-    } else {
-      // newSource can be either table or query
-      val table = scala.util.Try(BigQueryHelpers.parseTableSpec(newSource)).toOption
-      if (table.isDefined) {
-        bigQueryTable(table.get)
-      } else {
-        bigQuerySelect(newSource)
-      }
-    }
-    import scala.concurrent.ExecutionContext.Implicits.global
-    rows.map(_.map(bqt.fromTableRow))
-  }
-
-  /** Get a `Future[Tap[TableRow]]` for a BigQuery TableRow JSON file. */
-  def tableRowJsonFile(path: String): Future[Tap[TableRow]] =
-    mkTap(s"TableRowJson: $path", () => isPathDone(path), () => TableRowJsonTap(path))
-
   /** Get a `Future[Tap[String]]` for a text file. */
   def textFile(path: String): Future[Tap[String]] =
     mkTap(s"Text: $path", () => isPathDone(path), () => TextTap(path))
 
-  /** Get a `Future[Tap[T]]` of a Protobuf file. */
-  def protobufFile[T: ClassTag](path: String)(implicit ev: T <:< Message): Future[Tap[T]] =
-    mkTap(s"Protobuf: $path", () => isPathDone(path), () => ObjectFileTap[T](path))
-
-  /** Get a `Future[Tap[T]]` of an object file. */
-  def objectFile[T: ClassTag](path: String): Future[Tap[T]] =
-    mkTap(s"Protobuf: $path", () => isPathDone(path), () => ObjectFileTap[T](path))
-
-  private def isPathDone(path: String): Boolean = FileStorage(path).isDone
-
-  private def isQueryDone(sqlQuery: String): Boolean =
-    bqc.extractTables(sqlQuery).forall(bqc.tableExists)
-
-  private def bigQueryTap(sqlQuery: String, flattenResults: Boolean): BigQueryTap = {
-    val table = bqc.query(sqlQuery, flattenResults = flattenResults)
-    BigQueryTap(table)
-  }
+  private[scio] def isPathDone(path: String): Boolean = FileStorage(path).isDone
 
   /**
    * Make a tap, to be implemented by concrete classes.
@@ -138,93 +50,86 @@ trait Taps {
 }
 
 /** Taps implementation that fails immediately if tap not available. */
-private class ImmediateTaps extends Taps {
+private final class ImmediateTaps extends Taps {
   override private[scio] def mkTap[T](name: String,
                                       readyFn: () => Boolean,
                                       tapFn: () => Tap[T]): Future[Tap[T]] =
-    if (readyFn()) Future.successful(tapFn()) else Future.failed(new TapNotAvailableException(name))
+    if (readyFn()) Future.successful(tapFn())
+    else Future.failed(new TapNotAvailableException(name))
+}
+
+private object PollingTaps {
+  private val logger = LoggerFactory.getLogger(this.getClass)
+
+  final case class Poll(name: String,
+                        readyFn: () => Boolean,
+                        tapFn: () => Tap[Any],
+                        promise: Promise[AnyRef])
 }
 
 /** Taps implementation that polls for tap availability in the background. */
-private class PollingTaps(private val backOff: BackOff) extends Taps {
+private final class PollingTaps(private[this] val backOff: BackOff) extends Taps {
+  import PollingTaps._
 
-  case class Poll(name: String,
-                  readyFn: () => Boolean,
-                  tapFn: () => Tap[Any],
-                  promise: Promise[AnyRef])
-
-  private var polls: List[Poll] = _
-  private val logger = LoggerFactory.getLogger(this.getClass)
+  private[this] var polls: List[Poll] = _
 
   override private[scio] def mkTap[T](name: String,
                                       readyFn: () => Boolean,
-                                      tapFn: () => Tap[T]): Future[Tap[T]] = this.synchronized {
-    val p = Promise[AnyRef]()
-    val init = if (polls == null) {
-      polls = Nil
-      true
-    } else {
-      false
-    }
-
-    logger.info(s"Polling for tap $name")
-    polls +:= Poll(name, readyFn, tapFn.asInstanceOf[() => Tap[Any]], p)
-
-    if (init) {
-      import scala.concurrent.ExecutionContext.Implicits.global
-      Future {
-        val sleeper = Sleeper.DEFAULT
-        do {
-          if (polls.nonEmpty) {
-            val tap = if (polls.size > 1) "taps" else "tap"
-            logger.info(s"Polling for ${polls.size} $tap")
-          }
-          this.synchronized {
-            val (ready, pending) = polls.partition(_.readyFn())
-            ready.foreach { p =>
-              logger.info(s"Tap available: ${p.name}")
-              p.promise.success(tapFn())
-            }
-            polls = pending
-          }
-        } while (BackOffUtils.next(sleeper, backOff))
+                                      tapFn: () => Tap[T]): Future[Tap[T]] =
+    this.synchronized {
+      val p = Promise[AnyRef]()
+      val init = if (polls == null) {
+        polls = Nil
+        true
+      } else {
+        false
       }
-    }
 
-    p.future.asInstanceOf[Future[Tap[T]]]
-  }
+      logger.info(s"Polling for tap $name")
+      polls +:= Poll(name, readyFn, tapFn.asInstanceOf[() => Tap[Any]], p)
+
+      if (init) {
+        import scala.concurrent.ExecutionContext.Implicits.global
+        Future {
+          val sleeper = Sleeper.DEFAULT
+          do {
+            if (polls.nonEmpty) {
+              val tap = if (polls.size > 1) "taps" else "tap"
+              logger.info(s"Polling for ${polls.size} $tap")
+            }
+            this.synchronized {
+              val (ready, pending) = polls.partition(_.readyFn())
+              ready.foreach { p =>
+                logger.info(s"Tap available: ${p.name}")
+                p.promise.success(tapFn())
+              }
+              polls = pending
+            }
+          } while (BackOffUtils.next(sleeper, backOff))
+          polls.foreach(p => p.promise.failure(new TapNotAvailableException(p.name)))
+        }
+      }
+
+      p.future.asInstanceOf[Future[Tap[T]]]
+    }
 
 }
 
 /** Companion object for [[Taps]]. */
 object Taps extends {
-
-  /** System property key for taps algorithm. */
-  val ALGORITHM_KEY = "taps.algorithm"
+  import TapsSysProps._
 
   /** Default taps algorithm. */
-  val ALGORITHM_DEFAULT = "immediate"
-
-  /** System property key for polling taps maximum interval in milliseconds. */
-  val POLLING_MAXIMUM_INTERVAL_KEY = "taps.polling.maximum_interval"
+  val AlgorithmDefault = "immediate"
 
   /** Default polling taps maximum interval. */
-  val POLLING_MAXIMUM_INTERVAL_DEFAULT = "600000"
-
-  /** System property key for polling taps initial interval in milliseconds. */
-  val POLLING_INITIAL_INTERVAL_KEY = "taps.polling.initial_interval"
+  val PollingMaximumIntervalDefault = "600000"
 
   /** Default polling taps initial interval. */
-  val POLLING_INITIAL_INTERVAL_DEFAULT = "10000"
-
-  /**
-   * System property key for polling taps maximum number of attempts, unlimited if <= 0. Default is
-   * 0.
-   */
-  val POLLING_MAXIMUM_ATTEMPTS_KEY = "taps.polling.maximum_attempts"
+  val PollingInitialIntervalDefault = "10000"
 
   /** Default polling taps maximum number of attempts. */
-  val POLLING_MAXIMUM_ATTEMPTS_DEFAULT = "0"
+  val PollingMaximumAttemptsDefault = "0"
 
   /**
    * Create a new [[Taps]] instance.
@@ -241,16 +146,16 @@ object Taps extends {
    * - `taps.polling.maximum_attempts`: maximum number of attempts, unlimited if <= 0. Default is 0.
    */
   def apply(): Taps = {
-    getPropOrElse(ALGORITHM_KEY, ALGORITHM_DEFAULT) match {
+    Algorithm.value(AlgorithmDefault) match {
       case "immediate" => new ImmediateTaps
       case "polling" =>
         val maxAttempts =
-          getPropOrElse(POLLING_MAXIMUM_ATTEMPTS_KEY, POLLING_MAXIMUM_ATTEMPTS_DEFAULT).toInt
+          PollingMaximumAttempts.value(PollingMaximumAttemptsDefault).toInt
         val initInterval =
-          getPropOrElse(POLLING_INITIAL_INTERVAL_KEY, POLLING_INITIAL_INTERVAL_DEFAULT).toLong
+          PollingInitialInterval.value(PollingInitialIntervalDefault).toLong
         val backOff = if (maxAttempts <= 0) {
           val maxInterval =
-            getPropOrElse(POLLING_MAXIMUM_INTERVAL_KEY, POLLING_MAXIMUM_INTERVAL_DEFAULT).toLong
+            PollingMaximumInterval.value(PollingMaximumIntervalDefault).toLong
           FluentBackoff.DEFAULT
             .withInitialBackoff(Duration.millis(initInterval))
             .withMaxBackoff(Duration.millis(maxInterval))
@@ -266,9 +171,21 @@ object Taps extends {
     }
   }
 
-  private def getPropOrElse(key: String, default: String): String = {
-    val value = sys.props(key)
-    if (value == null) default else value
-  }
+}
+
+@registerSysProps
+object TapsSysProps {
+
+  val Algorithm = SysProp("taps.algorithm", "System property key for taps algorithm")
+  val PollingMaximumInterval = SysProp(
+    "taps.polling.maximum_interval",
+    "System property key for polling taps maximum interval in milliseconds")
+  val PollingInitialInterval = SysProp(
+    "taps.polling.initial_interval",
+    "System property key for polling taps initial interval in milliseconds")
+  val PollingMaximumAttempts = SysProp(
+    "taps.polling.maximum_attempts",
+    "System property key for polling taps maximum number of attempts, unlimited if <= 0. " +
+      "Default is 0")
 
 }

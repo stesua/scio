@@ -17,12 +17,20 @@
 
 package com.spotify.scio
 
-import com.google.api.services.bigquery.model.{TableReference, TableRow => GTableRow}
+import java.math.MathContext
+
+import com.google.api.services.bigquery.model.{
+  TableReference,
+  TableRow => GTableRow,
+  TimePartitioning => GTimePartitioning
+}
+import com.spotify.scio.values.SCollection
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO.Write
 import org.joda.time.format.{DateTimeFormat, DateTimeFormatterBuilder}
 import org.joda.time.{Instant, LocalDate, LocalDateTime, LocalTime}
 
 import scala.collection.JavaConverters._
+import scala.language.implicitConversions
 import scala.util.Try
 
 /**
@@ -36,9 +44,9 @@ import scala.util.Try
  * [[https://cloud.google.com/bigquery/docs/reference/legacy-sql legacy]] and
  * [[https://cloud.google.com/bigquery/docs/reference/standard-sql/ standard]].
  * APIs that take a BigQuery query string as argument, e.g.
- * [[com.spotify.scio.bigquery.BigQueryClient.getQueryRows BigQueryClient.getQueryRows]],
- * [[com.spotify.scio.bigquery.BigQueryClient.getQuerySchema BigQueryClient.getQuerySchema]],
- * [[com.spotify.scio.bigquery.BigQueryClient.getTypedRows BigQueryClient.getTypedRows]] and
+ * [[com.spotify.scio.bigquery.client.BigQuery.query.rows]],
+ * [[com.spotify.scio.bigquery.client.BigQuery.query.schema]],
+ * [[com.spotify.scio.bigquery.client.BigQuery.getTypedRows]] and
  * [[com.spotify.scio.bigquery.BigQueryType.fromQuery BigQueryType.fromQuery]], automatically
  * detects the query's dialect. To override this, start the query with either `#legacysql` or
  * `#standardsql` comment line.
@@ -71,6 +79,11 @@ package object bigquery {
    */
   type description = com.spotify.scio.bigquery.types.description
 
+  implicit def toBigQueryScioContext(c: ScioContext): BigQueryScioContext =
+    new BigQueryScioContext(c)
+  implicit def toBigQuerySCollection[T](c: SCollection[T]): BigQuerySCollection[T] =
+    new BigQuerySCollection[T](c)
+
   /**
    * Enhanced version of [[com.google.api.services.bigquery.model.TableReference TableReference]].
    */
@@ -100,7 +113,7 @@ package object bigquery {
    * }}}
    */
   object TableRow {
-    def apply(fields: (String, _)*): TableRow =
+    @inline def apply(fields: (String, _)*): TableRow =
       fields.foldLeft(new GTableRow())((r, kv) => r.set(kv._1, kv._2))
   }
 
@@ -110,22 +123,27 @@ package object bigquery {
   /** Enhanced version of [[TableRow]] with typed getters. */
   implicit class RichTableRow(private val r: TableRow) extends AnyVal {
 
-    def getBoolean(name: AnyRef): Boolean = this.getValue(name, _.toString.toBoolean, false)
+    def getBoolean(name: AnyRef): Boolean =
+      this.getValue(name, _.toString.toBoolean, false)
 
     def getBooleanOpt(name: AnyRef): Option[Boolean] =
       this.getValueOpt(name, _.toString.toBoolean)
 
     def getLong(name: AnyRef): Long = this.getValue(name, _.toString.toLong, 0L)
 
-    def getLongOpt(name: AnyRef): Option[Long] = this.getValueOpt(name, _.toString.toLong)
+    def getLongOpt(name: AnyRef): Option[Long] =
+      this.getValueOpt(name, _.toString.toLong)
 
-    def getDouble(name: AnyRef): Double = this.getValue(name, _.toString.toDouble, 0.0)
+    def getDouble(name: AnyRef): Double =
+      this.getValue(name, _.toString.toDouble, 0.0)
 
-    def getDoubleOpt(name: AnyRef): Option[Double] = this.getValueOpt(name, _.toString.toDouble)
+    def getDoubleOpt(name: AnyRef): Option[Double] =
+      this.getValueOpt(name, _.toString.toDouble)
 
     def getString(name: AnyRef): String = this.getValue(name, _.toString, null)
 
-    def getStringOpt(name: AnyRef): Option[String] = this.getValueOpt(name, _.toString)
+    def getStringOpt(name: AnyRef): Option[String] =
+      this.getValueOpt(name, _.toString)
 
     def getTimestamp(name: AnyRef): Instant =
       this.getValue(name, v => Timestamp.parse(v.toString), null)
@@ -133,12 +151,14 @@ package object bigquery {
     def getTimestampOpt(name: AnyRef): Option[Instant] =
       this.getValueOpt(name, v => Timestamp.parse(v.toString))
 
-    def getDate(name: AnyRef): LocalDate = this.getValue(name, v => Date.parse(v.toString), null)
+    def getDate(name: AnyRef): LocalDate =
+      this.getValue(name, v => Date.parse(v.toString), null)
 
     def getDateOpt(name: AnyRef): Option[LocalDate] =
       this.getValueOpt(name, v => Date.parse(v.toString))
 
-    def getTime(name: AnyRef): LocalTime = this.getValue(name, v => Time.parse(v.toString), null)
+    def getTime(name: AnyRef): LocalTime =
+      this.getValue(name, v => Time.parse(v.toString), null)
 
     def getTimeOpt(name: AnyRef): Option[LocalTime] =
       this.getValueOpt(name, v => Time.parse(v.toString))
@@ -176,20 +196,22 @@ package object bigquery {
 
   /** Utility for BigQuery `TIMESTAMP` type. */
   object Timestamp {
+    // YYYY-[M]M-[D]D[( |T)[H]H:[M]M:[S]S[.DDDDDD]][time zone]
+    private[this] val formatter =
+      DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS ZZZ")
 
-    // FIXME: verify that these match BigQuery specification
-    // YYYY-[M]M-[D]D[ [H]H:[M]M:[S]S[.DDDDDD]][time zone]
-    private val formatter = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS ZZZ")
-    private val parser = new DateTimeFormatterBuilder()
+    private[this] val parser = new DateTimeFormatterBuilder()
       .append(DateTimeFormat.forPattern("yyyy-MM-dd"))
-      .appendOptional(new DateTimeFormatterBuilder()
-        .append(DateTimeFormat.forPattern(" HH:mm:ss").getParser)
-        .appendOptional(DateTimeFormat.forPattern(".SSSSSS").getParser)
-        .toParser)
-      .appendOptional(new DateTimeFormatterBuilder()
-        .append(DateTimeFormat.forPattern("'T'HH:mm:ss").getParser)
-        .appendOptional(DateTimeFormat.forPattern(".SSSSSS").getParser)
-        .toParser)
+      .appendOptional(
+        new DateTimeFormatterBuilder()
+          .append(DateTimeFormat.forPattern(" HH:mm:ss").getParser)
+          .appendOptional(DateTimeFormat.forPattern(".SSSSSS").getParser)
+          .toParser)
+      .appendOptional(
+        new DateTimeFormatterBuilder()
+          .append(DateTimeFormat.forPattern("'T'HH:mm:ss").getParser)
+          .appendOptional(DateTimeFormat.forPattern(".SSSSSS").getParser)
+          .toParser)
       .appendOptional(new DateTimeFormatterBuilder()
         .append(null, Array(" ZZZ", "ZZ").map(p => DateTimeFormat.forPattern(p).getParser))
         .toParser)
@@ -203,14 +225,16 @@ package object bigquery {
     def apply(instant: Long): String = formatter.print(instant)
 
     /** Convert BigQuery `TIMESTAMP` string to `Instant`. */
-    def parse(timestamp: String): Instant = parser.parseDateTime(timestamp).toInstant
+    def parse(timestamp: String): Instant =
+      parser.parseDateTime(timestamp).toInstant
 
   }
 
   /** Utility for BigQuery `DATE` type. */
   object Date {
     // YYYY-[M]M-[D]D
-    private val formatter = DateTimeFormat.forPattern("yyyy-MM-dd").withZoneUTC()
+    private[this] val formatter =
+      DateTimeFormat.forPattern("yyyy-MM-dd").withZoneUTC()
 
     /** Convert `LocalDate` to BigQuery `DATE` string. */
     def apply(date: LocalDate): String = formatter.print(date)
@@ -222,8 +246,9 @@ package object bigquery {
   /** Utility for BigQuery `TIME` type. */
   object Time {
     // [H]H:[M]M:[S]S[.DDDDDD]
-    private val formatter = DateTimeFormat.forPattern("HH:mm:ss.SSSSSS").withZoneUTC()
-    private val parser = new DateTimeFormatterBuilder()
+    private[this] val formatter =
+      DateTimeFormat.forPattern("HH:mm:ss.SSSSSS").withZoneUTC()
+    private[this] val parser = new DateTimeFormatterBuilder()
       .append(DateTimeFormat.forPattern("HH:mm:ss").getParser)
       .appendOptional(DateTimeFormat.forPattern(".SSSSSS").getParser)
       .toFormatter
@@ -238,18 +263,22 @@ package object bigquery {
 
   /** Utility for BigQuery `DATETIME` type. */
   object DateTime {
-    // YYYY-[M]M-[D]D[ [H]H:[M]M:[S]S[.DDDDDD]]
-    private val formatter = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS")
-    private val parser = new DateTimeFormatterBuilder()
+    // YYYY-[M]M-[D]D[( |T)[H]H:[M]M:[S]S[.DDDDDD]]
+    private[this] val formatter =
+      DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSS")
+
+    private[this] val parser = new DateTimeFormatterBuilder()
       .append(DateTimeFormat.forPattern("yyyy-MM-dd"))
-      .appendOptional(new DateTimeFormatterBuilder()
-        .append(DateTimeFormat.forPattern(" HH:mm:ss").getParser)
-        .appendOptional(DateTimeFormat.forPattern(".SSSSSS").getParser)
-        .toParser)
-      .appendOptional(new DateTimeFormatterBuilder()
-        .append(DateTimeFormat.forPattern("'T'HH:mm:ss").getParser)
-        .appendOptional(DateTimeFormat.forPattern(".SSSSSS").getParser)
-        .toParser)
+      .appendOptional(
+        new DateTimeFormatterBuilder()
+          .append(DateTimeFormat.forPattern(" HH:mm:ss").getParser)
+          .appendOptional(DateTimeFormat.forPattern(".SSSSSS").getParser)
+          .toParser)
+      .appendOptional(
+        new DateTimeFormatterBuilder()
+          .append(DateTimeFormat.forPattern("'T'HH:mm:ss").getParser)
+          .appendOptional(DateTimeFormat.forPattern(".SSSSSS").getParser)
+          .toParser)
       .toFormatter
       .withZoneUTC()
 
@@ -257,7 +286,45 @@ package object bigquery {
     def apply(datetime: LocalDateTime): String = formatter.print(datetime)
 
     /** Convert BigQuery `DATETIME` string to `LocalDateTime`. */
-    def parse(datetime: String): LocalDateTime = parser.parseLocalDateTime(datetime)
+    def parse(datetime: String): LocalDateTime =
+      parser.parseLocalDateTime(datetime)
+  }
+
+  /**
+   * Scala wrapper for [[com.google.api.services.bigquery.model.TimePartitioning]].
+   */
+  case class TimePartitioning(`type`: String,
+                              field: String = null,
+                              expirationMs: Long = 0,
+                              requirePartitionFilter: Boolean = false) {
+    def asJava: GTimePartitioning = {
+      var p = new GTimePartitioning()
+        .setType(`type`)
+        .setRequirePartitionFilter(requirePartitionFilter)
+      if (field != null) p = p.setField(field)
+      if (expirationMs > 0) p = p.setExpirationMs(expirationMs)
+      p
+    }
+  }
+
+  object Numeric {
+    val MaxNumericPrecision = 38
+    val MaxNumericScale = 9
+
+    def apply(value: String): BigDecimal = apply(BigDecimal(value))
+
+    def apply(value: BigDecimal): BigDecimal = {
+      // NUMERIC's max scale is 9, precision is 38
+      val scaled = if (value.scale > MaxNumericScale) {
+        value.setScale(MaxNumericScale, scala.math.BigDecimal.RoundingMode.HALF_UP)
+      } else {
+        value
+      }
+      require(scaled.precision <= MaxNumericPrecision,
+              s"max allowed precision is $MaxNumericPrecision")
+
+      BigDecimal(scaled.toString, new MathContext(MaxNumericPrecision))
+    }
   }
 
 }

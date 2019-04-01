@@ -49,38 +49,45 @@ object WindowedWordCount {
 
     // Parse command line arguments
     val input = args.getOrElse("input", ExampleData.KING_LEAR)
-    val windowSize = Duration.standardMinutes(args.long("windowSize", WINDOW_SIZE))
-    val minTimestamp = args.long("minTimestampMillis", System.currentTimeMillis())
-    val maxTimestamp = args.long(
-      "maxTimestampMillis", minTimestamp + Duration.standardHours(1).getMillis)
+    val windowSize =
+      Duration.standardMinutes(args.long("windowSize", WINDOW_SIZE))
+    val minTimestamp =
+      args.long("minTimestampMillis", System.currentTimeMillis())
+    val maxTimestamp =
+      args.long("maxTimestampMillis", minTimestamp + Duration.standardHours(1).getMillis)
 
     // Open text files as an `SCollection[String]`
     sc.textFile(input)
-      // Assign random timestamps to each element
-      .timestampBy {
-        _ => new Instant(ThreadLocalRandom.current().nextLong(minTimestamp, maxTimestamp))
+      .transform("random timestamper") {
+        // Assign random timestamps to each element
+        _.timestampBy { _ =>
+          new Instant(ThreadLocalRandom.current().nextLong(minTimestamp, maxTimestamp))
+        }
       }
-      // Apply windowing logic
-      .withFixedWindows(windowSize)
-      // Split input lines, filter out empty tokens and expand into a collection of tokens
-      .flatMap(_.split("[^a-zA-Z']+").filter(_.nonEmpty))
-      // Count occurrences of each unique `String` within each window to get `(String, Long)`
-      .countByValue
-      // Expose window infomation as an `IntervalWindow`
-      .withWindow[IntervalWindow]
-      // Swap keys and values, i.e. `((String, Long), IntervalWindow)` => `(IntervalWindow,
-      // (String, Long))`
-      .swap
-      // Group elements by window to get `(IntervalWindow, Iterable[(String, Long)])
-      .groupByKey
+      .transform("windowed counter") {
+        // Apply windowing logic
+        _.withFixedWindows(windowSize)
+        // Split input lines, filter out empty tokens and expand into a collection of tokens
+          .flatMap(_.split("[^a-zA-Z']+").filter(_.nonEmpty))
+          // Count occurrences of each unique `String` within each window to get `(String, Long)`
+          .countByValue
+          // Expose window information as an `IntervalWindow`
+          .withWindow[IntervalWindow]
+          // Swap keys and values, i.e. `((String, Long), IntervalWindow)` => `(IntervalWindow,
+          // (String, Long))`
+          .swap
+          // Group elements by window to get `(IntervalWindow, Iterable[(String, Long)])
+          .groupByKey
+      }
       // Write values in each group to a separate text file
-      .map { case (w, vs) =>
-        val outputShard = "%s-%s-%s".format(
-          args("output"), formatter.print(w.start()), formatter.print(w.end()))
-        val resourceId = FileSystems.matchNewResource(outputShard, false)
-        val out = Channels.newOutputStream(FileSystems.create(resourceId, MimeTypes.TEXT))
-        vs.foreach { case (k, v) => out.write(s"$k: $v\n".getBytes) }
-        out.close()
+      .map {
+        case (w, vs) =>
+          val outputShard =
+            "%s-%s-%s".format(args("output"), formatter.print(w.start()), formatter.print(w.end()))
+          val resourceId = FileSystems.matchNewResource(outputShard, false)
+          val out = Channels.newOutputStream(FileSystems.create(resourceId, MimeTypes.TEXT))
+          vs.foreach { case (k, v) => out.write(s"$k: $v\n".getBytes) }
+          out.close()
       }
 
     // Close the context and execute the pipeline

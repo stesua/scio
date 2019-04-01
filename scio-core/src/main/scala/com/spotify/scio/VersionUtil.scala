@@ -21,12 +21,14 @@ import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.http.{GenericUrl, HttpRequest, HttpRequestInitializer}
 import com.google.api.client.json.JsonObjectParser
 import com.google.api.client.json.jackson2.JacksonFactory
+import org.apache.beam.sdk.util.ReleaseInfo
+import org.apache.beam.sdk.{PipelineResult, PipelineRunner}
 import org.slf4j.LoggerFactory
 
 import scala.collection.mutable
 import scala.util.Try
 
-private object VersionUtil {
+private[scio] object VersionUtil {
 
   case class SemVer(major: Int, minor: Int, rev: Int, suffix: String) extends Ordered[SemVer] {
     def compare(that: SemVer): Int = {
@@ -41,7 +43,7 @@ private object VersionUtil {
   private val pattern = """v?(\d+)\.(\d+).(\d+)(-\w+)?""".r
   private val logger = LoggerFactory.getLogger(this.getClass)
 
-  private def getLatest: Option[String] = Try {
+  private lazy val latest: Option[String] = Try {
     val transport = new NetHttpTransport()
     val response = transport
       .createRequestFactory(new HttpRequestInitializer {
@@ -54,7 +56,8 @@ private object VersionUtil {
       .buildGetRequest(new GenericUrl(url))
       .execute()
       .parseAs(classOf[java.util.List[Object]])
-    val latest = response.iterator().next().asInstanceOf[java.util.Map[String, AnyRef]]
+    val latest =
+      response.iterator().next().asInstanceOf[java.util.Map[String, AnyRef]]
     latest.get("tag_name").toString
   }.toOption
 
@@ -81,6 +84,13 @@ private object VersionUtil {
   }
 
   def checkVersion(): Unit =
-    checkVersion(scioVersion, getLatest).foreach(logger.warn)
+    checkVersion(BuildInfo.version, latest).foreach(logger.warn)
+
+  def checkRunnerVersion(runner: Class[_ <: PipelineRunner[_ <: PipelineResult]]): Unit = {
+    val name = runner.getSimpleName
+    val version = ReleaseInfo.getReleaseInfo.getVersion
+    require(version == BuildInfo.beamVersion,
+            s"Mismatched version for $name, expected: ${BuildInfo.beamVersion}, actual: $version")
+  }
 
 }

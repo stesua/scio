@@ -18,7 +18,8 @@
 package com.spotify.scio.examples.extra
 
 import com.spotify.scio.extra.checkpoint._
-import com.spotify.scio.testing.{PipelineSpec, TextIO}
+import com.spotify.scio.io._
+import com.spotify.scio.testing._
 
 class CheckpointExampleTest extends PipelineSpec {
 
@@ -26,36 +27,36 @@ class CheckpointExampleTest extends PipelineSpec {
   private val words = Seq("foo", "foo", "bar", "var")
   private val max = "(foo,2)"
   private val count = Seq("foo" -> 2L, "bar" -> 1L, "var" -> 1L)
-  private val prettyCount = count.map{case (k, v) => s"$k: $v"}
+  private val prettyCount = count.map { case (k, v) => s"$k: $v" }
 
   "CheckpointJobTest" should "work" in {
     JobTest[CheckpointExample.type]
       .args("--output=output", "--input=input", "--checkpoint=checkpoint")
       .input(TextIO("input"), input)
-      .output(TextIO("output-max"))(_ should containSingleValue (max))
-      .output(TextIO("output-words"))(_ should containInAnyOrder (words))
-      .output(TextIO("output"))(_ should containInAnyOrder (prettyCount))
+      .output(TextIO("output-max"))(_ should containSingleValue(max))
+      .output(TextIO("output-words"))(_ should containInAnyOrder(words))
+      .output(TextIO("output"))(_ should containInAnyOrder(prettyCount))
       .run()
   }
 
   it should "work with src checkpoint provided" in {
     JobTest[CheckpointExample.type]
       .args("--output=output", "--input=input", "--checkpoint=checkpoint")
-      .input[String](CheckpointIO("checkpoint-src"), words)
-      .output(TextIO("output-max"))(_ should containSingleValue (max))
-      .output(TextIO("output-words"))(_ should containInAnyOrder (words))
-      .output(TextIO("output"))(_ should containInAnyOrder (prettyCount))
+      .input(CheckpointIO[String]("checkpoint-src"), words)
+      .output(TextIO("output-max"))(_ should containSingleValue(max))
+      .output(TextIO("output-words"))(_ should containInAnyOrder(words))
+      .output(TextIO("output"))(_ should containInAnyOrder(prettyCount))
       .run()
   }
 
   it should "work with src and count checkpoints provided" in {
     JobTest[CheckpointExample.type]
       .args("--output=output", "--input=input", "--checkpoint=checkpoint")
-      .input[String](CheckpointIO("checkpoint-src"), words)
-      .input[(String, Long)](CheckpointIO("checkpoint-count"), count)
-      .output(TextIO("output-max"))(_ should containSingleValue (max))
-      .output(TextIO("output-words"))(_ should containInAnyOrder (words))
-      .output(TextIO("output"))(_ should containInAnyOrder (prettyCount))
+      .input(CheckpointIO[String]("checkpoint-src"), words)
+      .input(CheckpointIO[(String, Long)]("checkpoint-count"), count)
+      .output(TextIO("output-max"))(_ should containSingleValue(max))
+      .output(TextIO("output-words"))(_ should containInAnyOrder(words))
+      .output(TextIO("output"))(_ should containInAnyOrder(prettyCount))
       .run()
   }
 

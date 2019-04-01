@@ -31,16 +31,20 @@ object CheckpointMetrics {
     val elemsBefore = ScioMetrics.counter("elemsBefore")
     val elemsAfter = ScioMetrics.counter("elemsAfter")
 
-    val (sc, args) = ContextAndArgs(Array(s"--checkpoint=$checkpointArg") ++
-      Option(tempLocation).map(e => s"--tempLocation=$e"))
+    val (sc, args) = ContextAndArgs(
+      Array(s"--checkpoint=$checkpointArg") ++
+        Option(tempLocation).map(e => s"--tempLocation=$e"))
     sc.checkpoint(args("checkpoint")) {
-      sc.parallelize(1 to 10)
-        .map { x => elemsBefore.inc(); x }
-    }
-    .map { x => elemsAfter.inc(); x }
+        sc.parallelize(1 to 10)
+          .map { x =>
+            elemsBefore.inc(); x
+          }
+      }
+      .map { x =>
+        elemsAfter.inc(); x
+      }
     val r = sc.close().waitUntilDone()
-    (Try(r.counter(elemsBefore).committed.get).getOrElse(0),
-      r.counter(elemsAfter).committed.get)
+    (Try(r.counter(elemsBefore).committed.get).getOrElse(0), r.counter(elemsAfter).committed.get)
   }
 }
 
@@ -48,20 +52,21 @@ class CheckpointTest extends FlatSpec with Matchers {
   import CheckpointMetrics._
 
   "checkpoint" should "work on path" in {
-    val tmpDir = Files.createTempDirectory("checkpoint-dir").resolve("checkpoint").toString
-    runJob(tmpDir) shouldBe (10L, 10L)
-    runJob(tmpDir) shouldBe (0L, 10L)
+    val tmpDir =
+      Files.createTempDirectory("checkpoint-").resolve("checkpoint").toString
+    runJob(tmpDir) shouldBe ((10L, 10L))
+    runJob(tmpDir) shouldBe ((0L, 10L))
     File(tmpDir).deleteRecursively()
-    runJob(tmpDir) shouldBe (10L, 10L)
+    runJob(tmpDir) shouldBe ((10L, 10L))
   }
 
   it should "work on name/file" in {
     val checkpointName = "c1"
     val tempLocation = Files.createTempDirectory("temp-location-").toString
-    runJob(checkpointName, tempLocation) shouldBe (10L, 10L)
-    runJob(checkpointName, tempLocation) shouldBe (0L, 10L)
+    runJob(checkpointName, tempLocation) shouldBe ((10L, 10L))
+    runJob(checkpointName, tempLocation) shouldBe ((0L, 10L))
     File(s"$tempLocation/$checkpointName").deleteRecursively()
-    runJob(checkpointName, tempLocation) shouldBe (10L, 10L)
+    runJob(checkpointName, tempLocation) shouldBe ((10L, 10L))
   }
 
 }

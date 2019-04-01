@@ -23,52 +23,46 @@ import com.google.api.services.bigquery.model.TableRow
 import com.google.common.collect.ImmutableList
 import com.spotify.scio.ScioContext
 import com.spotify.scio.avro.AvroUtils._
-import com.spotify.scio.avro.TestRecord
 import com.spotify.scio.coders.CoderTestUtils._
+import com.spotify.scio.testing.CoderAssertions._
+
 import com.spotify.scio.testing.PipelineSpec
-import com.twitter.chill._
+import com.twitter.chill.{java => _, _}
 import org.apache.beam.sdk.Pipeline.PipelineExecutionException
-import org.apache.beam.sdk.coders.Coder
-import org.apache.beam.sdk.options.{PipelineOptions, PipelineOptionsFactory}
+import org.apache.beam.sdk.coders.{Coder => BCoder}
+import org.apache.beam.sdk.options.PipelineOptionsFactory
 import org.apache.beam.sdk.util.CoderUtils
 import org.apache.beam.sdk.values.KV
 import org.joda.time.Instant
-import org.scalatest.matchers.{MatchResult, Matcher}
 
 import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
+
+case class RecordA(name: String, value: Int)
+case class RecordB(name: String, value: Int)
 
 class KryoAtomicCoderTest extends PipelineSpec {
 
   import com.spotify.scio.testing.TestingUtils._
 
-  type CoderFactory = () => Coder[Any]
+  type CoderFactory = () => BCoder[Any]
   val cf = () => new KryoAtomicCoder[Any](KryoOptions())
 
-  private def roundTrip[T: ClassTag](value: T) = new Matcher[CoderFactory] {
-    override def apply(left: CoderFactory): MatchResult = {
-      MatchResult(
-        testRoundTrip(left(), left(), value),
-        s"Coder did not round trip $value",
-        s"Coder did round trip $value")
-    }
-  }
-
   "KryoAtomicCoder" should "support Scala collections" in {
-    cf should roundTrip (Seq(1, 2, 3))
-    cf should roundTrip (List(1, 2, 3))
-    cf should roundTrip (Set(1, 2, 3))
-    cf should roundTrip (Map("a" -> 1, "b" -> 2, "c" -> 3))
+    Seq(1, 2, 3) coderShould roundtripKryo()
+    List(1, 2, 3) coderShould roundtripKryo()
+    Set(1, 2, 3) coderShould roundtripKryo()
+    Map("a" -> 1, "b" -> 2, "c" -> 3) coderShould roundtripKryo()
   }
 
   it should "support Scala tuples" in {
-    cf should roundTrip (("hello", 10))
-    cf should roundTrip (("hello", 10, 10.0))
-    cf should roundTrip (("hello", (10, 10.0)))
+    ("hello", 10) coderShould roundtripKryo()
+    ("hello", 10, 10.0) coderShould roundtripKryo()
+    ("hello", (10, 10.0)) coderShould roundtripKryo()
   }
 
   it should "support Scala case classes" in {
-    cf should roundTrip (Pair("record", 10))
+    Pair("record", 10) coderShould roundtripKryo()
   }
 
   it should "support wrapped iterables" in {
@@ -76,45 +70,50 @@ class KryoAtomicCoderTest extends PipelineSpec {
     val list = ImmutableList.of(1, 2, 3)
 
     // Iterable/Collection should have proper equality
-    cf should roundTrip (list.asInstanceOf[jl.Iterable[Int]].asScala)
-    cf should roundTrip (list.asInstanceOf[ju.Collection[Int]].asScala)
-    cf should roundTrip (list.asScala)
+    list.asInstanceOf[jl.Iterable[Int]].asScala coderShould roundtripKryo()
+    list.asInstanceOf[ju.Collection[Int]].asScala coderShould roundtripKryo()
+    list.asScala coderShould roundtripKryo()
   }
 
   it should "support Avro GenericRecord" in {
     val r = newGenericRecord(1)
-    cf should roundTrip (r)
-    cf should roundTrip (("key", r))
-    cf should roundTrip (CaseClassWithGenericRecord("record", 10, r))
+    r coderShould roundtripKryo()
+    ("key", r) coderShould roundtripKryo()
+    CaseClassWithGenericRecord("record", 10, r) coderShould roundtripKryo()
   }
 
   it should "support Avro SpecificRecord" in {
-    val r = new TestRecord(1, 1L, 1F, 1.0, true, "hello")
-    cf should roundTrip (r)
-    cf should roundTrip (("key", r))
-    cf should roundTrip (CaseClassWithSpecificRecord("record", 10, r))
+    val r = newSpecificRecord(1)
+    r coderShould roundtripKryo()
+    ("key", r) coderShould roundtripKryo()
+    CaseClassWithSpecificRecord("record", 10, r) coderShould roundtripKryo()
   }
 
   it should "support KV" in {
-    cf should roundTrip (KV.of("key", 1.0))
-    cf should roundTrip (KV.of("key", (10, 10.0)))
-    cf should roundTrip (KV.of("key", newSpecificRecord(1)))
-    cf should roundTrip (KV.of("key", newGenericRecord(1)))
+    KV.of("key", 1.0) coderShould roundtripKryo()
+    KV.of("key", (10, 10.0)) coderShould roundtripKryo()
+    KV.of("key", newSpecificRecord(1)) coderShould roundtripKryo()
+    KV.of("key", newGenericRecord(1)) coderShould roundtripKryo()
   }
 
   it should "support Instant" in {
-    cf should roundTrip (Instant.now())
+    Instant.now() coderShould roundtripKryo()
   }
 
   it should "support TableRow" in {
     val r = new TableRow().set("repeated_field", ImmutableList.of("a", "b"))
-    cf should roundTrip (r)
+    r coderShould roundtripKryo()
   }
 
   it should "support large objects" in {
     val vs = iterable((1 to 1000000).map("value-%08d".format(_)): _*)
     val kv = ("key", vs)
-    cf should roundTrip (kv)
+    kv coderShould roundtripKryo()
+  }
+
+  it should "support BigDecimal" in {
+    val bigDecimal = BigDecimal(1000.42)
+    bigDecimal coderShould roundtripKryo()
   }
 
   it should "support custom KryoRegistrar" in {
@@ -139,22 +138,41 @@ class KryoAtomicCoderTest extends PipelineSpec {
   }
 
   it should "support kryo registration required option" in {
-    val options = PipelineOptionsFactory.fromArgs("--kryoRegistrationRequired=true").create()
+    val options = PipelineOptionsFactory
+      .fromArgs("--kryoRegistrationRequired=true")
+      .create()
+    val sc = ScioContext(options)
+
+    implicit def alwaysUseKryo[A: ClassTag]: Coder[A] = Coder.kryo[A]
+
+    sc.parallelize(1 to 10).map(x => RecordB(x.toString, x))
+
+    // scalastyle:off no.whitespace.before.left.bracket
+    val e = the[PipelineExecutionException] thrownBy { sc.close() }
+    // scalastyle:on no.whitespace.before.left.bracket
+
+    val msg = "Class is not registered: com.spotify.scio.coders.RecordB"
+    e.getCause.getMessage should startWith(msg)
+  }
+
+  it should "support kryo registrar with custom options" in {
+    implicit val recordBfallbackCoder = Coder.kryo[RecordB]
+    // ensure we get a different kryo instance from object pool.
+    val options = PipelineOptionsFactory
+      .fromArgs("--kryoReferenceTracking=false", "--kryoRegistrationRequired=false")
+      .create()
     val sc = ScioContext(options)
     sc.parallelize(1 to 10).map(x => RecordB(x.toString, x))
 
     // scalastyle:off no.whitespace.before.left.bracket
-    val e = the [PipelineExecutionException] thrownBy { sc.close() }
+    val e = the[PipelineExecutionException] thrownBy { sc.close() }
     // scalastyle:on no.whitespace.before.left.bracket
 
     val msg = "Class is not registered: com.spotify.scio.coders.RecordB"
-    e.getCause.getMessage should startWith (msg)
+    e.getCause.getMessage should startWith(msg)
   }
 
 }
-
-case class RecordA(name: String, value: Int)
-case class RecordB(name: String, value: Int)
 
 @KryoRegistrar
 class RecordAKryoRegistrar extends IKryoRegistrar {
@@ -164,6 +182,7 @@ class RecordAKryoRegistrar extends IKryoRegistrar {
         output.writeString(obj.name)
         output.writeInt(obj.value)
       }
+
       override def read(kryo: Kryo, input: Input, tpe: Class[RecordA]): RecordA =
         RecordA(input.readString(), input.readInt() + 10)
     })
@@ -176,7 +195,18 @@ class RecordBKryoRegistrar extends IKryoRegistrar {
         output.writeString(obj.name)
         output.writeInt(obj.value)
       }
+
       override def read(kryo: Kryo, input: Input, tpe: Class[RecordB]): RecordB =
         RecordB(input.readString(), input.readInt() + 10)
     })
+}
+
+// Dummy registrar that when reference tracing disabled requires registration
+@KryoRegistrar
+class TestOverridableKryoRegistrar extends IKryoRegistrar {
+  override def apply(k: Kryo): Unit =
+    if (!k.getReferences && !k.isRegistrationRequired) {
+      // Overrides the value set from KryoOptions
+      k.setRegistrationRequired(true)
+    }
 }

@@ -17,30 +17,31 @@
 
 package com.spotify.scio.examples.extra
 
-import com.spotify.scio.avro.Account
-import com.spotify.scio.testing.{AvroIO, PipelineSpec, TextIO}
-import org.apache.avro.generic.{GenericData, GenericRecord}
+import com.spotify.scio.avro._
+import com.spotify.scio.examples.extra.AvroExample.{AccountFromSchema, AccountToSchema}
+import com.spotify.scio.io._
+import com.spotify.scio.testing._
 
 class AvroExampleTest extends PipelineSpec {
 
   "AvroExample" should "work for specific input" in {
-    val input = Seq(
-      new Account(1, "checking", "Alice", 1000.0),
-      new Account(2, "checking", "Bob", 1500.0))
+    val input =
+      Seq(new Account(1, "checking", "Alice", 1000.0), new Account(2, "checking", "Bob", 1500.0))
 
     val expected = input.map(_.toString)
 
     JobTest[com.spotify.scio.examples.extra.AvroExample.type]
       .args("--input=in.avro", "--output=out.txt", "--method=specificIn")
       .input(AvroIO[Account]("in.avro"), input)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder (expected))
+      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
       .run()
   }
 
   it should "work for specific output" in {
     val expected = (1 to 100)
       .map { i =>
-        Account.newBuilder()
+        Account
+          .newBuilder()
           .setId(i)
           .setAmount(i.toDouble)
           .setName("account" + i)
@@ -50,39 +51,31 @@ class AvroExampleTest extends PipelineSpec {
 
     JobTest[com.spotify.scio.examples.extra.AvroExample.type]
       .args("--output=out.avro", "--method=specificOut")
-      .output[Account](AvroIO[Account]("out.avro"))(_ should containInAnyOrder (expected))
+      .output(AvroIO[Account]("out.avro"))(_ should containInAnyOrder(expected))
       .run()
   }
 
   "AvroExample" should "work for typed input" in {
-    val input = Seq(
-      new Account(1, "checking", "Alice", 1000.0),
-      new Account(2, "checking", "Bob", 1500.0))
+    val input = Seq(AccountFromSchema(1, "checking", "Alice", 1000.0),
+                    AccountFromSchema(2, "checking", "Bob", 1500.0))
 
     val expected = input.map(_.toString)
 
     JobTest[com.spotify.scio.examples.extra.AvroExample.type]
       .args("--input=in.avro", "--output=out.txt", "--method=typedIn")
-      .input(AvroIO[Account]("in.avro"), input)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder (expected))
+      .input(AvroIO[AccountFromSchema]("in.avro"), input)
+      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
       .run()
   }
 
   it should "work for typed output" in {
-    val expected = (1 to 100)
-      .map { i => {
-        val record = new GenericData.Record(Account.getClassSchema)
-        record.put("id", i)
-        record.put("amount", i.toDouble)
-        record.put("name", "account" + i)
-        record.put("type", "checking")
-        record.asInstanceOf[GenericRecord]
-      } }
+    val expected = (1 to 100).map { i =>
+      AccountToSchema(id = i, amount = i.toDouble, name = "account" + i, `type` = "checking")
+    }
 
     JobTest[com.spotify.scio.examples.extra.AvroExample.type]
       .args("--output=out.avro", "--method=typedOut")
-      .output[GenericRecord](AvroIO[GenericRecord]("out.avro"))(
-        _.map(_.toString) should containInAnyOrder (expected.map(_.toString)))
+      .output(AvroIO[AccountToSchema]("out.avro"))(_ should containInAnyOrder(expected))
       .run()
   }
 

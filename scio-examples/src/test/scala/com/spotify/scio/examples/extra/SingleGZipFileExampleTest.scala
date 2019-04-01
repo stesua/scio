@@ -20,7 +20,8 @@ package com.spotify.scio.examples.extra
 import java.io.FileOutputStream
 import java.nio.file.Files
 
-import com.spotify.scio.testing.{PipelineSpec, TextIO}
+import com.spotify.scio.io._
+import com.spotify.scio.testing._
 
 class SingleGZipFileExampleTest extends PipelineSpec {
 
@@ -31,20 +32,19 @@ class SingleGZipFileExampleTest extends PipelineSpec {
     JobTest[SingleGZipFileExample.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), inData)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder (expected))
+      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
       .run()
   }
 
   it should "output compressed data" in {
-    val tempDir = Files.createTempDirectory("single-gzip-file")
+    val tempDir = Files.createTempDirectory("single-gzip-file-")
     val in = tempDir.resolve("input").toFile
     val inFOS = new FileOutputStream(in.getAbsolutePath)
     inFOS.write(inData.mkString.getBytes)
     inFOS.close()
     val out = tempDir.resolve("output")
-    SingleGZipFileExample.main(Array(
-      s"--input=${in.getAbsolutePath}",
-      s"--output=${out.toFile.getAbsolutePath}"))
+    SingleGZipFileExample.main(
+      Array(s"--input=${in.getAbsolutePath}", s"--output=${out.toFile.getAbsolutePath}"))
 
     val outPartFile = out.resolve("part-00000-of-00001.txt.deflate").toFile
     outPartFile.exists() shouldBe true

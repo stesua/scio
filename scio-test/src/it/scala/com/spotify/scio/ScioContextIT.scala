@@ -23,6 +23,7 @@ import com.spotify.scio.testing.util.ItUtils
 import com.spotify.scio.util.ScioUtil
 import org.apache.beam.runners.dataflow.DataflowRunner
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions
+import org.apache.beam.sdk.io.FileSystems
 import org.apache.beam.sdk.options.{PipelineOptions, PipelineOptionsFactory}
 import org.scalatest._
 
@@ -54,4 +55,47 @@ class ScioContextIT extends FlatSpec with Matchers {
     ScioUtil.isRemoteUri(new URI(gcpTempLocation)) shouldBe true
   }
 
+  it should "#1323: generate unique SCollection names" in {
+    val options = PipelineOptionsFactory.create()
+    options.setRunner(classOf[DataflowRunner])
+    options.as(classOf[GcpOptions]).setProject(ItUtils.project)
+    val sc = ScioContext(options)
+
+    val s1 = sc.empty[(String, Int)]()
+    val s2 = sc.empty[(String, Double)]()
+    s1.join(s2)
+
+    noException shouldBe thrownBy { sc.close() }
+  }
+
+  it should "register remote file systems in the test context" in {
+    val sc = ScioContext.forTest()
+    noException shouldBe thrownBy {
+      FileSystems.matchSingleFileSpec("gs://data-integration-test-eu/shakespeare.json")
+    }
+    sc.close()
+  }
+
+  it should "#1734: generate a reasonably sized job graph" in {
+    import org.apache.beam.runners.dataflow.{DataflowPipelineTranslator, DataflowRunner}
+    import org.apache.beam.runners.dataflow.options.DataflowPipelineDebugOptions
+    val opts = PipelineOptionsFactory.create()
+    opts.setRunner(classOf[DataflowRunner])
+    opts.as(classOf[GcpOptions]).setProject(ItUtils.project)
+    val sc = ScioContext(opts)
+    val job = sc.parallelize(1 to 100)
+    val runner = DataflowRunner.fromOptions(sc.options)
+    val packages =
+      sc.options.as(classOf[DataflowPipelineDebugOptions]).getStager().stageDefaultFiles()
+    val jobSpecification = runner.getTranslator.translate(sc.pipeline, runner, packages)
+    val newJob = jobSpecification.getJob()
+    val graph = DataflowPipelineTranslator.jobToString(newJob)
+
+    import com.fasterxml.jackson.databind.ObjectMapper
+    val objectMapper = new ObjectMapper()
+    val rootNode = objectMapper.readTree(graph)
+    val path = "/steps/0/properties/output_info/0/encoding/component_encodings/0/@type"
+    val coder = rootNode.at(path).asText
+    coder should not(equal("org.apache.beam.sdk.coders.CustomCoder"))
+  }
 }

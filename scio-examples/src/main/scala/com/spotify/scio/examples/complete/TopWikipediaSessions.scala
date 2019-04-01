@@ -15,6 +15,13 @@
  * under the License.
  */
 
+// Example: Top Wikipedia Sessions
+// Usage:
+
+// `sbt runMain "com.spotify.scio.examples.complete.TopWikipediaSessions
+// --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
+// --input=gs://apache-beam-samples/wikipedia_edits/wiki_data-*.json
+// --output=gs://[BUCKET]/[PATH]/top_wikipedia_sessions"`
 package com.spotify.scio.examples.complete
 
 import com.spotify.scio._
@@ -23,17 +30,6 @@ import com.spotify.scio.examples.common.ExampleData
 import com.spotify.scio.values.SCollection
 import org.apache.beam.sdk.transforms.windowing.IntervalWindow
 import org.joda.time.{Duration, Instant}
-
-import scala.util.Try
-
-/*
-SBT
-runMain
-  com.spotify.scio.examples.complete.TopWikipediaSessions
-  --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
-  --input=gs://apache-beam-samples/wikipedia_edits/wiki_data-*.json
-  --output=gs://[BUCKET]/[PATH]/top_wikipedia_sessions
-*/
 
 object TopWikipediaSessions {
   def main(cmdlineArgs: Array[String]): Unit = {
@@ -50,34 +46,48 @@ object TopWikipediaSessions {
   def computeTopSessions(input: SCollection[TableRow],
                          samplingThreshold: Double): SCollection[String] = {
     input
+    // Extract fields from `TableRow` JSON
       .flatMap { row =>
         val username = row.getString("contributor_username")
         val timestamp = row.getLong("timestamp")
         if (username == null) {
           None
         } else {
-         Some((username, timestamp))
+          Some((username, timestamp))
         }
       }
-      .timestampBy(kv => new Instant(kv._2 * 1000L))  // add timestamp to values
+      // Assign timestamp to each element
+      .timestampBy(kv => new Instant(kv._2 * 1000L))
+      // Drop field now that elements are timestamped
       .map(_._1)
       .sample(withReplacement = false, fraction = samplingThreshold)
+      // Apply session windows on a per-key (username) bases
       .withSessionWindows(Duration.standardHours(1))
+      // Count number of edits per user per window
       .countByValue
-      .toWindowed  // enable access to underlying window info
+      // Convert to a `WindowedSCollection` to expose window information
+      .toWindowed
+      // Concatenate window information to username
       .map(wv => wv.copy((wv.value._1 + " : " + wv.window, wv.value._2)))
-      .toSCollection  // end of windowed operation
+      // End of windowed operation, convert back to a regular `SCollection`
+      .toSCollection
+      // Apply fixed windows
       .windowByMonths(1)
-      .top(1)(Ordering.by(_._2))
-      .toWindowed  // enable access to underlying window info
+      // Compute top `(username, count)` per month
+      .top(1, Ordering.by(_._2))
+      // Convert to a `WindowedSCollection` to expose window information
+      .toWindowed
       .flatMap { wv =>
         wv.value.map { kv =>
-          // expose window info through value
-          val o = kv._1 + " : " + kv._2 + " : " + wv.window.asInstanceOf[IntervalWindow].start()
+          // Format output with username, count and window start timestamp
+          val o = kv._1 + " : " + kv._2 + " : " + wv.window
+            .asInstanceOf[IntervalWindow]
+            .start()
           wv.copy(value = o)
         }
       }
-      .toSCollection  // end of windowed operation
+      // End of windowed operation, convert back to a regular `SCollection`
+      .toSCollection
   }
 
 }

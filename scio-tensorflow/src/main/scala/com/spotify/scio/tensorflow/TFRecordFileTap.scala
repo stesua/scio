@@ -22,13 +22,8 @@ import com.spotify.scio.io.{FileStorage, Tap}
 import com.spotify.scio.values.SCollection
 
 /** Tap for Tensorflow TFRecord files. */
-case class TFRecordFileTap(path: String) extends Tap[Array[Byte]] {
-
-  import scala.language.implicitConversions
-
-  implicit def makeTFFileStorageFunctions(s: FileStorage): TFFileStorageFunctions =
-    new TFFileStorageFunctions(s)
-
+final case class TFRecordFileTap(path: String) extends Tap[Array[Byte]] {
   override def value: Iterator[Array[Byte]] = FileStorage(path).tfRecordFile
-  override def open(sc: ScioContext): SCollection[Array[Byte]] = sc.tfRecordFile(path)
+  override def open(sc: ScioContext): SCollection[Array[Byte]] =
+    sc.tfRecordFile(path)
 }

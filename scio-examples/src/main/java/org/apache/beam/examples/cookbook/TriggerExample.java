@@ -334,8 +334,8 @@ public class TriggerExample {
 
     @Override
     public PCollection<TableRow> expand(PCollection<KV<String, Integer>> flowInfo) {
-      PCollection<KV<String, Iterable<Integer>>> flowPerFreeway = flowInfo
-          .apply(GroupByKey.<String, Integer>create());
+      PCollection<KV<String, Iterable<Integer>>> flowPerFreeway =
+          flowInfo.apply(GroupByKey.create());
 
       PCollection<KV<String, String>> results = flowPerFreeway.apply(ParDo.of(
           new DoFn<KV<String, Iterable<Integer>>, KV<String, String>>() {
@@ -367,9 +367,10 @@ public class TriggerExample {
     public FormatTotalFlow(String triggerType) {
       this.triggerType = triggerType;
     }
+
     @ProcessElement
     public void processElement(ProcessContext c, BoundedWindow window) throws Exception {
-      String[] values = c.element().getValue().split(",");
+      String[] values = c.element().getValue().split(",", -1);
       TableRow row = new TableRow()
           .set("trigger_type", triggerType)
           .set("freeway", c.element().getKey())
@@ -390,14 +391,16 @@ public class TriggerExample {
    * Freeway is used as key since we are calculating the total flow for each freeway.
    */
   static class ExtractFlowInfo extends DoFn<String, KV<String, Integer>> {
+    private static final int VALID_NUM_FIELDS = 50;
+
     @ProcessElement
     public void processElement(ProcessContext c) throws Exception {
-      String[] laneInfo = c.element().split(",");
-      if (laneInfo[0].equals("timestamp")) {
+      String[] laneInfo = c.element().split(",", -1);
+      if ("timestamp".equals(laneInfo[0])) {
         // Header row
         return;
       }
-      if (laneInfo.length < 48) {
+      if (laneInfo.length < VALID_NUM_FIELDS) {
         //Skip the invalid input.
         return;
       }
@@ -452,7 +455,7 @@ public class TriggerExample {
         .apply(ParDo.of(new ExtractFlowInfo()))
         .apply(new CalculateTotalFlow(options.getWindowDuration()));
 
-    for (int i = 0; i < resultList.size(); i++){
+    for (int i = 0; i < resultList.size(); i++) {
       resultList.get(i).apply(BigQueryIO.writeTableRows()
           .to(tableRef)
           .withSchema(getSchema()));
@@ -478,7 +481,7 @@ public class TriggerExample {
     public void processElement(ProcessContext c) throws Exception {
       Instant timestamp = Instant.now();
       Random random = new Random();
-      if (random.nextDouble() < THRESHOLD){
+      if (random.nextDouble() < THRESHOLD) {
         int range = MAX_DELAY - MIN_DELAY;
         int delayInMinutes = random.nextInt(range) + MIN_DELAY;
         long delayInMillis = TimeUnit.MINUTES.toMillis(delayInMinutes);
@@ -490,7 +493,7 @@ public class TriggerExample {
 
 
   /** Sets the table reference. */
-  private static TableReference getTableReference(String project, String dataset, String table){
+  private static TableReference getTableReference(String project, String dataset, String table) {
     TableReference tableRef = new TableReference();
     tableRef.setProjectId(project);
     tableRef.setDatasetId(dataset);

@@ -19,8 +19,9 @@ package com.spotify.scio.jdbc
 
 import java.sql.ResultSet
 
-import com.spotify.scio.ScioContext
-import com.spotify.scio.testing.PipelineSpec
+import com.spotify.scio._
+import org.apache.beam.sdk.io.{jdbc => beam}
+import com.spotify.scio.testing._
 
 object JdbcJob {
 
@@ -34,15 +35,13 @@ object JdbcJob {
   }
 
   def getReadOptions(opts: CloudSqlOptions): JdbcReadOptions[String] =
-    JdbcReadOptions(
-      connectionOptions = getConnectionOptions(opts),
-      query = "SELECT <this> FROM <this>",
-      rowMapper = (rs: ResultSet) => rs.getString(1))
+    JdbcReadOptions(connectionOptions = getConnectionOptions(opts),
+                    query = "SELECT <this> FROM <this>",
+                    rowMapper = (rs: ResultSet) => rs.getString(1))
 
   def getWriteOptions(opts: CloudSqlOptions): JdbcWriteOptions[String] =
-    JdbcWriteOptions[String](
-      connectionOptions = getConnectionOptions(opts),
-      statement = "INSERT INTO <this> VALUES( ?, ? ..?)")
+    JdbcWriteOptions[String](connectionOptions = getConnectionOptions(opts),
+                             statement = "INSERT INTO <this> VALUES( ?, ? ..?)")
 
   def connectionUrl(opts: CloudSqlOptions): String =
     s"jdbc:mysql://google/${opts.getCloudSqlDb}?" +
@@ -51,28 +50,27 @@ object JdbcJob {
 
   def getConnectionOptions(opts: CloudSqlOptions): JdbcConnectionOptions =
     JdbcConnectionOptions(username = opts.getCloudSqlUsername,
-      password = opts.getCloudSqlPassword,
-      connectionUrl = connectionUrl(opts),
-      classOf[java.sql.Driver])
+                          password = Some(opts.getCloudSqlPassword),
+                          connectionUrl = connectionUrl(opts),
+                          classOf[java.sql.Driver])
 
 }
 
 class JdbcTest extends PipelineSpec {
 
   def testJdbc(xs: String*): Unit = {
-    val args = Array(
-      "--cloudSqlUsername=john",
-      "--cloudSqlPassword=secret",
-      "--cloudSqlDb=mydb",
-      "--cloudSqlInstanceConnectionName=project-id:zone:db-instance-name")
+    val args = Array("--cloudSqlUsername=john",
+                     "--cloudSqlPassword=secret",
+                     "--cloudSqlDb=mydb",
+                     "--cloudSqlInstanceConnectionName=project-id:zone:db-instance-name")
     val (opts, _) = ScioContext.parseArguments[CloudSqlOptions](args)
     val readOpts = JdbcJob.getReadOptions(opts)
     val writeOpts = JdbcJob.getWriteOptions(opts)
 
     JobTest[JdbcJob.type]
       .args(args: _*)
-      .input(JdbcIO(readOpts), Seq("a", "b", "c"))
-      .output[String](JdbcIO(writeOpts))(_ should containInAnyOrder (xs))
+      .input(JdbcIO[String](readOpts), Seq("a", "b", "c"))
+      .output(JdbcIO[String](writeOpts))(_ should containInAnyOrder(xs))
       .run()
   }
 
@@ -82,9 +80,76 @@ class JdbcTest extends PipelineSpec {
 
   it should "fail incorrect JDBC" in {
     // scalastyle:off no.whitespace.before.left.bracket
-    an [AssertionError] should be thrownBy { testJdbc("aJ", "bJ") }
-    an [AssertionError] should be thrownBy { testJdbc("aJ", "bJ", "cJ", "dJ") }
+    an[AssertionError] should be thrownBy { testJdbc("aJ", "bJ") }
+    an[AssertionError] should be thrownBy { testJdbc("aJ", "bJ", "cJ", "dJ") }
     // scalastyle:on no.whitespace.before.left.bracket
+  }
+
+  it should "connnect via JDBC without a password" in {
+    val args =
+      Array("--cloudSqlUsername=john",
+            "--cloudSqlDb=mydb",
+            "--cloudSqlInstanceConnectionName=project-id:zone:db-instance-name")
+    val (opts, _) = ScioContext.parseArguments[CloudSqlOptions](args)
+    val readOpts = JdbcJob.getReadOptions(opts)
+    val writeOpts = JdbcJob.getWriteOptions(opts)
+
+    val expected = Seq("aJ", "bJ", "cJ")
+
+    JobTest[JdbcJob.type]
+      .args(args: _*)
+      .input(JdbcIO[String](readOpts), Seq("a", "b", "c"))
+      .output(JdbcIO[String](writeOpts))(_ should containInAnyOrder(expected))
+      .run()
+  }
+
+  it should "generate connection string with password" in {
+    val password = JdbcConnectionOptions(
+      username = "user",
+      password = Some("pass"),
+      connectionUrl = "foo",
+      driverClass = classOf[java.sql.Driver]
+    )
+    JdbcIO.jdbcIoId(password, "query") shouldEqual "user:pass@foo:query"
+  }
+
+  it should "generate connection string without password" in {
+    val noPassword = JdbcConnectionOptions(
+      username = "user",
+      password = None,
+      connectionUrl = "foo",
+      driverClass = classOf[java.sql.Driver]
+    )
+    JdbcIO.jdbcIoId(noPassword, "query") shouldEqual "user@foo:query"
+  }
+
+  it should "generate datasource config with password" in {
+    val opts = JdbcConnectionOptions(
+      username = "user",
+      password = Some("pass"),
+      connectionUrl = "foo",
+      driverClass = classOf[java.sql.Driver]
+    )
+    val expected = beam.JdbcIO.DataSourceConfiguration
+      .create(classOf[java.sql.Driver].getCanonicalName, "foo")
+      .withUsername("user")
+      .withPassword("pass")
+
+    getDataSourceConfig(opts).toString shouldBe expected.toString
+  }
+
+  it should "generate datasource config without password" in {
+    val opts = JdbcConnectionOptions(
+      username = "user",
+      password = None,
+      connectionUrl = "foo",
+      driverClass = classOf[java.sql.Driver]
+    )
+    val expected = beam.JdbcIO.DataSourceConfiguration
+      .create(classOf[java.sql.Driver].getCanonicalName, "foo")
+      .withUsername("user")
+
+    getDataSourceConfig(opts).toString shouldBe expected.toString
   }
 
 }

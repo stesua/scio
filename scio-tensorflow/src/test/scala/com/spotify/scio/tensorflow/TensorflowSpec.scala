@@ -17,90 +17,77 @@
 
 package com.spotify.scio.tensorflow
 
-import java.nio.file.Files
+import java.util.Collections
 
+import com.spotify.featran.FeatureSpec
+import com.spotify.featran.tensorflow._
+import com.spotify.featran.scio._
+import com.spotify.featran.transformers.StandardScaler
 import com.spotify.scio.ContextAndArgs
-import com.spotify.scio.testing.{DistCacheIO, PipelineSpec, TextIO}
+import com.spotify.scio.io._
+import com.spotify.scio.testing._
+import com.spotify.zoltar.tf.TensorFlowModel
 import org.tensorflow._
+import org.tensorflow.example.Example
 
-private object TFJob {
+import scala.io.Source
+
+private[tensorflow] object TFSavedJob {
+
+  case class Iris(sepalLength: Option[Double],
+                  sepalWidth: Option[Double],
+                  petalLength: Option[Double],
+                  petalWidth: Option[Double],
+                  className: Option[String])
+
+  val Spec: FeatureSpec[Iris] = FeatureSpec
+    .of[Iris]
+    .optional(_.petalLength)(StandardScaler("petal_length", withMean = true))
+    .optional(_.petalWidth)(StandardScaler("petal_width", withMean = true))
+    .optional(_.sepalLength)(StandardScaler("sepal_length", withMean = true))
+    .optional(_.sepalWidth)(StandardScaler("sepal_width", withMean = true))
+
   def main(argv: Array[String]): Unit = {
     val (sc, args) = ContextAndArgs(argv)
-    sc.parallelize(1L to 10)
-      .predict(args("graphURI"), Seq("multiply"))
-      {e => Map("input" -> Tensor.create(e))}
-      {(r, o) => (r, o.map{case (_, t) => t.longValue()}.head)}
-      .saveAsTextFile(args("output"))
-    sc.close()
-  }
-}
+    val options = TensorFlowModel.Options.builder
+      .tags(Collections.singletonList("serve"))
+      .build
+    val settings =
+      sc.parallelize(List(Source.fromURL(args("settings")).getLines.mkString))
 
-private object TFJob2Inputs {
-  def main(argv: Array[String]): Unit = {
-    val (sc, args) = ContextAndArgs(argv)
-    sc.parallelize(1L to 10)
-      .predict(args("graphURI"), Seq("multiply"))
-      {e => Map("input" -> Tensor.create(e),
-                "input2" -> Tensor.create(3L))}
-      {(r, o) => (r, o.map{case (_, t) => t.longValue()}.head)}
+    val collection =
+      sc.parallelize(List(Iris(Some(5.1), Some(3.5), Some(1.4), Some(0.2), Some("Iris-setosa"))))
+
+    Spec
+      .extractWithSettings(collection, settings)
+      .featureValues[Example]
+      .predict(args("savedModelUri"), Seq("linear/head/predictions/class_ids"), options) { e =>
+        Map("input_example_tensor" -> Tensors.create(Array(e.toByteArray)))
+      } { (r, o) =>
+        (r, o.map {
+          case (a, outTensor) =>
+            val output = Array.ofDim[Long](1)
+            outTensor.copyTo(output)
+            output(0)
+        }.head)
+      }
+      .map(_._2)
       .saveAsTextFile(args("output"))
-    sc.close()
+
+    sc.close().waitUntilDone()
   }
 }
 
 class TensorflowSpec extends PipelineSpec {
 
-  private def createHelloWorldGraph = {
-    val const = "MyConst"
-    val graph = new Graph()
-    val helloworld = s"Hello from ${TensorFlow.version()}"
-    val t = Tensor.create(helloworld.getBytes("UTF-8"))
-    graph.opBuilder("Const", const).setAttr("dtype", t.dataType()).setAttr("value", t).build()
-    (graph, const, helloworld)
-  }
+  it should "allow saved model prediction" in {
+    val resource = getClass.getResource("/trained_model")
+    val settings = getClass.getResource("/settings.json")
 
-  "Tensorflow" should "work for hello-wold" in {
-    val (graph, const, helloworld) = createHelloWorldGraph
-    val session = new Session(graph)
-    val r = session.runner().fetch(const).run().get(0)
-    new String(r.bytesValue()) should be (helloworld)
-  }
-
-  it should "work for serde model" in {
-    val (graph, const, helloworld) = createHelloWorldGraph
-    val graphFile = Files.createTempFile("tf-grap", ".bin")
-    Files.write(graphFile, graph.toGraphDef)
-    val newGraph = new Graph()
-    newGraph.importGraphDef(Files.readAllBytes(graphFile))
-    val session = new Session(graph)
-    val r = session.runner().fetch(const).run().get(0)
-    new String(r.bytesValue()) should be (helloworld)
-  }
-
-  it should "allow to predict" in {
-    val g = new Graph()
-    val t3 = Tensor.create(3L)
-    val input = g.opBuilder("Placeholder", "input").setAttr("dtype", t3.dataType).build.output(0)
-    val c3 = g.opBuilder("Const", "c3")
-      .setAttr("dtype", t3.dataType)
-      .setAttr("value", t3).build.output(0)
-    g.opBuilder("Mul", "multiply").addInput(c3).addInput(input).build()
-
-
-  }
-
-  it should "allow to predict with 2 inputs" in {
-    val g = new Graph()
-    val input = g.opBuilder("Placeholder", "input")
-      .setAttr("dtype", DataType.INT64).build.output(0)
-    val input2 = g.opBuilder("Placeholder", "input2")
-      .setAttr("dtype", DataType.INT64).build.output(0)
-    g.opBuilder("Mul", "multiply").addInput(input2).addInput(input).build()
-    JobTest[TFJob2Inputs.type]
-      .distCache(DistCacheIO[Array[Byte]]("tf-graph.bin"), g.toGraphDef)
-      .args("--graphURI=tf-graph.bin", "--output=output")
-      .output(TextIO("output")){
-        _ should containInAnyOrder((1L to 10).map(x => (x, x * 3)).map(_.toString))
+    JobTest[TFSavedJob.type]
+      .args(s"--savedModelUri=$resource", s"--settings=$settings", "--output=output")
+      .output(TextIO("output")) {
+        _ should containInAnyOrder(List("0"))
       }
       .run()
   }

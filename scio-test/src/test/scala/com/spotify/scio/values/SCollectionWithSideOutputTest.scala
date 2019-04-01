@@ -25,9 +25,11 @@ class SCollectionWithSideOutputTest extends PipelineSpec {
     runWithContext { sc =>
       val p1 = sc.parallelize(Seq("a", "b", "c"))
       val p2 = SideOutput[String]()
-      val (main, side) = p1.withSideOutputs(p2).map { (x, s) => s.output(p2, x + "2"); x + "1" }
-      main should containInAnyOrder (Seq("a1", "b1", "c1"))
-      side(p2) should containInAnyOrder (Seq("a2", "b2", "c2"))
+      val (main, side) = p1.withSideOutputs(p2).map { (x, s) =>
+        s.output(p2, x + "2"); x + "1"
+      }
+      main should containInAnyOrder(Seq("a1", "b1", "c1"))
+      side(p2) should containInAnyOrder(Seq("a2", "b2", "c2"))
     }
   }
 
@@ -39,9 +41,29 @@ class SCollectionWithSideOutputTest extends PipelineSpec {
         s.output(p2, x + "2x").output(p2, x + "2y")
         Seq(x + "1x", x + "1y")
       }
-      main should containInAnyOrder (Seq("a1x", "a1y", "b1x", "b1y", "c1x", "c1y"))
-      side(p2) should containInAnyOrder (Seq("a2x", "a2y", "b2x", "b2y", "c2x", "c2y"))
+      main should containInAnyOrder(Seq("a1x", "a1y", "b1x", "b1y", "c1x", "c1y"))
+      side(p2) should containInAnyOrder(Seq("a2x", "a2y", "b2x", "b2y", "c2x", "c2y"))
     }
+  }
+
+  it should "not break when a side output is not applied (#1587)" in runWithContext { sc =>
+    val nSideOut = SideOutput[Int]()
+    val expected = List(2, 4, 6, 8, 10)
+    val elements = sc.parallelize(1 to 10)
+    val (even, side) =
+      elements
+        .withSideOutputs(nSideOut)
+        .flatMap {
+          case (n, ctx) =>
+            if (n % 2 == 0)
+              Some(n)
+            else {
+              ctx.output(nSideOut, n)
+              None
+            }
+        }
+
+    even should containInAnyOrder(expected)
   }
 
 }

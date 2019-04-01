@@ -7,15 +7,14 @@ Scio
 [![Maven Central](https://img.shields.io/maven-central/v/com.spotify/scio-core_2.11.svg)](https://maven-badges.herokuapp.com/maven-central/com.spotify/scio-core_2.11)
 [![Join the chat at https://gitter.im/spotify/scio](https://badges.gitter.im/spotify/scio.svg)](https://gitter.im/spotify/scio)
 
-![Scio Logo](https://raw.github.com/spotify/scio/master/logo/logo.png)
+<img src="https://raw.github.com/spotify/scio/master/site/src/paradox/images/scio.png" alt="Scio Logo" width="250"/>
 
-> Ecclesiastical Latin IPA: /ˈʃi.o/, [ˈʃiː.o], [ˈʃi.i̯o]
-
+> Ecclesiastical Latin IPA: /ˈʃi.o/, [ˈʃiː.o], [ˈʃi.i̯o]  
 > Verb: I can, know, understand, have knowledge.
 
 Scio is a Scala API for [Apache Beam](http://beam.incubator.apache.org/) and [Google Cloud Dataflow](https://github.com/GoogleCloudPlatform/DataflowJavaSDK) inspired by [Apache Spark](http://spark.apache.org/) and [Scalding](https://github.com/twitter/scalding).
 
-Scio 0.3.0 and future versions depend on Apache Beam (`org.apache.beam`) while earlier versions depend on Google Cloud Dataflow SDK (`com.google.cloud.dataflow`). See this [page](https://github.com/spotify/scio/wiki/Apache-Beam) for a list of breaking changes.
+Scio 0.3.0 and future versions depend on Apache Beam (`org.apache.beam`) while earlier versions depend on Google Cloud Dataflow SDK (`com.google.cloud.dataflow`). See this [page](https://spotify.github.io/scio/Apache-Beam.html) for a list of breaking changes.
 
 # Features
 
@@ -34,21 +33,30 @@ Scio 0.3.0 and future versions depend on Apache Beam (`org.apache.beam`) while e
 
 # Quick Start
 
-The ubiquitous word count example can be run directly with SBT in local mode, using `README.md` as input.
+Use our [giter8 template](https://github.com/spotify/scio.g8) to quickly setup a project:
 
-```bash
-sbt "scio-examples/run-main com.spotify.scio.examples.WordCount --input=README.md --output=wc"
-cat wc/part-00000-of-00001.txt
-```
+`sbt new spotify/scio.g8`
+
+Compile it:
+
+`sbt pack`
+
+Run the included word count example:
+
+`target/pack/bin/word-count --output=wc`
+
+Inspect the results:
+
+`cat wc/part-00000-of-00001.txt`
 
 # Documentation
 
-[Getting Started](https://github.com/spotify/scio/wiki/Getting-Started) is the best place to start with Scio. If you are new to Apache Beam and distributed data processing, check out the [Beam Programming Guide](https://beam.apache.org/documentation/programming-guide/) first for a detailed explanation of the Beam programming model and concepts. If you have experience with other Scala data processing libraries, check out this comparison between [Scio, Scalding and Spark](https://github.com/spotify/scio/wiki/Scio%2C-Scalding-and-Spark). Finally check out this document about the relationship between [Scio, Beam and Dataflow](https://github.com/spotify/scio/wiki/Scio,-Beam-and-Dataflow).
+[Getting Started](https://spotify.github.io/scio/Getting-Started.html) is the best place to start with Scio. If you are new to Apache Beam and distributed data processing, check out the [Beam Programming Guide](https://beam.apache.org/documentation/programming-guide/) first for a detailed explanation of the Beam programming model and concepts. If you have experience with other Scala data processing libraries, check out this comparison between [Scio, Scalding and Spark](https://spotify.github.io/scio/Scio,-Scalding-and-Spark.html). Finally check out this document about the relationship between [Scio, Beam and Dataflow](https://spotify.github.io/scio/Scio,-Beam-and-Dataflow.html).
 
 Example Scio pipelines and tests can be found under [scio-examples](https://github.com/spotify/scio/tree/master/scio-examples/src). A lot of them are direct ports from Beam's Java [examples](https://github.com/apache/beam/tree/master/examples). See this [page](http://spotify.github.io/scio/examples/) for some of them with side-by-side explanation. Also see [Big Data Rosetta Code](https://github.com/spotify/big-data-rosetta-code) for common data processing code snippets in Scio, Scalding and Spark.
 
-- [Scio Wiki](https://github.com/spotify/scio/wiki) - wiki page
-- [Scio Scaladocs](http://spotify.github.io/scio) - current API documentation
+- [Scio Wiki](https://spotify.github.io/scio/) - wiki page
+- [Scio Scaladocs](http://spotify.github.io/scio/api/) - current API documentation
 - [Scio Examples](http://spotify.github.io/scio/examples/) - examples with side-by-side explanation
 
 # Artifacts
@@ -64,6 +72,7 @@ Scio includes the following artifacts:
 - `scio-cassandra3`: add-on for Cassandra 3.x
 - `scio-elasticsearch2`: add-on for Elasticsearch 2.x
 - `scio-elasticsearch5`: add-on for Elasticsearch 5.x
+- `scio-elasticsearch6`: add-on for Elasticsearch 6.x
 - `scio-extra`: extra utilities for working with collections, Breeze, etc.
 - `scio-hdfs`: add-on for HDFS IO
 - `scio-jdbc`: add-on for JDBC IO

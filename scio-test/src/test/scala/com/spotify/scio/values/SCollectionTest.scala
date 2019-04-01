@@ -25,36 +25,56 @@ import com.spotify.scio.testing.PipelineSpec
 import com.spotify.scio.util.MockedPrintStream
 import com.spotify.scio.util.random.RandomSamplerUtils
 import com.twitter.algebird.{Aggregator, Semigroup}
-import org.apache.beam.sdk.transforms.Count
+import org.apache.beam.sdk.transforms.DoFn.ProcessElement
+import org.apache.beam.sdk.transforms.{Count, DoFn, GroupByKey, ParDo}
 import org.apache.beam.sdk.transforms.windowing.PaneInfo.Timing
 import org.apache.beam.sdk.transforms.windowing.{
-  BoundedWindow, GlobalWindow, IntervalWindow, PaneInfo
+  BoundedWindow,
+  GlobalWindow,
+  IntervalWindow,
+  PaneInfo
 }
+import org.apache.beam.sdk.values.KV
 import org.joda.time.{DateTimeConstants, Duration, Instant}
 
-import scala.reflect.ClassTag
+import scala.collection.JavaConverters._
+import com.spotify.scio.coders.Coder
 
 class SCollectionTest extends PipelineSpec {
 
   import com.spotify.scio.testing.TestingUtils._
 
-  "SCollection" should "support setName()" in {
+  "SCollection" should "support applyTransform()" in {
     runWithContext { sc =>
-      val p = sc.parallelize(Seq(1, 2, 3, 4, 5)).setName("MySCollection")
-      p.name shouldBe "MySCollection"
+      val p =
+        sc.parallelize(Seq(1, 2, 3, 4, 5)).applyTransform(Count.globally())
+      p should containSingleValue(5L.asInstanceOf[java.lang.Long])
     }
   }
 
-  it should "support applyTransform()" in {
+  private def newKvDoFn = new DoFn[Int, KV[Int, String]] {
+    @ProcessElement
+    def processElement(c: DoFn[Int, KV[Int, String]]#ProcessContext): Unit = {
+      val x = c.element()
+      c.output(KV.of(x, x.toString))
+    }
+  }
+
+  it should "support applyKvTransform()" in {
     runWithContext { sc =>
-      val p = sc.parallelize(Seq(1, 2, 3, 4, 5)).applyTransform(Count.globally())
-      p should containSingleValue (5L.asInstanceOf[java.lang.Long])
+      val p = sc
+        .parallelize(Seq(1, 2, 3, 4, 5))
+        .applyKvTransform(ParDo.of(newKvDoFn))
+        .applyKvTransform(GroupByKey.create())
+        .map(kv => (kv.getKey, kv.getValue.asScala.toList))
+      p should containInAnyOrder(Seq(1, 2, 3, 4, 5).map(x => (x, List(x.toString))))
     }
   }
 
   it should "support transform()" in {
     runWithContext {
-      _.parallelize(1 to 10).transform(_.map(_ * 10).sum) should containSingleValue (550)
+      _.parallelize(1 to 10)
+        .transform(_.map(_ * 10).sum) should containSingleValue(550)
     }
   }
 
@@ -65,7 +85,24 @@ class SCollectionTest extends PipelineSpec {
       val p3 = sc.parallelize(Seq("g", "h", "i"))
       val r = SCollection.unionAll(Seq(p1, p2, p3))
       val expected = Seq("a", "b", "c", "d", "e", "f", "g", "h", "i")
-      r should containInAnyOrder (expected)
+      r should containInAnyOrder(expected)
+    }
+  }
+
+  it should "support unionAll() when called on ScioContext" in {
+    runWithContext { sc =>
+      val p1 = sc.parallelize(Seq("a", "b", "c"))
+      val p2 = sc.parallelize(Seq("d", "e", "f"))
+      val p3 = sc.parallelize(Seq("g", "h", "i"))
+      val r = sc.unionAll(Seq(p1, p2, p3))
+      val expected = Seq("a", "b", "c", "d", "e", "f", "g", "h", "i")
+      r should containInAnyOrder(expected)
+    }
+  }
+
+  it should "support unionAll() with an empty list" in {
+    runWithContext { sc =>
+      sc.unionAll(List[SCollection[Unit]]().toIterable) should beEmpty
     }
   }
 
@@ -76,8 +113,8 @@ class SCollectionTest extends PipelineSpec {
       val r1 = p1 ++ p2
       val r2 = p1.union(p2)
       val expected = Seq("a", "b", "c", "d", "e", "f")
-      r1 should containInAnyOrder (expected)
-      r2 should containInAnyOrder (expected)
+      r1 should containInAnyOrder(expected)
+      r2 should containInAnyOrder(expected)
     }
   }
 
@@ -88,8 +125,8 @@ class SCollectionTest extends PipelineSpec {
       val r1 = p1 ++ p2
       val r2 = p1.union(p2)
       val expected = Seq("a", "a", "a", "b", "c", "d", "d", "d", "e", "f")
-      r1 should containInAnyOrder (expected)
-      r2 should containInAnyOrder (expected)
+      r1 should containInAnyOrder(expected)
+      r2 should containInAnyOrder(expected)
     }
   }
 
@@ -98,7 +135,7 @@ class SCollectionTest extends PipelineSpec {
       val p1 = sc.parallelize(Seq(1, 2, 3, 4, 5))
       val p2 = sc.parallelize(Seq(2, 4, 6, 8, 10))
       val p = p1.intersection(p2)
-      p should containInAnyOrder (Seq(2, 4))
+      p should containInAnyOrder(Seq(2, 4))
     }
   }
 
@@ -107,15 +144,32 @@ class SCollectionTest extends PipelineSpec {
       val p1 = sc.parallelize(Seq(1, 2, 3, 4, 5, 2, 4))
       val p2 = sc.parallelize(Seq(2, 4, 6, 8, 10, 2, 4))
       val p = p1.intersection(p2)
-      p should containInAnyOrder (Seq(2, 4))
+      p should containInAnyOrder(Seq(2, 4))
     }
   }
 
   it should "support partition()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3, 4, 5, 6)).partition(2, _ % 2)
-      p(0) should containInAnyOrder (Seq(2, 4, 6))
-      p(1) should containInAnyOrder (Seq(1, 3, 5))
+      p(0) should containInAnyOrder(Seq(2, 4, 6))
+      p(1) should containInAnyOrder(Seq(1, 3, 5))
+    }
+  }
+
+  it should "support partition() according to a predicate" in {
+    runWithContext { sc =>
+      val (p1, p2) = sc.parallelize(Seq(1, 2, 3, 4, 5, 6)).partition(_ % 2 == 0)
+      p1 should containInAnyOrder(Seq(2, 4, 6))
+      p2 should containInAnyOrder(Seq(1, 3, 5))
+    }
+  }
+
+  it should "support hashPartition() based on Object.hashCode()" in {
+    runWithContext { sc =>
+      val p = sc.parallelize(Seq(-1, 2, -3, 4, -5, 6)).hashPartition(3)
+      p(0) should containInAnyOrder(Seq(-3, 6))
+      p(1) should containInAnyOrder(Seq(4, -5))
+      p(2) should containInAnyOrder(Seq(-1, 2))
     }
   }
 
@@ -125,9 +179,9 @@ class SCollectionTest extends PipelineSpec {
       val p1 = p.aggregate(0.0)(_ + _, _ + _)
       val p2 = p.aggregate(Aggregator.max[Int])
       val p3 = p.aggregate(Aggregator.immutableSortedReverseTake[Int](5))
-      p1 should containSingleValue (5050.0)
-      p2 should containSingleValue (100)
-      p3 should containSingleValue (Seq(100, 99, 98, 97, 96))
+      p1 should containSingleValue(5050.0)
+      p2 should containSingleValue(100)
+      p3 should containSingleValue(Seq(100, 99, 98, 97, 96))
     }
   }
 
@@ -139,20 +193,20 @@ class SCollectionTest extends PipelineSpec {
         ("test3", 3)
       )
       val p = sc.parallelize(records).collect { case ("test2", x) => 2 * x }
-      p should containSingleValue (4)
+      p should containSingleValue(4)
     }
   }
 
   it should "support combine()" in {
     runWithContext { sc =>
       val p = sc.parallelize(1 to 100).combine(_.toDouble)(_ + _)(_ + _)
-      p should containSingleValue (5050.0)
+      p should containSingleValue(5050.0)
     }
   }
 
   it should "support count" in {
     runWithContext { sc =>
-      sc.parallelize(Seq("a", "b", "c")).count should containSingleValue (3L)
+      sc.parallelize(Seq("a", "b", "c")).count should containSingleValue(3L)
     }
   }
 
@@ -161,42 +215,60 @@ class SCollectionTest extends PipelineSpec {
       val p = sc.parallelize(Seq("a", "b", "b", "c", "c", "c"))
       val r1 = p.countApproxDistinct()
       val r2 = p.countApproxDistinct(sampleSize = 10000)
-      r1 should containSingleValue (3L)
-      r2 should containSingleValue (3L)
+      r1 should containSingleValue(3L)
+      r2 should containSingleValue(3L)
     }
   }
 
   it should "support countByValue" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq("a", "b", "b", "c", "c", "c")).countByValue
-      p should containInAnyOrder (Seq(("a", 1L), ("b", 2L), ("c", 3L)))
+      p should containInAnyOrder(Seq(("a", 1L), ("b", 2L), ("c", 3L)))
     }
   }
 
-  it should "support distinct" in {
+  it should "support distinct on String" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq("a", "b", "b", "c", "c", "c")).distinct
-      p should containInAnyOrder (Seq("a", "b", "c"))
+      p should containInAnyOrder(Seq("a", "b", "c"))
+    }
+  }
+
+  it should "support distinct on Int" in {
+    runWithContext { sc =>
+      val p = sc.parallelize(Seq(1, 3, 4, 2, 2, 5, 4, 2, 1, 1)).distinct
+      p should containInAnyOrder(Seq(1, 2, 3, 4, 5))
+    }
+  }
+
+  it should "support distinctBy() with Scala primitive as representative values" in {
+    runWithContext { sc =>
+      val p = sc
+        .parallelize(Seq(1 -> "vA1", 2 -> "vB", 1 -> "vA2"))
+        .distinctBy(_._1)
+      p.keys should containInAnyOrder(Seq(1, 2))
     }
   }
 
   it should "support filter()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3, 4, 5)).filter(_ % 2 == 0)
-      p should containInAnyOrder (Seq(2, 4))
+      p should containInAnyOrder(Seq(2, 4))
     }
   }
 
   it should "support flatMap()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq("a b c", "d e", "f")).flatMap(_.split(" "))
-      p should containInAnyOrder (Seq("a", "b", "c", "d", "e", "f"))
+      p should containInAnyOrder(Seq("a", "b", "c", "d", "e", "f"))
     }
   }
 
   it should "support flatten()" in {
     runWithContext { sc =>
-      val p1 = sc.parallelize(Seq(Seq("a b", "c d"), Seq("e f", "g h"))).flatten
+      val p1 = sc
+        .parallelize(Seq(Seq("a b", "c d"), Seq("e f", "g h")))
+        .flatten
       p1 should containInAnyOrder(Seq("a b", "c d", "e f", "g h"))
 
       val p2 = sc.parallelize(Seq(Some(1), None)).flatten
@@ -209,66 +281,69 @@ class SCollectionTest extends PipelineSpec {
       val p = sc.parallelize(1 to 100)
       val r1 = p.fold(0)(_ + _)
       val r2 = p.fold
-      r1 should containSingleValue (5050)
-      r2 should containSingleValue (5050)
+      r1 should containSingleValue(5050)
+      r2 should containSingleValue(5050)
     }
   }
 
   it should "support groupBy()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3, 4)).groupBy(_ % 2).mapValues(_.toSet)
-      p should containInAnyOrder (Seq((0, Set(2, 4)), (1, Set(1, 3))))
+      p should containInAnyOrder(Seq((0, Set(2, 4)), (1, Set(1, 3))))
     }
   }
 
   it should "support keyBy()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq("hello", "world")).keyBy(_.substring(0, 1))
-      p should containInAnyOrder (Seq(("h", "hello"), ("w", "world")))
+      p should containInAnyOrder(Seq(("h", "hello"), ("w", "world")))
     }
   }
 
   it should "support map()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq("1", "2", "3")).map(_.toInt)
-      p should containInAnyOrder (Seq(1, 2, 3))
+      p should containInAnyOrder(Seq(1, 2, 3))
     }
   }
 
   it should "support max" in {
     runWithContext { sc =>
-      def max[T: ClassTag : Numeric](elems: T*): SCollection[T] = sc.parallelize(elems).max
-      max(1, 2, 3) should containSingleValue (3)
-      max(1L, 2L, 3L) should containSingleValue (3L)
-      max(1F, 2F, 3F) should containSingleValue (3F)
-      max(1.0, 2.0, 3.0) should containSingleValue (3.0)
+      def max[T: Coder: Numeric](elems: T*): SCollection[T] =
+        sc.parallelize(elems).max
+      max(1, 2, 3) should containSingleValue(3)
+      max(1L, 2L, 3L) should containSingleValue(3L)
+      max(1F, 2F, 3F) should containSingleValue(3F)
+      max(1.0, 2.0, 3.0) should containSingleValue(3.0)
     }
   }
 
   it should "support mean" in {
     runWithContext { sc =>
-      def mean[T: ClassTag : Numeric](elems: T*): SCollection[Double] = sc.parallelize(elems).mean
-      mean(1, 2, 3) should containSingleValue (2.0)
-      mean(1L, 2L, 3L) should containSingleValue (2.0)
-      mean(1F, 2F, 3F) should containSingleValue (2.0)
-      mean(1.0, 2.0, 3.0) should containSingleValue (2.0)
+      def mean[T: Coder: Numeric](elems: T*): SCollection[Double] =
+        sc.parallelize(elems).mean
+      mean(1, 2, 3) should containSingleValue(2.0)
+      mean(1L, 2L, 3L) should containSingleValue(2.0)
+      mean(1F, 2F, 3F) should containSingleValue(2.0)
+      mean(1.0, 2.0, 3.0) should containSingleValue(2.0)
     }
   }
 
   it should "support min" in {
     runWithContext { sc =>
-      def min[T: ClassTag : Numeric](elems: T*): SCollection[T] = sc.parallelize(elems).min
-      min(1, 2, 3) should containSingleValue (1)
-      min(1L, 2L, 3L) should containSingleValue (1L)
-      min(1F, 2F, 3F) should containSingleValue (1F)
-      min(1.0, 2.0, 3.0) should containSingleValue (1.0)
+      def min[T: Coder: Numeric](elems: T*): SCollection[T] =
+        sc.parallelize(elems).min
+      min(1, 2, 3) should containSingleValue(1)
+      min(1L, 2L, 3L) should containSingleValue(1L)
+      min(1F, 2F, 3F) should containSingleValue(1F)
+      min(1.0, 2.0, 3.0) should containSingleValue(1.0)
     }
   }
 
   it should "support quantilesApprox()" in {
     runWithContext { sc =>
       val p = sc.parallelize(0 to 100).quantilesApprox(5)
-      p should containSingleValue (iterable(0, 25, 50, 75, 100))
+      p should containSingleValue(iterable(0, 25, 50, 75, 100))
     }
   }
 
@@ -279,18 +354,26 @@ class SCollectionTest extends PipelineSpec {
       val p2 = sc.parallelize(0 to 1000).randomSplit(Array(0.2, 0.3, 0.5))
       p1.length shouldBe 2
       p2.length shouldBe 3
-      p1(0).count.map(round) should containSingleValue (300L)
-      p1(1).count.map(round) should containSingleValue (700L)
-      p2(0).count.map(round) should containSingleValue (200L)
-      p2(1).count.map(round) should containSingleValue (300L)
-      p2(2).count.map(round) should containSingleValue (500L)
+      p1(0).count.map(round) should containSingleValue(300L)
+      p1(1).count.map(round) should containSingleValue(700L)
+      p2(0).count.map(round) should containSingleValue(200L)
+      p2(1).count.map(round) should containSingleValue(300L)
+      p2(2).count.map(round) should containSingleValue(500L)
+
+      val (pa, pb) = sc.parallelize(0 to 1000).randomSplit(0.3)
+      val (pc, pd, pe) = sc.parallelize(0 to 1000).randomSplit(0.2, 0.3)
+      pa.count.map(round) should containSingleValue(300L)
+      pb.count.map(round) should containSingleValue(700L)
+      pc.count.map(round) should containSingleValue(200L)
+      pd.count.map(round) should containSingleValue(300L)
+      pe.count.map(round) should containSingleValue(500L)
     }
   }
 
   it should "support reduce()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3, 4, 5)).reduce(_ + _)
-      p should containSingleValue (15)
+      p should containSingleValue(15)
     }
   }
 
@@ -299,8 +382,8 @@ class SCollectionTest extends PipelineSpec {
       val p = sc.parallelize(Seq(1, 1, 1, 1, 1))
       val r1 = p.sample(1)
       val r2 = p.sample(5)
-      r1 should containSingleValue (iterable(1))
-      r2 should containSingleValue (iterable(1, 1, 1, 1, 1))
+      r1 should containSingleValue(iterable(1))
+      r2 should containSingleValue(iterable(1, 1, 1, 1, 1))
     }
   }
 
@@ -327,7 +410,7 @@ class SCollectionTest extends PipelineSpec {
       val p1 = sc.parallelize(Seq(1, 2, 3, 4, 5))
       val p2 = sc.parallelize(Seq(2, 4, 6, 8, 10))
       val p = p1.subtract(p2)
-      p should containInAnyOrder (Seq(1, 3, 5))
+      p should containInAnyOrder(Seq(1, 3, 5))
     }
   }
 
@@ -336,26 +419,27 @@ class SCollectionTest extends PipelineSpec {
       val p1 = sc.parallelize(Seq(1, 2, 3, 4, 5, 1, 3, 5))
       val p2 = sc.parallelize(Seq(2, 4, 6, 8, 10))
       val p = p1.subtract(p2)
-      p should containInAnyOrder (Seq(1, 3, 5, 1, 3, 5))
+      p should containInAnyOrder(Seq(1, 3, 5, 1, 3, 5))
     }
   }
 
   it should "support sum" in {
     runWithContext { sc =>
-      def sum[T: ClassTag : Semigroup](elems: T*): SCollection[T] = sc.parallelize(elems).sum
-      sum(1, 2, 3) should containSingleValue (6)
-      sum(1L, 2L, 3L) should containSingleValue (6L)
-      sum(1F, 2F, 3F) should containSingleValue (6F)
-      sum(1.0, 2.0, 3.0) should containSingleValue (6.0)
-      sum(1 to 100: _*) should containSingleValue (5050)
+      def sum[T: Coder: Semigroup](elems: T*): SCollection[T] =
+        sc.parallelize(elems).sum
+      sum(1, 2, 3) should containSingleValue(6)
+      sum(1L, 2L, 3L) should containSingleValue(6L)
+      sum(1F, 2F, 3F) should containSingleValue(6F)
+      sum(1.0, 2.0, 3.0) should containSingleValue(6.0)
+      sum(1 to 100: _*) should containSingleValue(5050)
     }
   }
 
   it should "support take()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3, 4, 5))
-      p.take(1) should haveSize (1)
-      p.take(2) should haveSize (2)
+      p.take(1) should haveSize(1)
+      p.take(2) should haveSize(2)
     }
   }
 
@@ -363,9 +447,9 @@ class SCollectionTest extends PipelineSpec {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3, 4, 5))
       val r1 = p.top(3)
-      val r2 = p.top(3)(Ordering.by(-_))
-      r1 should containSingleValue (iterable(5, 4, 3))
-      r2 should containSingleValue (iterable(1, 2, 3))
+      val r2 = p.top(3, Ordering.by(-_))
+      r1 should containSingleValue(iterable(5, 4, 3))
+      r2 should containSingleValue(iterable(1, 2, 3))
     }
   }
 
@@ -376,8 +460,8 @@ class SCollectionTest extends PipelineSpec {
       val p3 = sc.parallelize(Seq(1, 2))
       val s1 = p1.cross(p2)
       val s2 = p1.cross(p3)
-      s1 should containInAnyOrder (Seq(("a", 1), ("b", 1), ("c", 1)))
-      s2 should containInAnyOrder (Seq(("a", 1), ("a", 2), ("b", 1), ("b", 2), ("c", 1), ("c", 2)))
+      s1 should containInAnyOrder(Seq(("a", 1), ("b", 1), ("c", 1)))
+      s2 should containInAnyOrder(Seq(("a", 1), ("a", 2), ("b", 1), ("b", 2), ("c", 1), ("c", 2)))
     }
   }
 
@@ -386,44 +470,54 @@ class SCollectionTest extends PipelineSpec {
       val p1 = sc.parallelize(Seq("a", "b", "c"))
       val p2 = sc.parallelize(Seq(("a", 1), ("b", 2), ("b", 3)))
       val p = p1.hashLookup(p2).mapValues(_.toSet)
-      p should containInAnyOrder (Seq(("a", Set(1)), ("b", Set(2, 3)), ("c", Set[Int]())))
+      p should containInAnyOrder(Seq(("a", Set(1)), ("b", Set(2, 3)), ("c", Set[Int]())))
     }
   }
 
   it should "support withFixedWindows()" in {
     runWithContext { sc =>
-      val p = sc.parallelizeTimestamped(
-        Seq("a", "b", "c", "d", "e", "f"), (0 to 5).map(new Instant(_)))
+      val p =
+        sc.parallelizeTimestamped(Seq("a", "b", "c", "d", "e", "f"), (0 to 5).map(new Instant(_)))
       val r = p.withFixedWindows(Duration.millis(3)).top(10).map(_.toSet)
-      r should containInAnyOrder (Seq(Set("a", "b", "c"), Set("d", "e", "f")))
+      r should containInAnyOrder(Seq(Set("a", "b", "c"), Set("d", "e", "f")))
     }
   }
 
   it should "support withSlidingWindows()" in {
     runWithContext { sc =>
-      val p = sc.parallelizeTimestamped(
-        Seq("a", "b", "c", "d", "e", "f"), (0 to 5).map(new Instant(_)))
-      val r = p.withSlidingWindows(Duration.millis(2), Duration.millis(3)).top(10).map(_.toSet)
-      r should containInAnyOrder (Seq(Set("a", "b"), Set("d", "e")))
+      val p =
+        sc.parallelizeTimestamped(Seq("a", "b", "c", "d", "e", "f"), (0 to 5).map(new Instant(_)))
+      val r = p
+        .withSlidingWindows(Duration.millis(2), Duration.millis(2))
+        .top(10)
+        .map(_.toSet)
+      r should containInAnyOrder(Seq(Set("a", "b"), Set("c", "d"), Set("e", "f")))
     }
   }
 
   it should "support withSessionWindows()" in {
     runWithContext { sc =>
-      val p = sc.parallelizeTimestamped(
-        Seq("a", "b", "c", "d", "e"), Seq(0, 5, 10, 44, 55).map(new Instant(_)))
+      val p =
+        sc.parallelizeTimestamped(Seq("a", "b", "c", "d", "e"),
+                                  Seq(0, 5, 10, 44, 55).map(new Instant(_)))
       val r = p
-        .withSessionWindows(Duration.millis(10)).top(10).map(_.toSet)
-      r should containInAnyOrder (Seq(Set("a", "b", "c"), Set("d"), Set("e")))
+        .withSessionWindows(Duration.millis(10))
+        .top(10)
+        .map(_.toSet)
+      r should containInAnyOrder(Seq(Set("a", "b", "c"), Set("d"), Set("e")))
     }
   }
 
   it should "support withGlobalWindow()" in {
     runWithContext { sc =>
-      val p = sc.parallelizeTimestamped(
-        Seq("a", "b", "c", "d", "e", "f"), (0 to 5).map(new Instant(_)))
-      val r = p.withFixedWindows(Duration.millis(3)).withGlobalWindow().top(10).map(_.toSet)
-      r should containInAnyOrder (Seq(Set("a", "b", "c", "d", "e", "f")))
+      val p =
+        sc.parallelizeTimestamped(Seq("a", "b", "c", "d", "e", "f"), (0 to 5).map(new Instant(_)))
+      val r = p
+        .withFixedWindows(Duration.millis(3))
+        .withGlobalWindow()
+        .top(10)
+        .map(_.toSet)
+      r should containInAnyOrder(Seq(Set("a", "b", "c", "d", "e", "f")))
     }
   }
 
@@ -432,7 +526,7 @@ class SCollectionTest extends PipelineSpec {
       val pane = PaneInfo.createPane(true, true, Timing.UNKNOWN, 0, 0)
       val p = sc.parallelizeTimestamped(Seq("a", "b", "c"), Seq(1, 2, 3).map(new Instant(_)))
       val r = p.withPaneInfo.map(kv => (kv._1, kv._2))
-      r should containInAnyOrder (Seq(("a", pane), ("b", pane), ("c", pane)))
+      r should containInAnyOrder(Seq(("a", pane), ("b", pane), ("c", pane)))
     }
   }
 
@@ -440,13 +534,13 @@ class SCollectionTest extends PipelineSpec {
     runWithContext { sc =>
       val p = sc.parallelizeTimestamped(Seq("a", "b", "c"), Seq(1, 2, 3).map(new Instant(_)))
       val r = p.withTimestamp.map(kv => (kv._1, kv._2.getMillis))
-      r should containInAnyOrder (Seq(("a", 1L), ("b", 2L), ("c", 3L)))
+      r should containInAnyOrder(Seq(("a", 1L), ("b", 2L), ("c", 3L)))
     }
   }
 
   it should "support withWindow" in {
     def w2s(window: BoundedWindow): String = window match {
-      case w: GlobalWindow => s"GlobalWindow(${w.maxTimestamp()})"
+      case w: GlobalWindow   => s"GlobalWindow(${w.maxTimestamp()})"
       case w: IntervalWindow => s"IntervalWindow(${w.start()}, ${w.end()})"
     }
 
@@ -458,7 +552,7 @@ class SCollectionTest extends PipelineSpec {
 
       // default is GlobalWindow
       val w = w2s(GlobalWindow.INSTANCE)
-      r should containInAnyOrder (Seq(("a", w), ("b", w), ("c", w)))
+      r should containInAnyOrder(Seq(("a", w), ("b", w), ("c", w)))
     }
 
     runWithContext { sc =>
@@ -467,7 +561,7 @@ class SCollectionTest extends PipelineSpec {
 
       // default is GlobalWindow
       val w = w2s(GlobalWindow.INSTANCE)
-      r should containInAnyOrder (Seq(("a", w), ("b", w), ("c", w)))
+      r should containInAnyOrder(Seq(("a", w), ("b", w), ("c", w)))
     }
 
     runWithContext { sc =>
@@ -478,33 +572,38 @@ class SCollectionTest extends PipelineSpec {
 
       // type is IntervalWindow after windowing is applied
       val ws = timestamps.map(t => w2s(new IntervalWindow(t, t.plus(Duration.standardMinutes(1)))))
-      r should containInAnyOrder (Seq("a", "b", "c").zip(ws))
+      r should containInAnyOrder(Seq("a", "b", "c").zip(ws))
     }
   }
 
   it should "support timestampBy()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3))
-      val r = p.timestampBy(new Instant(_)).withTimestamp.map(kv => (kv._1, kv._2.getMillis))
-      r should containInAnyOrder (Seq((1, 1L), (2, 2L), (3, 3L)))
+      val r = p
+        .timestampBy(new Instant(_))
+        .withTimestamp
+        .map(kv => (kv._1, kv._2.getMillis))
+      r should containInAnyOrder(Seq((1, 1L), (2, 2L), (3, 3L)))
     }
   }
 
   it should "support timestampBy() with skew" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3))
-      val r = p.timestampBy(new Instant(_), Duration.millis(1))
-        .withTimestamp.map(kv => (kv._1, kv._2.getMillis))
-      r should containInAnyOrder (Seq((1, 1L), (2, 2L), (3, 3L)))
+      val r = p
+        .timestampBy(new Instant(_), Duration.millis(1))
+        .withTimestamp
+        .map(kv => (kv._1, kv._2.getMillis))
+      r should containInAnyOrder(Seq((1, 1L), (2, 2L), (3, 3L)))
     }
   }
 
   it should "support debug to the stdout" in {
     val stdOutMock = new MockedPrintStream
-    Console.withOut(stdOutMock){
+    Console.withOut(stdOutMock) {
       runWithContext { sc =>
         val r = sc.parallelize(1 to 3).debug()
-        r should containInAnyOrder (Seq(1, 2, 3))
+        r should containInAnyOrder(Seq(1, 2, 3))
       }
     }
     stdOutMock.message.filterNot(_ == "\n") should contain theSameElementsAs Seq("1", "2", "3")
@@ -515,7 +614,7 @@ class SCollectionTest extends PipelineSpec {
     Console.withOut(stdOutMock) {
       runWithContext { sc =>
         val r = sc.parallelize(1 to 3).debug(prefix = "===")
-        r should containInAnyOrder (Seq(1, 2, 3))
+        r should containInAnyOrder(Seq(1, 2, 3))
       }
     }
     stdOutMock.message.filterNot(_ == "\n") should contain theSameElementsAs
@@ -524,22 +623,22 @@ class SCollectionTest extends PipelineSpec {
 
   it should "support debug to the stderr" in {
     val stdErrMock = new MockedPrintStream
-    Console.withErr(stdErrMock){
+    Console.withErr(stdErrMock) {
       runWithContext { sc =>
         val r = sc.parallelize(1 to 3).debug(() => Console.err)
-        r should containInAnyOrder (Seq(1, 2, 3))
+        r should containInAnyOrder(Seq(1, 2, 3))
       }
     }
     stdErrMock.message.filterNot(_ == "\n") should contain theSameElementsAs Seq("1", "2", "3")
   }
 
   it should "support debug to a file" in {
-    val outFile = Files.createTempFile("debug_test", "txt")
+    val outFile = Files.createTempFile("debug-test-", "txt")
     val fileStream = new PrintStream(outFile.toFile)
-    Console.withOut(fileStream){
+    Console.withOut(fileStream) {
       runWithContext { sc =>
         val r = sc.parallelize(1 to 3).debug()
-        r should containInAnyOrder (Seq(1, 2, 3))
+        r should containInAnyOrder(Seq(1, 2, 3))
       }
     }
     Files.readAllLines(outFile, Charsets.UTF_8) should contain theSameElementsAs Seq("1", "2", "3")

@@ -15,6 +15,13 @@
  * under the License.
  */
 
+// Example: Streaming Word Extract
+// Usage:
+
+// `sbt runMain "com.spotify.scio.examples.complete.StreamingWordExtract
+// --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
+// --input=gs://apache-beam-samples/shakespeare/kinglear.txt
+// --output=[DATASET].streaming_word_extract"`
 package com.spotify.scio.examples.complete
 
 import com.google.api.services.bigquery.model.{TableFieldSchema, TableSchema}
@@ -26,15 +33,6 @@ import org.apache.beam.sdk.options.StreamingOptions
 
 import scala.collection.JavaConverters._
 
-/*
-SBT
-runMain
-  com.spotify.scio.examples.complete.StreamingWordExtract
-  --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
-  --input=gs://apache-beam-samples/shakespeare/kinglear.txt
-  --output=[DATASET].streaming_word_extract
-*/
-
 object StreamingWordExtract {
   def main(cmdlineArgs: Array[String]): Unit = {
     // set up example wiring
@@ -44,8 +42,8 @@ object StreamingWordExtract {
 
     val sc = ScioContext(opts)
 
-    val schema = new TableSchema().setFields(
-      List(new TableFieldSchema().setName("string_field").setType("STRING")).asJava)
+    val schema = new TableSchema()
+      .setFields(List(new TableFieldSchema().setName("string_field").setType("STRING")).asJava)
 
     sc.textFile(args.getOrElse("input", ExampleData.KING_LEAR))
       .flatMap(_.split("[^a-zA-Z']+").filter(_.nonEmpty))
@@ -54,6 +52,6 @@ object StreamingWordExtract {
       .saveAsBigQuery(args("output"), schema)
 
     val result = sc.close()
-    exampleUtils.waitToFinish(result.internal)
+    exampleUtils.waitToFinish(result.pipelineResult)
   }
 }

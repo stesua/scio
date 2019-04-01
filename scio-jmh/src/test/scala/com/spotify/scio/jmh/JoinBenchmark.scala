@@ -73,7 +73,10 @@ class JoinBenchmark {
 
   def forYield(as: JIterable[Int], bs: JIterable[Int], c: Context[(Int, Int)]): Unit = {
     val xs: TraversableOnce[(Int, Int)] =
-      for (a <- as.asScala.iterator; b <- bs.asScala.iterator) yield (a, b)
+      for {
+        a <- as.asScala.iterator
+        b <- bs.asScala.iterator
+      } yield (a, b)
     val i = xs.toIterator
     while (i.hasNext) c.output(i.next())
   }
@@ -83,20 +86,20 @@ class JoinBenchmark {
 
   def artisan(as: JIterable[Int], bs: JIterable[Int], c: Context[(Int, Int)]): Unit = {
     (peak(as), peak(bs)) match {
-      case ((1, a), (1, b)) => c.output(a, b)
+      case ((1, a), (1, b)) => c.output((a, b))
       case ((1, a), (2, _)) =>
         val i = bs.iterator()
-        while (i.hasNext) c.output(a, i.next())
+        while (i.hasNext) c.output((a, i.next()))
       case ((2, _), (1, b)) =>
         val i = as.iterator()
-        while (i.hasNext) c.output(i.next(), b)
+        while (i.hasNext) c.output((i.next(), b))
       case ((2, _), (2, _)) =>
         val i = as.iterator()
         while (i.hasNext) {
           val a = i.next()
           val j = bs.iterator()
           while (j.hasNext) {
-            c.output(a, j.next())
+            c.output((a, j.next()))
           }
         }
       case _ => ()
@@ -116,16 +119,16 @@ class JoinBenchmark {
       val a1 = !ai.hasNext
       val b1 = !bi.hasNext
       if (a1 && b1) {
-        c.output(a, b)
+        c.output((a, b))
       } else if (a1 && !b1) {
-        c.output(a, b)
-        c.output(a, bi.next())
+        c.output((a, b))
+        c.output((a, bi.next()))
         while (bi.hasNext) {
-          c.output(a, bi.next())
+          c.output((a, bi.next()))
         }
       } else if (!a1 && b1) {
-        c.output(a, b)
-        c.output(ai.next(), b)
+        c.output((a, b))
+        c.output((ai.next(), b))
         while (ai.hasNext) {
           c.output((ai.next(), b))
         }
@@ -135,7 +138,7 @@ class JoinBenchmark {
           a = ai.next()
           bi = bs.iterator()
           while (bi.hasNext) {
-            c.output(a, bi.next())
+            c.output((a, bi.next()))
           }
         }
       }
@@ -152,7 +155,7 @@ class JoinBenchmark {
       val a = ai.next()
       val bi = bs.iterator()
       while (bi.hasNext) {
-        c.output(a, bi.next())
+        c.output((a, bi.next()))
       }
     }
   }
@@ -223,7 +226,7 @@ class JoinBenchmark {
 }
 
 private class CartesianIterator[A, B](as: JIterable[A], bs: JIterable[B])
-  extends AbstractIterator[(A, B)] {
+    extends AbstractIterator[(A, B)] {
   private val asi = as.iterator()
   private var bsi = bs.iterator()
   private var a: A = _
@@ -236,7 +239,7 @@ private class CartesianIterator[A, B](as: JIterable[A], bs: JIterable[B])
 
   override def computeNext(): (A, B) = {
     if (!bsi.hasNext) {
-      if (!asi.hasNext)  {
+      if (!asi.hasNext) {
         endOfData()
       } else {
         a = asi.next()

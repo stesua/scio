@@ -19,24 +19,18 @@ package com.spotify.scio.tensorflow
 
 import java.util.UUID
 
-import com.spotify.scio.ScioContext
 import com.spotify.scio.io.TapSpec
-import org.apache.beam.sdk.Pipeline.PipelineExecutionException
-import org.apache.beam.sdk.io.Compression
 import org.apache.commons.io.FileUtils
 import shapeless.datatype.tensorflow._
 
 class TFTapTest extends TapSpec {
 
   object TestFeatureSpec {
-    val featuresType: TensorFlowType[TestFeatures] = TensorFlowType[TestFeatures]
-    case class TestFeatures(f1: Float, f2: Float)
-  }
+    val featuresType: TensorFlowType[TestFeatures] =
+      TensorFlowType[TestFeatures]
 
-  private def getDummyExample = {
-    import TestFeatureSpec._
-    val features = Seq(TestFeatures(1.0F, 2.0F), TestFeatures(5.0F, 3.0F))
-    features.map(featuresType.toExample(_))
+    case class TestFeatures(f1: Float, f2: Float)
+
   }
 
   "SCollection" should "support saveAsTFRecordFile" in {
@@ -45,78 +39,13 @@ class TFTapTest extends TapSpec {
     for (compressionType <- Seq(CType.UNCOMPRESSED, CType.DEFLATE, CType.GZIP)) {
       val dir = tmpDir
       val t = runWithFileFuture {
-        _
-          .parallelize(data)
+        _.parallelize(data)
           .map(_.getBytes)
           .saveAsTfRecordFile(dir.getPath, compression = compressionType)
       }
       verifyTap(t.map(new String(_)), data.toSet)
       FileUtils.deleteDirectory(dir)
     }
-  }
-
-  it should "support saveAsTfExampleFile with case class or Seq feature spec" in {
-    val examples = getDummyExample
-    import org.apache.beam.sdk.io.{Compression => CType}
-    for (
-      compressionType <- Seq(CType.UNCOMPRESSED, CType.DEFLATE, CType.GZIP);
-      featureSpec <- Seq(
-        FeatureDesc.fromCaseClass[TestFeatureSpec.TestFeatures],
-        FeatureDesc.fromSeq(Seq("f1", "f2")))
-        ) {
-      val dir = tmpDir
-      val sc = ScioContext()
-      val (out, spec) = sc.parallelize(examples)
-          .saveAsTfExampleFile(
-            dir.getPath,
-            featureSpec,
-            compression = compressionType)
-      sc.close().waitUntilDone()
-      verifyTap(out.waitForResult(), examples.toSet)
-      verifyTap(spec.waitForResult(), Set("f1", "f2"))
-      FileUtils.deleteDirectory(dir)
-    }
-  }
-
-  it should "support saveAsTfExampleFile with SCollection based feature spec" in {
-    val examples = getDummyExample
-    import org.apache.beam.sdk.io.{Compression => CType}
-    for (compressionType <- Seq(CType.UNCOMPRESSED, CType.DEFLATE, CType.GZIP)) {
-      val dir = tmpDir
-      val sc = ScioContext()
-      val featureSpec = sc.parallelize(Option(Seq("f1", "f2")))
-      val (out, spec) = sc.parallelize(examples)
-        .saveAsTfExampleFile(
-          dir.getPath,
-          FeatureDesc.fromSCollection(featureSpec),
-          compression = compressionType)
-      sc.close().waitUntilDone()
-      verifyTap(out.waitForResult(), examples.toSet)
-      verifyTap(spec.waitForResult(), Set("f1", "f2"))
-      FileUtils.deleteDirectory(dir)
-    }
-  }
-
-  it should "throw on multiple feature specifications" in {
-    val examples = getDummyExample
-    val dir = tmpDir
-    // using my own ScioContext cause error is thrown during the pipeline execution not, not DAG
-    // construction. Also don't want to specify expected in/out.
-    val sc = ScioContext()
-    // scalastyle:off no.whitespace.before.left.bracket
-    // scalastyle:off line.size.limit
-    the [PipelineExecutionException] thrownBy {
-      val featureSpec = sc.parallelize(Seq(Seq("f1", "f2"), Seq("f1", "f3")))
-      sc.parallelize(examples)
-        .saveAsTfExampleFile(
-          dir.getPath,
-          FeatureDesc.fromSCollection(featureSpec),
-          compression = Compression.UNCOMPRESSED)
-      sc.close()
-    } should have message s"java.lang.IllegalArgumentException: requirement failed: Feature description must contain a single element"
-    // scalastyle:on no.whitespace.before.left.bracket
-    // scalastyle:off line.size.limit
-    FileUtils.deleteDirectory(dir)
   }
 
 }

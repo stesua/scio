@@ -18,7 +18,8 @@
 package com.spotify.scio.bigquery.types
 
 import com.spotify.scio.bigquery.BigQueryUtil.parseSchema
-import org.scalatest.{Matchers, FlatSpec}
+import org.apache.beam.sdk.util.SerializableUtils
+import org.scalatest.{FlatSpec, Matchers}
 
 class SchemaProviderTest extends FlatSpec with Matchers {
 
@@ -38,7 +39,8 @@ class SchemaProviderTest extends FlatSpec with Matchers {
        |  {"mode": "$mode", "name": "timestampF", "type": "TIMESTAMP"},
        |  {"mode": "$mode", "name": "dateF", "type": "DATE"},
        |  {"mode": "$mode", "name": "timeF", "type": "TIME"},
-       |  {"mode": "$mode", "name": "datetimeF", "type": "DATETIME"}
+       |  {"mode": "$mode", "name": "datetimeF", "type": "DATETIME"},
+       |  {"mode": "$mode", "name": "bigDecimalF", "type": "NUMERIC"}
        |]
        |""".stripMargin
 
@@ -77,10 +79,6 @@ class SchemaProviderTest extends FlatSpec with Matchers {
     SchemaProvider.schemaOf[RepeatedNested] shouldBe parseSchema(recordFields("REPEATED"))
   }
 
-  case class User(@description("user name") name: String, @description("user age") age: Int)
-  case class Account(@description("account user") user: User,
-                     @description("in USD") balance: Double)
-
   val userFields =
     s"""
        |"fields": [
@@ -103,6 +101,11 @@ class SchemaProviderTest extends FlatSpec with Matchers {
   it should "support description" in {
     SchemaProvider.schemaOf[User] shouldBe parseSchema(userSchema)
     SchemaProvider.schemaOf[Account] shouldBe parseSchema(accountSchema)
+  }
+
+  it should "have serializable descriptions" in {
+    // The description annotation should be serializable.
+    SerializableUtils.ensureSerializable(new description(value = "this a field description"))
   }
 
 }

@@ -17,8 +17,9 @@
 
 package com.spotify.scio.examples.extra
 
+import com.spotify.scio.io._
 import com.spotify.scio.tensorflow.TFExampleIO
-import com.spotify.scio.testing.{PipelineSpec, TextIO}
+import com.spotify.scio.testing._
 
 class TFExampleExampleTest extends PipelineSpec {
   import WordCountFeatureSpec._
@@ -27,23 +28,20 @@ class TFExampleExampleTest extends PipelineSpec {
   val input = Seq("foo", "bar", "foo")
   val output = Seq(WordCountFeatures(3.0f, 2.0f), WordCountFeatures(3.0f, 1.0f))
     .map(featuresType.toExample(_))
-  val featureNameDesc = Seq("wordLength", "count")
 
   "TFExampleExample" should "work" in {
     JobTest[com.spotify.scio.examples.extra.TFExampleExample.type]
       .args("--input=in", "--output=out")
       .input(TextIO("in"), input)
-      .output(TFExampleIO("out"))(_ should containInAnyOrder (output))
-      .output(TextIO("out/_feature_desc"))(_ should containInAnyOrder (featureNameDesc))
+      .output(TFExampleIO("out"))(_ should containInAnyOrder(output))
       .run()
   }
 
   it should "work with custom feature desc path" in {
     JobTest[com.spotify.scio.examples.extra.TFExampleExample.type]
-      .args("--input=in", "--output=out", "--feature-desc-path=out/custom_path_features")
+      .args("--input=in", "--output=out")
       .input(TextIO("in"), input)
-      .output(TFExampleIO("out"))(_ should containInAnyOrder (output))
-      .output(TextIO("out/custom_path_features"))(_ should containInAnyOrder (featureNameDesc))
+      .output(TFExampleIO("out"))(_ should containInAnyOrder(output))
       .run()
   }
 

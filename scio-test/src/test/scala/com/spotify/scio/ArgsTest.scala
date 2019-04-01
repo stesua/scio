@@ -17,6 +17,8 @@
 
 package com.spotify.scio
 
+import caseapp._
+import com.spotify.scio.ContextAndArgs.TypedParser
 import org.scalatest.{FlatSpec, Matchers}
 
 class ArgsTest extends FlatSpec with Matchers {
@@ -26,11 +28,13 @@ class ArgsTest extends FlatSpec with Matchers {
   }
 
   it should "support getOrElse" in {
-    Args("--key1=value1".split(" ")).getOrElse("key2", "value2") shouldBe "value2"
+    Args("--key1=value1".split(" "))
+      .getOrElse("key2", "value2") shouldBe "value2"
   }
 
   it should "support list" in {
-    Args("--key=value1 --key=value2".split(" ")).list("key") shouldBe List("value1", "value2")
+    Args("--key=value1 --key=value2".split(" "))
+      .list("key") shouldBe List("value1", "value2")
   }
 
   it should "support optional" in {
@@ -45,13 +49,13 @@ class ArgsTest extends FlatSpec with Matchers {
 
   // scalastyle:off no.whitespace.before.left.bracket
   it should "fail required with missing value" in {
-    the [IllegalArgumentException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       Args(Array.empty).required("key")
     } should have message "Missing value for property 'key'"
   }
 
   it should "fail required with multiple values" in {
-    the [IllegalArgumentException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       Args("--key=value1 --key=value2".split(" ")).required("key")
     } should have message "Multiple values for property 'key'"
   }
@@ -104,8 +108,63 @@ class ArgsTest extends FlatSpec with Matchers {
   }
 
   it should "support toString" in {
-    val args = Args(Array("--key1=value1", "--key2=value2", "--key2=value3", "--key3"))
+    val args =
+      Args(Array("--key1=value1", "--key2=value2", "--key2=value3", "--key3"))
     args.toString shouldBe "Args(--key1=value1, --key2=[value2, value3], --key3=true)"
+  }
+
+  @AppName("FooBar App")
+  @AppVersion(BuildInfo.version)
+  @ProgName("foobar")
+  case class Arguments(@HelpMessage("Path of the file to read from")
+                       @ExtraName("i")
+                       input: String,
+                       @HelpMessage("Path of the file to write to")
+                       @ExtraName("o")
+                       output: String)
+
+  it should "support typed args" in {
+    val rawArgs = Array("--input=value1", "--output=value2")
+    val result = TypedParser[Arguments]().parse(rawArgs)
+
+    result should be a 'success
+  }
+
+  it should "fail on missing args" in {
+    val rawArgs = Array("--input=value1")
+    val result = TypedParser[Arguments]().parse(rawArgs)
+
+    result should be a 'failure
+  }
+
+  it should "fail on unused args" in {
+    val rawArgs = Array("--input=value1", "--output=value2", "--unused")
+    val result = TypedParser[Arguments]().parse(rawArgs)
+
+    result should be a 'failure
+  }
+
+  @AppName("Scio Examples")
+  @AppVersion(BuildInfo.version)
+  @ProgName("com.spotify.scio.examples.MinimalWordCount")
+  case class CamelCaseArguments(@HelpMessage("Path of the file to read from")
+                                @ExtraName("i")
+                                input: String = "/path/to/input",
+                                @HelpMessage("Path of the file to write to")
+                                @ExtraName("o")
+                                output: String,
+                                camelCaseTest: String)
+
+  it should "#1436: support camelCase" in {
+    val rawArgs = Array("--output=/path/to/output", "--camelCaseTest=value1")
+    val result = TypedParser[CamelCaseArguments]().parse(rawArgs)
+    result should be a 'success
+  }
+
+  it should "#1770: fail kebab-case" in {
+    val rawArgs = Array("--output=/path/to/output", "--camel-case-test=value1")
+    val result = TypedParser[CamelCaseArguments]().parse(rawArgs)
+    result should be a 'failure
   }
 
 }

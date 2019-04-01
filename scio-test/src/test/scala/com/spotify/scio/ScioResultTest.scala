@@ -17,9 +17,13 @@
 
 package com.spotify.scio
 
+import com.spotify.scio.ScioResultTest._
 import com.spotify.scio.metrics.{BeamDistribution, MetricValue}
 import com.spotify.scio.testing.PipelineSpec
+import org.apache.beam.sdk.PipelineResult
 import org.apache.beam.sdk.PipelineResult.State
+import org.apache.beam.sdk.metrics.MetricResults
+import org.joda.time
 
 class ScioResultTest extends PipelineSpec {
 
@@ -30,7 +34,7 @@ class ScioResultTest extends PipelineSpec {
   }
 
   it should "expose Beam metrics" in {
-    val r = runWithContext { sc =>
+    val r: ClosedScioContext = runWithContext { sc =>
       val c = ScioMetrics.counter("c")
       val d = ScioMetrics.distribution("d")
       val g = ScioMetrics.gauge("g")
@@ -42,7 +46,7 @@ class ScioResultTest extends PipelineSpec {
           x
         }
     }
-    val m = r.getMetrics.beamMetrics
+    val m = r.waitUntilDone().getMetrics.beamMetrics
 
     m.counters.map(_.name) shouldBe Iterable("c")
     m.counters.map(_.value) shouldBe Iterable(MetricValue(3L, Some(3L)))
@@ -55,6 +59,35 @@ class ScioResultTest extends PipelineSpec {
     m.gauges.map(_.name) shouldBe Iterable("g")
     gauge.forall(g => g.attempted.value >= 1 && g.attempted.value <= 3) shouldBe true
     gauge.forall(g => g.committed.get.value >= 1 && g.committed.get.value <= 3) shouldBe true
+  }
+
+  "isTest" should "return true when testing" in {
+    val r = runWithContext(_.parallelize(Seq(1, 2, 3)))
+    r.waitUntilDone().isTest shouldBe true
+  }
+
+  "isTest" should "return false when not testing" in {
+    mockScioResult.isTest shouldBe false
+  }
+}
+
+object ScioResultTest {
+
+  private val mockPipeline: PipelineResult = new PipelineResult {
+    private var state = State.RUNNING
+    override def cancel(): State = {
+      state = State.CANCELLED
+      state
+    }
+    override def waitUntilFinish(duration: time.Duration): State = null
+    override def waitUntilFinish(): State = null
+    override def getState: State = state
+    override def metrics(): MetricResults = null
+  }
+
+  // Mock Scio result takes 100 milliseconds to complete
+  private val mockScioResult = new ScioResult(mockPipeline) {
+    override def getMetrics: metrics.Metrics = null
   }
 
 }

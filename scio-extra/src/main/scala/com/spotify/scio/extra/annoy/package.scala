@@ -116,7 +116,7 @@ package object annoy {
 
     private val index = {
       val indexType = metric match {
-        case Angular => IndexType.ANGULAR
+        case Angular   => IndexType.ANGULAR
         case Euclidean => IndexType.EUCLIDEAN
       }
       new ANNIndex(dim, path, indexType)
@@ -141,7 +141,8 @@ package object annoy {
   }
 
   /** Enhanced version of [[ScioContext]] with Annoy methods. */
-  implicit class AnnoyScioContext(val self: ScioContext) extends AnyVal {
+  implicit class AnnoyScioContext(private val self: ScioContext) extends AnyVal {
+
     /**
      * Create a SideInput of [[AnnoyReader]] from an [[AnnoyUri]] base path, to be used with
      * [[com.spotify.scio.values.SCollection.withSideInputs SCollection.withSideInputs]]
@@ -156,7 +157,9 @@ package object annoy {
     }
   }
 
-  implicit class AnnoyPairSCollection(val self: SCollection[(Int, Array[Float])]) {
+  implicit class AnnoyPairSCollection(@transient private val self: SCollection[(Int, Array[Float])])
+      extends AnyVal {
+
     /**
      * Write the key-value pairs of this SCollection as an Annoy file to a specific location,
      * building the trees in the index according to the parameters provided.
@@ -169,33 +172,33 @@ package object annoy {
      *               that they will take at most 2x the memory of the vectors.
      * @return A singleton SCollection containing the [[AnnoyUri]] of the saved files
      */
-    def asAnnoy(path: String, metric: AnnoyMetric, dim: Int, nTrees: Int)
-    : SCollection[AnnoyUri] = {
+    def asAnnoy(path: String, metric: AnnoyMetric, dim: Int, nTrees: Int): SCollection[AnnoyUri] = {
       val uri = AnnoyUri(path, self.context.options)
       require(!uri.exists, s"Annoy URI ${uri.path} already exists")
 
       self.transform { in =>
         in.groupBy(_ => ())
-          .map { case(_, xs) =>
-            logger.info(s"Saving as Annoy: $uri")
-            val startTime = System.nanoTime()
-            val annoyWriter = new AnnoyWriter(metric, dim, nTrees)
-            try {
-              val it = xs.iterator
-              while (it.hasNext) {
-                val (k, v) = it.next()
-                annoyWriter.addItem(k, v)
+          .map {
+            case (_, xs) =>
+              logger.info(s"Saving as Annoy: $uri")
+              val startTime = System.nanoTime()
+              val annoyWriter = new AnnoyWriter(metric, dim, nTrees)
+              try {
+                val it = xs.iterator
+                while (it.hasNext) {
+                  val (k, v) = it.next()
+                  annoyWriter.addItem(k, v)
+                }
+                val size = annoyWriter.size
+                uri.saveAndClose(annoyWriter)
+                val elapsedTime = (System.nanoTime() - startTime) / 1000000000.0
+                logger.info(s"Built index with $size items in $elapsedTime seconds")
+              } catch {
+                case e: Throwable =>
+                  annoyWriter.free()
+                  throw e
               }
-              val size = annoyWriter.size
-              uri.saveAndClose(annoyWriter)
-              val elapsedTime = (System.nanoTime() - startTime) / 1000000000.0
-              logger.info(s"Built index with $size items in $elapsedTime seconds")
-            } catch {
-              case e: Throwable =>
-                annoyWriter.free()
-                throw e
-            }
-            uri
+              uri
           }
       }
     }
@@ -211,7 +214,9 @@ package object annoy {
      */
     def asAnnoy(metric: AnnoyMetric, dim: Int, nTrees: Int): SCollection[AnnoyUri] = {
       val uuid = UUID.randomUUID()
-      val path = s"${self.context.options.getTempLocation}/annoy-build-$uuid"
+      val tempLocation = self.context.options.getTempLocation
+      require(tempLocation != null, s"--tempLocation arg is required")
+      val path = s"$tempLocation/annoy-build-$uuid"
       this.asAnnoy(path, metric, dim, nTrees)
     }
 
@@ -234,7 +239,9 @@ package object annoy {
   /**
    * Enhanced version of [[com.spotify.scio.values.SCollection SCollection]] with Annoy methods
    */
-  implicit class AnnoySCollection(val self: SCollection[AnnoyUri]) extends AnyVal {
+  implicit class AnnoySCollection(@transient private val self: SCollection[AnnoyUri])
+      extends AnyVal {
+
     /**
      * Load Annoy index stored at [[AnnoyUri]] in this
      * [[com.spotify.scio.values.SCollection SCollection]].
@@ -248,11 +255,9 @@ package object annoy {
     }
   }
 
-  private class AnnoySideInput(val view: PCollectionView[AnnoyUri],
-                               metric: AnnoyMetric,
-                               dim: Int)
-    extends SideInput[AnnoyReader] {
-    override def get[I,O](context: DoFn[I, O]#ProcessContext): AnnoyReader =
+  private class AnnoySideInput(val view: PCollectionView[AnnoyUri], metric: AnnoyMetric, dim: Int)
+      extends SideInput[AnnoyReader] {
+    override def get[I, O](context: DoFn[I, O]#ProcessContext): AnnoyReader =
       context.sideInput(view).getReader(metric, dim)
   }
 }

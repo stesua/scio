@@ -18,6 +18,7 @@
 package com.spotify.scio.bigquery.types
 
 import com.google.api.services.bigquery.model.{TableRow, TableSchema}
+import org.apache.avro.generic.GenericRecord
 
 import scala.annotation.StaticAnnotation
 import scala.language.experimental.macros
@@ -28,20 +29,19 @@ import scala.util.Try
  * Macro annotations and converter generators for BigQuery types.
  *
  * The following table lists each legacy SQL data type, its standard SQL equivalent and Scala type.
- * {{{
- * Legacy SQL      Standard SQL    Scala type
- * BOOLEAN         BOOL            Boolean
- * INTEGER         INT64           Long, Int
- * FLOAT           FLOAT64         Double, Float
- * STRING          STRING          String
- * BYTES           BYTES           com.google.protobuf.ByteString, Array[Byte]
- * RECORD          STRUCT          Nested case class
- * REPEATED        ARRAY           List[T]
- * TIMESTAMP       TIMESTAMP       org.joda.time.Instant
- * DATE            DATE            org.joda.time.LocalDate
- * TIME            TIME            org.joda.time.LocalTime
- * DATETIME        DATETIME        org.joda.time.LocalDateTime
- * }}}
+ * | Legacy SQL | Standard SQL | Scala type                                      |
+ * |:-----------|:-------------|:------------------------------------------------|
+ * | BOOLEAN    | BOOL         | `Boolean`                                       |
+ * | INTEGER    | INT64        | `Long`, `Int`                                   |
+ * | FLOAT      | FLOAT64      | `Double`, `Float`                               |
+ * | STRING     | STRING       | `String`                                        |
+ * | BYTES      | BYTES        | `com.google.protobuf.ByteString`, `Array[Byte]` |
+ * | RECORD     | STRUCT       | Nested case class                               |
+ * | REPEATED   | ARRAY        | `List[T]`                                       |
+ * | TIMESTAMP  | TIMESTAMP    | `org.joda.time.Instant`                         |
+ * | DATE       | DATE         | `org.joda.time.LocalDate`                       |
+ * | TIME       | TIME         | `org.joda.time.LocalTime`                       |
+ * | DATETIME   | DATETIME     | `org.joda.time.LocalDateTime`                   |
  *
  * @groupname trait Traits for annotated types
  * @groupname annotation Type annotations
@@ -55,23 +55,36 @@ object BigQueryType {
    * @group trait
    */
   trait HasTable {
+
     /** Table for case class schema. */
     def table: String
   }
+
+  /**
+   * Trait for companion objects of case classes generated with table.
+   * Instance of this trait are provided as implicits allowing static discovery.
+   * That trait provide evidence that a BQ table is statically known for a given type T.
+   * @group trait
+   */
+  trait Table[T] extends HasTable
 
   /**
    * Trait for companion objects of case classes generated with schema.
    * @group trait
    */
   trait HasSchema[T] {
+
     /** Case class schema. */
     def schema: TableSchema
 
+    /** Avro [[GenericRecord]] to `T` converter. */
+    def fromAvro: GenericRecord => T
+
     /** TableRow to `T` converter. */
-    def fromTableRow: (TableRow => T)
+    def fromTableRow: TableRow => T
 
     /** `T` to TableRow converter. */
-    def toTableRow: (T => TableRow)
+    def toTableRow: T => TableRow
 
     /** Get a pretty string representation of the schema. */
     def toPrettyString(indent: Int = 0): String
@@ -82,15 +95,25 @@ object BigQueryType {
    * @group trait
    */
   trait HasQuery {
+
     /** SELECT query for case class schema. */
     def query: String
   }
+
+  /**
+   * Trait for companion objects of case classes generated with query.
+   * Instance of this trait are provided as implicits allowing static discovery.
+   * That trait provide evidence that a BQ query is statically known for a given type T.
+   * @group trait
+   */
+  trait Query[T] extends HasQuery
 
   /**
    * Trait for companion objects of case classes generated with table description.
    * @group trait
    */
   trait HasTableDescription {
+
     /** Case class table description. */
     def tableDescription: String
   }
@@ -193,7 +216,7 @@ object BigQueryType {
    * behavior, start the query string with `#legacysql` or `#standardsql`.
    * @group annotation
    */
-  class fromQuery(query: String, args: String*) extends StaticAnnotation {
+  class fromQuery(query: String, args: Any*) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.queryImpl
   }
 
@@ -220,19 +243,26 @@ object BigQueryType {
   def schemaOf[T: TypeTag]: TableSchema = SchemaProvider.schemaOf[T]
 
   /**
+   * Generate a converter function from Avro [[GenericRecord]] to the given case class `T`.
+   * @group converters
+   */
+  def fromAvro[T]: GenericRecord => T = macro ConverterProvider.fromAvroImpl[T]
+
+  /**
    * Generate a converter function from [[TableRow]] to the given case class `T`.
    * @group converters
    */
-  def fromTableRow[T]: (TableRow => T) = macro ConverterProvider.fromTableRowImpl[T]
+  def fromTableRow[T]: TableRow => T =
+    macro ConverterProvider.fromTableRowImpl[T]
 
   /**
    * Generate a converter function from the given case class `T` to [[TableRow]].
    * @group converters
    */
-  def toTableRow[T]: (T => TableRow) = macro ConverterProvider.toTableRowImpl[T]
+  def toTableRow[T]: T => TableRow = macro ConverterProvider.toTableRowImpl[T]
 
   /** Create a new BigQueryType instance. */
-  def apply[T: TypeTag]: BigQueryType[T] = new BigQueryType[T]
+  @inline final def apply[T: TypeTag]: BigQueryType[T] = new BigQueryType[T]
 
 }
 
@@ -243,35 +273,46 @@ object BigQueryType {
  */
 class BigQueryType[T: TypeTag] {
 
-  private val bases = typeOf[T].companion.baseClasses
+  private[this] val bases = typeOf[T].companion.baseClasses
 
-  private val instance = runtimeMirror(getClass.getClassLoader)
-    .reflectModule(typeOf[T].typeSymbol.companion.asModule)
+  private[this] val instance = runtimeMirror(getClass.getClassLoader)
+    .reflectModule(typeOf[T].erasure.typeSymbol.companion.asModule)
     .instance
 
-  private def getField(key: String) = instance.getClass.getMethod(key).invoke(instance)
+  private def getField(key: String) =
+    instance.getClass.getMethod(key).invoke(instance)
 
   /** Whether the case class is annotated for a table. */
-  def isTable: Boolean = bases.contains(typeOf[BigQueryType.HasTable].typeSymbol)
+  def isTable: Boolean =
+    bases.contains(typeOf[BigQueryType.HasTable].typeSymbol)
 
   /** Whether the case class is annotated for a query. */
-  def isQuery: Boolean = bases.contains(typeOf[BigQueryType.HasQuery].typeSymbol)
+  def isQuery: Boolean =
+    bases.contains(typeOf[BigQueryType.HasQuery].typeSymbol)
 
   /** Table reference from the annotation. */
-  def table: Option[String] = Try(getField("table").asInstanceOf[String]).toOption
+  def table: Option[String] =
+    Try(getField("table").asInstanceOf[String]).toOption
 
   /** Query from the annotation. */
-  def query: Option[String] = Try(getField("query").asInstanceOf[String]).toOption
+  def query: Option[String] =
+    Try(getField("query").asInstanceOf[String]).toOption
 
   /** Table description from the annotation. */
   def tableDescription: Option[String] =
     Try(getField("tableDescription").asInstanceOf[String]).toOption
 
+  /** Avro [[GenericRecord]] to `T` converter. */
+  def fromAvro: GenericRecord => T =
+    getField("fromAvro").asInstanceOf[GenericRecord => T]
+
   /** TableRow to `T` converter. */
-  def fromTableRow: (TableRow => T) = getField("fromTableRow").asInstanceOf[(TableRow => T)]
+  def fromTableRow: TableRow => T =
+    getField("fromTableRow").asInstanceOf[TableRow => T]
 
   /** `T` to TableRow converter. */
-  def toTableRow: (T => TableRow) = getField("toTableRow").asInstanceOf[(T => TableRow)]
+  def toTableRow: T => TableRow =
+    getField("toTableRow").asInstanceOf[T => TableRow]
 
   /** TableSchema of `T`. */
   def schema: TableSchema = BigQueryType.schemaOf[T]

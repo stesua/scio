@@ -17,8 +17,8 @@
 
 package com.spotify.scio.examples.extra
 
-import com.spotify.scio.bigquery.TableRow
-import com.spotify.scio.testing.{JobTest, PipelineSpec, TableRowJsonIO}
+import com.spotify.scio.bigquery._
+import com.spotify.scio.testing._
 
 class TableRowJsonInOutTest extends PipelineSpec {
 
@@ -31,7 +31,7 @@ class TableRowJsonInOutTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.extra.TableRowJsonInOut.type]
       .args("--input=in.json", "--output=out.json")
       .input(TableRowJsonIO("in.json"), input)
-      .output(TableRowJsonIO("out.json"))(_ should containInAnyOrder (input))
+      .output(TableRowJsonIO("out.json"))(_ should containInAnyOrder(input))
       .run()
   }
 

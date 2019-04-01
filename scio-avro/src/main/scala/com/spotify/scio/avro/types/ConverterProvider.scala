@@ -21,7 +21,6 @@ import com.google.protobuf.ByteString
 import com.spotify.scio.avro.types.MacroUtil._
 import org.apache.avro.generic.GenericRecord
 
-import scala.language.experimental.macros
 import scala.reflect.macros._
 
 private[types] object ConverterProvider {
@@ -50,20 +49,23 @@ private[types] object ConverterProvider {
     // =======================================================================
 
     def cast(tree: Tree, tpe: Type): Tree = {
-      val s = q"$tree.toString"
       tpe match {
-        case t if t =:= typeOf[Boolean] => q"$s.toBoolean"
-        case t if t =:= typeOf[Int] => q"$s.toInt"
-        case t if t =:= typeOf[Long] => q"$s.toLong"
-        case t if t =:= typeOf[Float] => q"$s.toFloat"
-        case t if t =:= typeOf[Double] => q"$s.toDouble"
-        case t if t =:= typeOf[String] => q"$s"
+        case t if t =:= typeOf[Boolean] => q"$tree.asInstanceOf[Boolean]"
+        case t if t =:= typeOf[Int]     => q"$tree.asInstanceOf[Int]"
+        case t if t =:= typeOf[Long]    => q"$tree.asInstanceOf[Long]"
+        case t if t =:= typeOf[Float]   => q"$tree.asInstanceOf[Float]"
+        case t if t =:= typeOf[Double]  => q"$tree.asInstanceOf[Double]"
+        case t if t =:= typeOf[String]  => q"$tree.toString"
 
         case t if t =:= typeOf[ByteString] =>
-          val bb = tq"_root_.java.nio.ByteBuffer"
-          q"_root_.com.google.protobuf.ByteString.copyFrom($tree.asInstanceOf[$bb])"
+          val bb = q"$tree.asInstanceOf[_root_.java.nio.ByteBuffer]"
+          q"_root_.com.google.protobuf.ByteString.copyFrom($bb)"
 
-        case t if t.erasure <:< typeOf[scala.collection.Map[String,_]].erasure =>
+        case t if t =:= typeOf[Array[Byte]] =>
+          val bb = q"$tree.asInstanceOf[_root_.java.nio.ByteBuffer]"
+          q"_root_.java.util.Arrays.copyOfRange($bb.array(), $bb.position(), $bb.limit())"
+
+        case t if t.erasure <:< typeOf[scala.collection.Map[String, _]].erasure =>
           map(tree, tpe.typeArgs.tail.head)
 
         case t if t.erasure =:= typeOf[List[_]].erasure =>
@@ -85,7 +87,8 @@ private[types] object ConverterProvider {
 
     def list(tree: Tree, tpe: Type): Tree = {
       val jl = tq"_root_.java.util.List[AnyRef]"
-      q"$tree.asInstanceOf[$jl].asScala.map(x => ${cast(q"x", tpe)}).toList"
+      val bo = q"_root_.scala.collection.breakOut"
+      q"$tree.asInstanceOf[$jl].asScala.map(x => ${cast(q"x", tpe)})($bo)"
     }
 
     def map(tree: Tree, tpe: Type): Tree = {
@@ -109,7 +112,7 @@ private[types] object ConverterProvider {
       val companion = tpe.typeSymbol.companion
       val gets = tpe.erasure match {
         case t if isCaseClass(c)(t) => getFields(c)(t).map(s => field(s, fn))
-        case t => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
+        case t                      => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
       }
       q"$companion(..$gets)"
     }
@@ -139,17 +142,18 @@ private[types] object ConverterProvider {
 
     def cast(tree: Tree, tpe: Type): Tree = {
       tpe match {
-        case t if t =:= typeOf[Boolean] => q"$tree"
-        case t if t =:= typeOf[Int] => q"$tree"
-        case t if t =:= typeOf[Long] => q"$tree"
-        case t if t =:= typeOf[Float] => q"$tree"
-        case t if t =:= typeOf[Double] => q"$tree"
-        case t if t =:= typeOf[String] => tree
+        case t if t =:= typeOf[Boolean] => tree
+        case t if t =:= typeOf[Int]     => tree
+        case t if t =:= typeOf[Long]    => tree
+        case t if t =:= typeOf[Float]   => tree
+        case t if t =:= typeOf[Double]  => tree
+        case t if t =:= typeOf[String]  => tree
 
-        case t if t =:= typeOf[ByteString] =>
-          q"$tree.asReadOnlyByteBuffer"
+        case t if t =:= typeOf[ByteString] => q"$tree.asReadOnlyByteBuffer"
+        case t if t =:= typeOf[Array[Byte]] =>
+          q"_root_.java.nio.ByteBuffer.wrap($tree)"
 
-        case t if t.erasure <:< typeOf[scala.collection.Map[String,_]].erasure =>
+        case t if t.erasure <:< typeOf[scala.collection.Map[String, _]].erasure =>
           map(tree, tpe.typeArgs.tail.head)
 
         case t if t.erasure <:< typeOf[List[_]].erasure =>
@@ -169,9 +173,11 @@ private[types] object ConverterProvider {
     def option(tree: Tree, tpe: Type): Tree =
       q"if ($tree.isDefined) ${cast(q"$tree.get", tpe)} else null"
 
-    def list(tree: Tree, tpe: Type): Tree = q"$tree.map(x => ${cast(q"x", tpe)}).asJava"
+    def list(tree: Tree, tpe: Type): Tree =
+      q"$tree.map(x => ${cast(q"x", tpe)}).asJava"
 
-    def map(tree: Tree, tpe: Type): Tree = q"$tree.mapValues(x => ${cast(q"x", tpe)}).asJava"
+    def map(tree: Tree, tpe: Type): Tree =
+      q"$tree.mapValues(x => ${cast(q"x", tpe)}).asJava"
 
     def field(symbol: Symbol, fn: TermName): (String, Tree) = {
       val name = symbol.name.toString
@@ -189,12 +195,16 @@ private[types] object ConverterProvider {
     def constructor(tpe: Type, fn: TermName): Tree = {
       val sets = tpe.erasure match {
         case t if isCaseClass(c)(t) => getFields(c)(t).map(s => field(s, fn))
-        case _ => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
+        case _                      => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
       }
       val schemaOf = q"${p(c, ScioAvroType)}.schemaOf[$tpe]"
-      val header = q"val result = new ${p(c, ApacheAvro)}.generic.GenericData.Record($schemaOf)"
-      val body = sets.map { case (fieldName, value) =>
-        q"if (${p(c, ScioAvro)}.types.ConverterUtil.notNull($value)) result.put($fieldName, $value)"
+      val header =
+        q"val result = new ${p(c, ApacheAvro)}.generic.GenericData.Record($schemaOf)"
+      val body = sets.map {
+        case (fieldName, value) =>
+          // scalastyle:off line.size.limit
+          q"if (${p(c, ScioAvro)}.types.ConverterUtil.notNull($value)) result.put($fieldName, $value)"
+        // scalastyle:on line.size.limit
       }
       val footer = q"result"
       q"{$header; ..$body; $footer}"

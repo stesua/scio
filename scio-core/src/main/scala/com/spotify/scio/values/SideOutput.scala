@@ -17,28 +17,31 @@
 
 package com.spotify.scio.values
 
-import com.spotify.scio.{Implicits, ScioContext}
+import com.spotify.scio.ScioContext
+import com.spotify.scio.coders.Coder
 import org.apache.beam.sdk.transforms.DoFn
 import org.apache.beam.sdk.values.{PCollectionTuple, TupleTag}
 import org.joda.time.Instant
 
-import scala.reflect.ClassTag
-
 /** Encapsulate a side output for a transform. */
-trait SideOutput[T] extends Serializable {
+sealed trait SideOutput[T] extends Serializable {
   private[scio] val tupleTag: TupleTag[T]
+  private[scio] val coder: Coder[T]
 }
 
 /** Companion object for [[SideOutput]]. */
 object SideOutput {
+
   /** Create a new [[SideOutput]] instance. */
-  def apply[T](): SideOutput[T] = new SideOutput[T] {
+  def apply[T: Coder](): SideOutput[T] = new SideOutput[T] {
     override private[scio] val tupleTag: TupleTag[T] = new TupleTag[T]()
+    override private[scio] val coder = Coder[T]
   }
 }
 
 /** Encapsulate context of one or more [[SideOutput]]s in an [[SCollectionWithSideOutput]]. */
 class SideOutputContext[T] private[scio] (val context: DoFn[T, AnyRef]#ProcessContext) {
+
   /** Write a value to a given [[SideOutput]]. */
   def output[S](sideOutput: SideOutput[S],
                 output: S,
@@ -55,12 +58,9 @@ class SideOutputContext[T] private[scio] (val context: DoFn[T, AnyRef]#ProcessCo
 /** Encapsulate output of one or more [[SideOutput]]s in an [[SCollectionWithSideOutput]]. */
 class SideOutputCollections private[values] (private val tuple: PCollectionTuple,
                                              private val context: ScioContext) {
-  import Implicits._
 
   /** Extract the [[SCollection]] of a given [[SideOutput]]. */
-  def apply[T: ClassTag](sideOutput: SideOutput[T]): SCollection[T] = {
-    val r = context.pipeline.getCoderRegistry
-    val o = tuple.get(sideOutput.tupleTag).setCoder(r.getScalaCoder[T](context.options))
-    context.wrap(o)
+  def apply[T](sideOutput: SideOutput[T]): SCollection[T] = context.wrap {
+    tuple.get(sideOutput.tupleTag)
   }
 }

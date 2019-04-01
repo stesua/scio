@@ -102,12 +102,12 @@ public class TriggerExampleTest {
         .of(new ExtractFlowInfo());
 
     List<KV<String, Integer>> results = extractFlowInfow.processBundle(INPUT);
-    Assert.assertEquals(results.size(), 1);
-    Assert.assertEquals(results.get(0).getKey(), "94");
-    Assert.assertEquals(results.get(0).getValue(), new Integer(29));
+    Assert.assertEquals(1, results.size());
+    Assert.assertEquals("94", results.get(0).getKey());
+    Assert.assertEquals(Integer.valueOf(29), results.get(0).getValue());
 
     List<KV<String, Integer>> output = extractFlowInfow.processBundle("");
-    Assert.assertEquals(output.size(), 0);
+    Assert.assertEquals(0, output.size());
   }
 
   @Test
@@ -117,9 +117,9 @@ public class TriggerExampleTest {
         .apply(Create.timestamped(TIME_STAMPED_INPUT))
         .apply(ParDo.of(new ExtractFlowInfo()));
 
-    PCollection<TableRow> totalFlow = flow
-        .apply(Window.<KV<String, Integer>>into(FixedWindows.of(Duration.standardMinutes(1))))
-        .apply(new TotalFlow("default"));
+    PCollection<TableRow> totalFlow =
+        flow.apply(Window.into(FixedWindows.of(Duration.standardMinutes(1))))
+            .apply(new TotalFlow("default"));
 
     PCollection<String> results =  totalFlow.apply(ParDo.of(new FormatResults()));
 

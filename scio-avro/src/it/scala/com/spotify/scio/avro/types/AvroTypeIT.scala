@@ -18,50 +18,62 @@
 package com.spotify.scio.avro.types
 
 import org.apache.avro.Schema.Parser
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest._
+
+import scala.annotation.StaticAnnotation
+import scala.reflect.runtime.universe._
 
 object AvroTypeIT {
   @AvroType.fromPath(
     "gs://data-integration-test-eu/avro-integration-test/folder-a/folder-b/shakespeare.avro")
   class FromPath
 
-  @AvroType.fromPath(
-    "gs://data-integration-test-eu/avro-integration-test/folder-a/folder-b")
+  @AvroType.fromPath("gs://data-integration-test-eu/avro-integration-test/folder-a/folder-b")
   class FromPath1
 
-  @AvroType.fromPath(
-    "gs://data-integration-test-eu/avro-integration-test/folder-a/folder-b/")
+  @AvroType.fromPath("gs://data-integration-test-eu/avro-integration-test/folder-a/folder-b/")
   class FromPath2
 
-  @AvroType.fromPath(
-    "gs://data-integration-test-eu/*/*/*")
+  @AvroType.fromPath("gs://data-integration-test-eu/avro-*/*/*")
   class FromGlob1
 
-  @AvroType.fromPath(
-    "gs://data-integration-test-eu/*/*/*/")
+  @AvroType.fromPath("gs://data-integration-test-eu/avro-*/*/*/")
   class FromGlob2
 
-  @AvroType.fromPath("gs://data-integration-test-eu/*/*/*/*.avro")
+  @AvroType.fromPath("gs://data-integration-test-eu/avro-*/*/*/*.avro")
   class FromGlob3
 
-  @AvroType.fromPath(
-    """
+  @AvroType.fromPath("""
       |gs://data-integration-test-eu/
       |avro-integration-test/folder-a/folder-b/
       |shakespeare.avro
     """.stripMargin)
   class FromPathMultiLine
 
-  @AvroType.fromSchemaFile(
-    """
+  @AvroType.fromSchemaFile("""
       |gs://data-integration-test-eu/
       |avro-integration-test/folder-a/folder-b/
       |shakespeare-schema.avsc
     """.stripMargin)
   class FromFile
+
+  class Annotation1 extends StaticAnnotation
+  class Annotation2 extends StaticAnnotation
+
+  @Annotation1
+  @AvroType.fromPath(
+    "gs://data-integration-test-eu/avro-integration-test/folder-a/folder-b/shakespeare.avro")
+  @Annotation2
+  class FromPathWithSurroundingAnnotations
+
+  @AvroType.fromPath(
+    "gs://data-integration-test-eu/avro-integration-test/folder-a/folder-b/shakespeare.avro")
+  @Annotation1
+  @Annotation2
+  class FromPathWithSequentialAnnotations
 }
 
-class AvroTypeIT extends FlatSpec with Matchers  {
+class AvroTypeIT extends FlatSpec with Matchers {
   import AvroTypeIT._
 
   private val expectedSchema = new Parser().parse("""{
@@ -112,14 +124,29 @@ class AvroTypeIT extends FlatSpec with Matchers  {
   }
 
   it should "support roundtrip conversion when reading schema from GCS glob" in {
-    val r1 = FromGlob1(word=Some("word"), word_count=Some(2L))
+    val r1 = FromGlob1(word = Some("word"), word_count = Some(2L))
     val r2 = FromGlob1.fromGenericRecord(FromGlob1.toGenericRecord(r1))
     r1 shouldBe r2
   }
 
   it should "support roundtrip conversion when reading schema from multilne GCS path" in {
-    val r1 = FromPathMultiLine(corpus=Some("corpus"), corpus_date=Some(123L))
+    val r1 = FromPathMultiLine(corpus = Some("corpus"), corpus_date = Some(123L))
     val r2 = FromPathMultiLine.fromGenericRecord(FromPathMultiLine.toGenericRecord(r1))
     r1 shouldBe r2
+  }
+
+  def containsAllAnnotTypes[T: TypeTag]: Assertion = {
+    val types = typeOf[T].typeSymbol.annotations
+      .map(_.tree.tpe)
+    Seq(typeOf[Annotation1], typeOf[Annotation2])
+      .forall(lt => types.exists(rt => lt =:= rt)) shouldBe true
+  }
+
+  it should "preserve surrounding user defined annotations" in {
+    containsAllAnnotTypes[FromPathWithSurroundingAnnotations]
+  }
+
+  it should "preserve sequential user defined annotations" in {
+    containsAllAnnotTypes[FromPathWithSequentialAnnotations]
   }
 }

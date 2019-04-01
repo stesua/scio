@@ -22,6 +22,7 @@ import java.net.URI
 import java.nio.file.{Files, Paths}
 
 import annoy4s._
+import com.spotify.scio.coders.Coder
 import com.spotify.scio.util.{RemoteFileUtil, ScioUtil}
 import com.sun.jna.Native
 import org.apache.beam.sdk.options.PipelineOptions
@@ -44,6 +45,8 @@ private[annoy] object AnnoyUri {
     } else {
       new RemoteAnnoyUri(path, opts)
     }
+
+  implicit val annoyUriCoder: Coder[AnnoyUri] = Coder.kryo[AnnoyUri]
 }
 
 private class LocalAnnoyUri(val path: String) extends AnnoyUri {
@@ -64,7 +67,7 @@ private class LocalAnnoyUri(val path: String) extends AnnoyUri {
 
 private class RemoteAnnoyUri(val path: String, options: PipelineOptions) extends AnnoyUri {
 
-  val rfu: RemoteFileUtil = RemoteFileUtil.create(options)
+  private[this] val rfu: RemoteFileUtil = RemoteFileUtil.create(options)
 
   override private[annoy] def getReader(metric: AnnoyMetric, dim: Int): AnnoyReader = {
     val localPath = rfu.download(new URI(path))
@@ -88,12 +91,14 @@ private class RemoteAnnoyUri(val path: String, options: PipelineOptions) extends
 private[annoy] class AnnoyWriter(metric: AnnoyMetric, dim: Int, nTrees: Int) {
 
   private val annoy4sIndex = metric match {
-    case Angular => AnnoyWriter.lib.createAngular(dim)
+    case Angular   => AnnoyWriter.lib.createAngular(dim)
     case Euclidean => AnnoyWriter.lib.createAngular(dim)
   }
 
-  def addItem(item: Int, w: Array[Float]): Unit = AnnoyWriter.lib.addItem(annoy4sIndex, item, w)
-  def save(filename: String): Unit = AnnoyWriter.lib.save(annoy4sIndex, filename)
+  def addItem(item: Int, w: Array[Float]): Unit =
+    AnnoyWriter.lib.addItem(annoy4sIndex, item, w)
+  def save(filename: String): Unit =
+    AnnoyWriter.lib.save(annoy4sIndex, filename)
   def build(): Unit = AnnoyWriter.lib.build(annoy4sIndex, nTrees)
   def free(): Unit = AnnoyWriter.lib.deleteIndex(annoy4sIndex)
   def size: Int = AnnoyWriter.lib.getNItems(annoy4sIndex)
@@ -102,5 +107,7 @@ private[annoy] class AnnoyWriter(metric: AnnoyMetric, dim: Int, nTrees: Int) {
 }
 
 private[annoy] object AnnoyWriter {
-  private val lib = Native.loadLibrary("annoy", classOf[AnnoyLibrary]).asInstanceOf[AnnoyLibrary]
+  private val lib = Native
+    .loadLibrary("annoy", classOf[AnnoyLibrary])
+    .asInstanceOf[AnnoyLibrary]
 }

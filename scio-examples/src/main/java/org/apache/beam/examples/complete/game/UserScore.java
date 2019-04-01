@@ -101,7 +101,7 @@ public class UserScore {
       return this.score;
     }
     public String getKey(String keyname) {
-      if (keyname.equals("team")) {
+      if ("team".equals(keyname)) {
         return this.team;
       } else {  // return username as default
         return this.user;
@@ -128,7 +128,8 @@ public class UserScore {
 
     @ProcessElement
     public void processElement(ProcessContext c) {
-      String[] components = c.element().split(",");
+      System.out.println("GOT " + c.element());
+      String[] components = c.element().split(",", -1);
       try {
         String user = components[0].trim();
         String team = components[1].trim();
@@ -162,10 +163,11 @@ public class UserScore {
         PCollection<GameActionInfo> gameInfo) {
 
       return gameInfo
-        .apply(MapElements
-            .into(TypeDescriptors.kvs(TypeDescriptors.strings(), TypeDescriptors.integers()))
-            .via((GameActionInfo gInfo) -> KV.of(gInfo.getKey(field), gInfo.getScore())))
-        .apply(Sum.<String>integersPerKey());
+          .apply(
+              MapElements.into(
+                      TypeDescriptors.kvs(TypeDescriptors.strings(), TypeDescriptors.integers()))
+                  .via((GameActionInfo gInfo) -> KV.of(gInfo.getKey(field), gInfo.getScore())))
+          .apply(Sum.integersPerKey());
     }
   }
   // [END DocInclude_USExtractXform]
@@ -196,8 +198,7 @@ public class UserScore {
    */
   protected static Map<String, WriteToText.FieldFn<KV<String, Integer>>>
       configureOutput() {
-    Map<String, WriteToText.FieldFn<KV<String, Integer>>> config =
-        new HashMap<String, WriteToText.FieldFn<KV<String, Integer>>>();
+    Map<String, WriteToText.FieldFn<KV<String, Integer>>> config = new HashMap<>();
     config.put("user", (c, w) -> c.element().getKey());
     config.put("total_score", (c, w) -> c.element().getValue());
     return config;
@@ -219,11 +220,7 @@ public class UserScore {
         // Extract and sum username/score pairs from the event data.
         .apply("ExtractUserScore", new ExtractAndSumScore("user"))
         .apply(
-            "WriteUserScoreSums",
-            new WriteToText<KV<String, Integer>>(
-                options.getOutput(),
-                configureOutput(),
-                false));
+            "WriteUserScoreSums", new WriteToText<>(options.getOutput(), configureOutput(), false));
 
     // Run the batch pipeline.
     pipeline.run().waitUntilFinish();

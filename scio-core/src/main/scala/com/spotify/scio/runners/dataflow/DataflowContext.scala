@@ -19,9 +19,8 @@ package com.spotify.scio.runners.dataflow
 
 import java.io.File
 import java.net.URLClassLoader
-import java.util.jar.{Attributes, JarFile}
 
-import com.spotify.scio.RunnerContext
+import com.spotify.scio.{CoreSysProps, RunnerContext}
 import org.apache.beam.runners.dataflow.DataflowRunner
 import org.apache.beam.runners.dataflow.options.DataflowPipelineWorkerPoolOptions
 import org.apache.beam.sdk.options.PipelineOptions
@@ -34,17 +33,17 @@ case object DataflowContext extends RunnerContext {
 
   private val logger = LoggerFactory.getLogger(this.getClass)
 
-  override def prepareOptions(options: PipelineOptions, artifacts: List[String]): Unit = {
-    options.as(classOf[DataflowPipelineWorkerPoolOptions])
-      .setFilesToStage(getFilesToStage(artifacts).asJava)
-  }
+  override def prepareOptions(options: PipelineOptions, artifacts: List[String]): Unit =
+    options
+      .as(classOf[DataflowPipelineWorkerPoolOptions])
+      .setFilesToStage(getFilesToStage(artifacts).toList.asJava)
 
   // =======================================================================
   // Extra artifacts - jars/files etc
   // =======================================================================
 
   /** Compute list of local files to make available to workers. */
-  private def getFilesToStage(extraLocalArtifacts: List[String]): List[String] = {
+  private def getFilesToStage(extraLocalArtifacts: List[String]): Iterable[String] = {
     val finalLocalArtifacts = detectClassPathResourcesToStage(
       classOf[DataflowRunner].getClassLoader) ++ extraLocalArtifacts
 
@@ -53,41 +52,23 @@ case object DataflowContext extends RunnerContext {
   }
 
   /** Borrowed from DataflowRunner. */
-  private def detectClassPathResourcesToStage(classLoader: ClassLoader): List[String] = {
+  private def detectClassPathResourcesToStage(classLoader: ClassLoader): Iterable[String] = {
     require(classLoader.isInstanceOf[URLClassLoader],
-      "Current ClassLoader is '" + classLoader + "' only URLClassLoaders are supported")
+            "Current ClassLoader is '" + classLoader + "' only URLClassLoaders are supported")
 
     // exclude jars from JAVA_HOME and files from current directory
-    val javaHome = new File(sys.props("java.home")).getCanonicalPath
-    val userDir = new File(sys.props("user.dir")).getCanonicalPath
+    val javaHome = new File(CoreSysProps.Home.value).getCanonicalPath
+    val userDir = new File(CoreSysProps.UserDir.value).getCanonicalPath
 
-    val classPathJars = classLoader.asInstanceOf[URLClassLoader]
+    val classPathJars = classLoader
+      .asInstanceOf[URLClassLoader]
       .getURLs
       .map(url => new File(url.toURI).getCanonicalPath)
-      .filter(p => !p.startsWith(javaHome) && p != userDir)
-      .toList
-
-    // fetch jars from classpath jar's manifest Class-Path if present
-    val manifestJars =  classPathJars
-      .filter(_.endsWith(".jar"))
-      .map(p => (p, new JarFile(p).getManifest))
-      .filter { case (p, manifest) =>
-        manifest != null && manifest.getMainAttributes.containsKey(Attributes.Name.CLASS_PATH)}
-      .map { case (p, manifest) => (new File(p).getParentFile,
-        manifest.getMainAttributes.getValue(Attributes.Name.CLASS_PATH).split(" ")) }
-      .flatMap { case (parent, jars) => jars.map(jar =>
-        if (jar.startsWith("/")) {
-          jar // accept absolute path as is
-        } else {
-          new File(parent, jar).getCanonicalPath  // relative path
-        })
-      }
+      .filter(path => !path.startsWith(javaHome) && path != userDir)
 
     logger.debug(s"Classpath jars: ${classPathJars.mkString(":")}")
-    logger.debug(s"Manifest jars: ${manifestJars.mkString(":")}")
 
-    // no need to care about duplicates here - should be solved by the SDK uploader
-    classPathJars ++ manifestJars
+    classPathJars
   }
 
 }

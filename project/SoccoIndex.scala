@@ -33,7 +33,7 @@ object SoccoIndex {
     """.stripMargin
   val footer =
     """  </xmp>
-      |  <script src="http://strapdownjs.com/v/0.2/strapdown.js"></script>
+      |  <script src="https://strapdownjs.com/v/0.2/strapdown.js"></script>
       |</html>
     """.stripMargin
 
@@ -44,7 +44,10 @@ object SoccoIndex {
 
   def isScala(f: File): Boolean = f.isFile && f.getName.endsWith(".scala")
 
-  case class Source(file: String, section: String, title: String, url: String,
+  case class Source(file: String,
+                    section: String,
+                    title: String,
+                    url: String,
                     objects: List[String])
 
   // Find all source files
@@ -89,15 +92,16 @@ object SoccoIndex {
       .toMap
   }
 
-  def mappings: Seq[(File, String)] = sources
-    .map(s => new File(s"scio-examples/target/site/${s.file}.html") -> s"examples/${s.file}.html")
+  def mappings: Seq[(File, String)] =
+    sources
+      .map(s => new File(s"scio-examples/target/site/${s.file}.html") -> s"examples/${s.file}.html")
 
   def generate(outFile: File): File = {
     outFile.getParentFile.mkdirs()
     val out = new PrintWriter(outFile)
     out.println(header)
     var section = ""
-    sources.foreach { s =>
+    sources.sortBy(s => (s.section, s.file)).foreach { s =>
       if (section != s.section) {
         section = s.section
         out.println()
@@ -106,7 +110,7 @@ object SoccoIndex {
       }
       val test = s.objects.flatMap(tests.get).headOption match {
         case Some(url) => s", [test]($url)"
-        case None => ""
+        case None      => ""
       }
       out.println(s"- [${s.file}](${s.file}.html) ([source](${s.url})$test) - ${s.title}")
     }

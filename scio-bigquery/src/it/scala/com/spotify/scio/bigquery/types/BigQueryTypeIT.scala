@@ -17,11 +17,12 @@
 
 package com.spotify.scio.bigquery.types
 
-import com.spotify.scio.bigquery.BigQueryClient
-import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO
-import org.scalatest.{FlatSpec, Matchers}
+import com.spotify.scio.bigquery.client.BigQuery
+import org.scalatest.{Assertion, FlatSpec, Matchers}
 
+import scala.annotation.StaticAnnotation
 import scala.collection.JavaConverters._
+import scala.reflect.runtime.universe._
 
 object BigQueryTypeIT {
   @BigQueryType.fromQuery(
@@ -36,25 +37,65 @@ object BigQueryTypeIT {
   class FromTableT
 
   @BigQueryType.fromQuery(
-    "SELECT word, word_count FROM [data-integration-test:partition_a.table_%s]", "$LATEST")
+    "SELECT word, word_count FROM [data-integration-test:partition_a.table_%s]",
+    "$LATEST")
   class LegacyLatestT
 
   @BigQueryType.fromQuery(
-    "SELECT word, word_count FROM `data-integration-test.partition_a.table_%s`", "$LATEST")
+    "SELECT word, word_count FROM `data-integration-test.partition_a.table_%s`",
+    "$LATEST")
   class SqlLatestT
+
+  @BigQueryType.fromQuery(
+    """
+      |SELECT word, word_count
+      |FROM `data-integration-test.partition_a.table_%s`
+      |WHERE word_count > %3$d and word != '%%'
+      |LIMIT %d
+    """.stripMargin,
+    "$LATEST",
+    1,
+    1
+  )
+  class SqlLatestTWithMultiArgs
 
   @BigQueryType.fromTable("data-integration-test:partition_a.table_%s", "$LATEST")
   class FromTableLatestT
 
   @BigQueryType.toTable
   case class ToTableT(word: String, word_count: Int)
+
+  class Annotation1 extends StaticAnnotation
+  class Annotation2 extends StaticAnnotation
+
+  @Annotation1
+  @BigQueryType.fromTable("bigquery-public-data:samples.shakespeare")
+  @Annotation2
+  class ShakespeareWithSurroundingAnnotations
+
+  @BigQueryType.fromTable("bigquery-public-data:samples.shakespeare")
+  @Annotation1
+  @Annotation2
+  class ShakespeareWithSequentialAnnotations
+
+  // run this to re-populate tables used for this test and BigQueryPartitionUtilIT
+  def main(args: Array[String]): Unit = {
+    val bq = BigQuery.defaultInstance()
+    val data = List(ToTableT("a", 1), ToTableT("b", 2))
+    bq.writeTypedRows("data-integration-test:partition_a.table_20170101", data)
+    bq.writeTypedRows("data-integration-test:partition_a.table_20170102", data)
+    bq.writeTypedRows("data-integration-test:partition_a.table_20170103", data)
+    bq.writeTypedRows("data-integration-test:partition_b.table_20170101", data)
+    bq.writeTypedRows("data-integration-test:partition_b.table_20170102", data)
+    bq.writeTypedRows("data-integration-test:partition_c.table_20170104", data)
+  }
 }
 
 class BigQueryTypeIT extends FlatSpec with Matchers {
 
   import BigQueryTypeIT._
 
-  val bq = BigQueryClient.defaultInstance()
+  val bq = BigQuery.defaultInstance()
 
   val legacyQuery =
     "SELECT word, word_count FROM [bigquery-public-data:samples.shakespeare] WHERE word = 'Romeo'"
@@ -93,7 +134,7 @@ class BigQueryTypeIT extends FlatSpec with Matchers {
 
   it should "round trip rows with legacy syntax" in {
     val bqt = BigQueryType[LegacyT]
-    val rows = bq.getQueryRows(legacyQuery).toList
+    val rows = bq.query.rows(legacyQuery).toList
     val typed = Seq(LegacyT("Romeo", 117L))
     rows.map(bqt.fromTableRow) shouldBe typed
     typed.map(bqt.toTableRow).map(bqt.fromTableRow) shouldBe typed
@@ -101,7 +142,7 @@ class BigQueryTypeIT extends FlatSpec with Matchers {
 
   it should "round trip rows with SQL syntax" in {
     val bqt = BigQueryType[SqlT]
-    val rows = bq.getQueryRows(sqlQuery).toList
+    val rows = bq.query.rows(sqlQuery).toList
     val typed = Seq(SqlT(Some("Romeo"), Some(117L)))
     rows.map(bqt.fromTableRow) shouldBe typed
     typed.map(bqt.toTableRow).map(bqt.fromTableRow) shouldBe typed
@@ -113,6 +154,36 @@ class BigQueryTypeIT extends FlatSpec with Matchers {
 
   it should "work with SQL syntax with $LATEST" in {
     BigQueryType[SqlLatestT].query shouldBe Some(sqlLatestQuery)
+  }
+
+  it should "have query fn" in {
+    """LegacyLatestT.query("TABLE")""" should compile
+    """SqlLatestT.query("TABLE")""" should compile
+  }
+
+  it should "have query fn with only 1 argument" in {
+    """LegacyLatestT.query("TABLE", 1)""" shouldNot typeCheck
+    """SqlLatestT.query("TABLE", 1)""" shouldNot typeCheck
+  }
+
+  it should "have query fn with multiple arguments" in {
+    """SqlLatestTWithMultiArgs.query("TABLE", 1, 1)""" should compile
+    """SqlLatestTWithMultiArgs.query(1, "TABLE", 1)""" shouldNot typeCheck
+  }
+
+  it should "format query" in {
+    LegacyLatestT.query("TABLE") shouldBe legacyLatestQuery.format("TABLE")
+    SqlLatestT.query("TABLE") shouldBe sqlLatestQuery.format("TABLE")
+  }
+
+  it should "type check annotation arguments" in {
+    """
+      |  @BigQueryType.fromQuery(
+      |    "SELECT word, word_count FROM `data-integration-test.partition_a.table_%s` LIMIT %d",
+      |    "$LATEST",
+      |    "1")
+      |  class WrongFormatSupplied
+    """.stripMargin shouldNot compile
   }
 
   "fromTable" should "work" in {
@@ -130,6 +201,21 @@ class BigQueryTypeIT extends FlatSpec with Matchers {
 
   it should "work with $LATEST" in {
     BigQueryType[FromTableLatestT].table shouldBe Some("data-integration-test:partition_a.table_%s")
+  }
+
+  def containsAllAnnotTypes[T: TypeTag]: Assertion = {
+    val types = typeOf[T].typeSymbol.annotations
+      .map(_.tree.tpe)
+    Seq(typeOf[Annotation1], typeOf[Annotation2])
+      .forall(lt => types.exists(rt => lt =:= rt)) shouldBe true
+  }
+
+  it should "preserve surrounding user defined annotations" in {
+    containsAllAnnotTypes[ShakespeareWithSurroundingAnnotations]
+  }
+
+  it should "preserve sequential user defined annotations" in {
+    containsAllAnnotTypes[ShakespeareWithSequentialAnnotations]
   }
 
   "toTable" should "work" in {

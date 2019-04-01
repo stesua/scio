@@ -17,6 +17,8 @@
 
 package com.spotify.scio.repl
 
+import com.spotify.scio.bigquery.BigQuerySysProps
+
 import scala.reflect.io.File
 import scala.tools.nsc.util.ClassPath
 import scala.tools.nsc.{GenericRunnerCommand, MainGenericRunner}
@@ -51,7 +53,8 @@ trait BaseScioShell extends MainGenericRunner {
 
     def classLoaderURLs(cl: ClassLoader): Array[java.net.URL] = cl match {
       case null => Array()
-      case u: java.net.URLClassLoader => u.getURLs ++ classLoaderURLs(cl.getParent)
+      case u: java.net.URLClassLoader =>
+        u.getURLs ++ classLoaderURLs(cl.getParent)
       case _ => classLoaderURLs(cl.getParent)
     }
 
@@ -65,10 +68,12 @@ trait BaseScioShell extends MainGenericRunner {
 
     // Repl assembly includes paradise's scalac-plugin.xml - required for BigQuery macro
     // There should be no harm if we keep this for sbt launch.
-    val thisJar = this.getClass.getProtectionDomain.getCodeSource.getLocation.getPath
+    val thisJar =
+      this.getClass.getProtectionDomain.getCodeSource.getLocation.getPath
     command.settings.plugin.tryToSet(List(thisJar))
 
-    ClassPath.split(command.settings.classpath.value)
+    ClassPath
+      .split(command.settings.classpath.value)
       .find(File(_).name.startsWith("paradise_"))
       .foreach(s => command.settings.plugin.tryToSet(List(s)))
 
@@ -79,6 +84,9 @@ trait BaseScioShell extends MainGenericRunner {
 
     // Force the repl to be synchronous, so all cmds are executed in the same thread
     command.settings.Yreplsync.value = true
+
+    // Workaround for https://github.com/spotify/scio/issues/867
+    command.settings.Yreplclassbased.value = true
 
     val scioClassLoader = new ScioReplClassLoader(
       command.settings.classpathURLs.toArray ++
@@ -99,8 +107,10 @@ trait BaseScioShell extends MainGenericRunner {
   // scalastyle:on method.length
 
   /** Runs an instance of the shell. */
-  def main(args: Array[String]) {
-    sys.props("bigquery.plugin.disable.dump") = "true"
+  def main(args: Array[String]): Unit = {
+    sys.props(BigQuerySysProps.DisableDump.flag) = "true"
+    sys.props(ScioReplSysProps.MaxPrintString.flag) = "1500"
+
     val retVal = process(args)
     if (!retVal) {
       sys.exit(1)

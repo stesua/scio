@@ -36,15 +36,15 @@ import org.apache.commons.io.IOUtils
 
 import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
-import scala.util.Try
 
 private[scio] object FileStorage {
-  def apply(path: String): FileStorage = new FileStorage(path)
+  @inline final def apply(path: String): FileStorage = new FileStorage(path)
 }
 
-private[scio] class FileStorage(protected[scio] val path: String) {
+private[scio] final class FileStorage(protected[scio] val path: String) {
 
-  private def listFiles: Seq[Metadata] = FileSystems.`match`(path).metadata().asScala
+  private def listFiles: Seq[Metadata] =
+    FileSystems.`match`(path).metadata().asScala
 
   private def getObjectInputStream(meta: Metadata): InputStream =
     Channels.newInputStream(FileSystems.open(meta.resourceId()))
@@ -52,7 +52,13 @@ private[scio] class FileStorage(protected[scio] val path: String) {
   private def getAvroSeekableInput(meta: Metadata): SeekableInput =
     new SeekableInput {
       require(meta.isReadSeekEfficient)
-      private val in = FileSystems.open(meta.resourceId()).asInstanceOf[SeekableByteChannel]
+      private val in = {
+        val channel = FileSystems.open(meta.resourceId()).asInstanceOf[SeekableByteChannel]
+        // metadata is lazy loaded on GCS FS and only triggered upon first read
+        channel.read(ByteBuffer.allocate(1))
+        // reset position
+        channel.position(0)
+      }
       override def read(b: Array[Byte], off: Int, len: Int): Int =
         in.read(ByteBuffer.wrap(b, off, len))
       override def tell(): Long = in.position()
@@ -69,15 +75,21 @@ private[scio] class FileStorage(protected[scio] val path: String) {
       new GenericDatumReader[T](schema)
     }
 
-    listFiles.map(m => DataFileReader.openReader(getAvroSeekableInput(m), reader))
-      .map(_.iterator().asScala).reduce(_ ++ _)
+    listFiles
+      .map(m => DataFileReader.openReader(getAvroSeekableInput(m), reader))
+      .map(_.iterator().asScala)
+      .reduce(_ ++ _)
   }
 
   def textFile: Iterator[String] = {
     val factory = new CompressorStreamFactory()
     def wrapInputStream(in: InputStream) = {
       val buffered = new BufferedInputStream(in)
-      Try(factory.createCompressorInputStream(buffered)).getOrElse(buffered)
+      try {
+        factory.createCompressorInputStream(buffered)
+      } catch {
+        case _: Throwable => buffered
+      }
     }
     val input = getDirectoryInputStream(path, wrapInputStream)
     IOUtils.lineIterator(input, Charsets.UTF_8).asScala
@@ -91,12 +103,12 @@ private[scio] class FileStorage(protected[scio] val path: String) {
     val metadata = try {
       listFiles
     } catch {
-      case e: FileNotFoundException => Seq.empty
+      case _: FileNotFoundException => Seq.empty
     }
     val nums = metadata.flatMap { meta =>
       val m = partPattern.findAllIn(meta.resourceId().toString)
       if (m.hasNext) {
-        Some(m.group(1).toInt, m.group(2).toInt)
+        Some((m.group(1).toInt, m.group(2).toInt))
       } else {
         None
       }
@@ -109,17 +121,17 @@ private[scio] class FileStorage(protected[scio] val path: String) {
       // found xxxxx-of-yyyyy pattern
       val parts = nums.map(_._1).sorted
       val total = nums.map(_._2).toSet
-      metadata.size == nums.size &&  // all paths matched
-        total.size == 1 && total.head == parts.size &&  // yyyyy part
-        parts.head == 0 && parts.last + 1 == parts.size // xxxxx part
+      metadata.size == nums.size && // all paths matched
+      total.size == 1 && total.head == parts.size && // yyyyy part
+      parts.head == 0 && parts.last + 1 == parts.size // xxxxx part
     } else {
       true
     }
   }
 
-  private[scio] def getDirectoryInputStream(path: String,
-                                            wrapperFn: InputStream => InputStream = identity)
-  : InputStream = {
+  private[scio] def getDirectoryInputStream(
+    path: String,
+    wrapperFn: InputStream => InputStream = identity): InputStream = {
     val inputs = listFiles.map(getObjectInputStream).map(wrapperFn).asJava
     new SequenceInputStream(Collections.enumeration(inputs))
   }

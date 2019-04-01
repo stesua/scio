@@ -15,6 +15,12 @@
  * under the License.
  */
 
+// Example: Use Futures and Taps to orchestrate multiple jobs with dependencies
+// Usage:
+
+// `sbt runMain "com.spotify.scio.examples.extra.WordCountOrchestration
+// --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
+// --output=gs://[BUCKET]/[PATH]/wordcount"`
 package com.spotify.scio.examples.extra
 
 import com.spotify.scio._
@@ -25,33 +31,23 @@ import org.apache.beam.sdk.options.PipelineOptions
 
 import scala.concurrent.Future
 
-/*
-SBT
-runMain
-  com.spotify.scio.examples.extra.WordCountOrchestration
-  --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
-  --output=gs://[BUCKET]/[PATH]/wordcount
-*/
-
-// Use Futures and Taps to orchestrate multiple jobs with dependencies
 object WordCountOrchestration {
 
-  type FT[T] = Future[Tap[T]]
-
   def main(cmdlineArgs: Array[String]): Unit = {
+    import scala.concurrent.ExecutionContext.Implicits.global
     val (opts, args) = ScioContext.parseArguments[PipelineOptions](cmdlineArgs)
 
     val output = args("output")
 
     // Submit count job 1
-    val f1 = count(opts, ExampleData.KING_LEAR)
+    val f1 = Future(count(opts, ExampleData.KING_LEAR))
 
     // Submit count job 2
-    val f2 = count(opts, ExampleData.OTHELLO)
+    val f2 = Future(count(opts, ExampleData.OTHELLO))
 
     import scala.concurrent.ExecutionContext.Implicits.global
 
-    // extract Tap[T]s from two Future[Tap[T]]s
+    // extract `Tap[T]`s from two `Future[Tap[T]]`s
     val f = for {
       t1 <- f1
       t2 <- f2
@@ -60,40 +56,35 @@ object WordCountOrchestration {
     // scalastyle:off regex
     // Block process and wait for last future
     println("Tap:")
-    f.waitForResult().value.take(10).foreach(println)
+    f.value.take(10).foreach(println)
     // scalastyle:on regex
   }
 
-  def count(opts: PipelineOptions, inputPath: String): FT[(String, Long)] = {
+  def count(opts: PipelineOptions, inputPath: String): Tap[(String, Long)] = {
     val sc = ScioContext(opts)
-    val f = sc.textFile(inputPath)
+    val f = sc
+      .textFile(inputPath)
       .flatMap(_.split("[^a-zA-Z']+").filter(_.nonEmpty))
       .countByValue
       .materialize
-    sc.close()
-    f
+    sc.close().waitUntilDone().tap(f)
   }
 
   // Split out transform for unit testing
-  def countWords(in: SCollection[String]): SCollection[(String, Long)] = {
-    in.flatMap(_.split("[^a-zA-Z']+").filter(_.nonEmpty))
-      .countByValue
-  }
+  def countWords(in: SCollection[String]): SCollection[(String, Long)] =
+    in.flatMap(_.split("[^a-zA-Z']+").filter(_.nonEmpty)).countByValue
 
-  def merge(opts: PipelineOptions,
-            s: Seq[Tap[(String, Long)]],
-            outputPath: String): FT[String] = {
+  def merge(opts: PipelineOptions, s: Seq[Tap[(String, Long)]], outputPath: String): Tap[String] = {
     val sc = ScioContext(opts)
     val f = mergeCounts(s.map(_.open(sc)))
       .map(kv => kv._1 + " " + kv._2)
       .saveAsTextFile(outputPath)
-    sc.close()
-    f
+
+    sc.close().waitUntilDone().tap(f)
   }
 
   // Split out transform for unit testing
-  def mergeCounts(ins: Seq[SCollection[(String, Long)]]): SCollection[(String, Long)] = {
+  def mergeCounts(ins: Seq[SCollection[(String, Long)]]): SCollection[(String, Long)] =
     SCollection.unionAll(ins).sumByKey
-  }
 
 }

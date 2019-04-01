@@ -23,9 +23,7 @@ import java.util.UUID
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import com.spotify.scio.ScioContext
-import org.apache.beam.sdk.coders.{Coder, CoderRegistry}
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions
-import org.apache.beam.sdk.options.PipelineOptionsFactory
 import org.apache.beam.sdk.util.Transport
 import org.apache.beam.sdk.{PipelineResult, PipelineRunner}
 import org.slf4j.LoggerFactory
@@ -35,10 +33,18 @@ import scala.util.{Failure, Success, Try}
 
 private[scio] object ScioUtil {
 
+  // Try.toEither does not exists in Scala 2.11
+  def toEither[T](t: Try[T]): Either[Throwable, T] =
+    t match {
+      case Success(s) => Right(s)
+      case Failure(e) => Left(e)
+    }
+
   @transient lazy private val log = LoggerFactory.getLogger(this.getClass)
   @transient lazy val jsonFactory = Transport.getJsonFactory
 
-  def isLocalUri(uri: URI): Boolean = uri.getScheme == null || uri.getScheme == "file"
+  def isLocalUri(uri: URI): Boolean =
+    uri.getScheme == null || uri.getScheme == "file"
 
   def isRemoteUri(uri: URI): Boolean = !isLocalUri(uri)
 
@@ -51,19 +57,11 @@ private[scio] object ScioUtil {
   def isRemoteRunner(runner: Class[_ <: PipelineRunner[_ <: PipelineResult]]): Boolean =
     !isLocalRunner(runner)
 
-  def classOf[T: ClassTag]: Class[T] = implicitly[ClassTag[T]].runtimeClass.asInstanceOf[Class[T]]
+  def classOf[T: ClassTag]: Class[T] =
+    implicitly[ClassTag[T]].runtimeClass.asInstanceOf[Class[T]]
 
-  def getScalaCoder[T: ClassTag]: Coder[T] = {
-    import com.spotify.scio.Implicits._
-
-    val coderRegistry = CoderRegistry.createDefault()
-    coderRegistry.registerScalaCoders()
-
-    val options = PipelineOptionsFactory.create()
-    coderRegistry.getScalaCoder[T](options)
-  }
-
-  def getScalaJsonMapper: ObjectMapper = new ObjectMapper().registerModule(DefaultScalaModule)
+  def getScalaJsonMapper: ObjectMapper =
+    new ObjectMapper().registerModule(DefaultScalaModule)
 
   def addPartSuffix(path: String, ext: String = ""): String =
     if (path.endsWith("/")) s"${path}part-*$ext" else s"$path/part-*$ext"
@@ -92,5 +90,8 @@ private[scio] object ScioUtil {
       tmpDir + (if (tmpDir.endsWith("/")) "" else "/") + filename
     }
   }
+
+  def pathWithShards(path: String): String =
+    path.replaceAll("\\/+$", "") + "/part"
 
 }

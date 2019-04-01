@@ -24,26 +24,29 @@ class MetricsExampleTest extends PipelineSpec {
 
   "MetricsExample" should "work" in {
     JobTest[com.spotify.scio.examples.extra.MetricsExample.type]
-      // static metrics
+    // static metrics
       .counter(MetricsExample.sum)(_ shouldBe (1 to 100).sum)
       .counter(MetricsExample.sum2)(_ shouldBe (1 to 100).sum + (1 to 50).sum)
       .counter(MetricsExample.count)(_ shouldBe 100)
       .distribution(MetricsExample.dist) { d =>
-        d.count() shouldBe 100
-        d.min() shouldBe 1
-        d.max() shouldBe 100
-        d.sum() shouldBe (1 to 100).sum
-        d.mean() shouldBe (1 to 100).sum / 100.0
+        d.getCount shouldBe 100
+        d.getMin shouldBe 1
+        d.getMax shouldBe 100
+        d.getSum shouldBe (1 to 100).sum
+        d.getMean shouldBe (1 to 100).sum / 100.0
       }
       .gauge(MetricsExample.gauge) { g =>
-        g.value() should be >= 1L
-        g.value() should be <= 100L
+        g.getValue should be >= 1L
+        g.getValue should be <= 100L
       }
       // dynamic metrics
       .counter(ScioMetrics.counter("even_2"))(_ shouldBe 1)
       .counter(ScioMetrics.counter("even_4"))(_ shouldBe 1)
       .counter(ScioMetrics.counter("even_6"))(_ shouldBe 1)
       .counter(ScioMetrics.counter("even_8"))(_ shouldBe 1)
+      // context-initialized metrics
+      .counter(ScioMetrics.counter("ctxcount"))(_ shouldBe 0)
+      .counter(ScioMetrics.counter("namespace", "ctxcount"))(_ shouldBe 0)
       .run()
   }
 

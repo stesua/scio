@@ -17,6 +17,7 @@
 
 package com.spotify.scio.bigquery.types
 
+import com.spotify.scio.bigquery.BigQuerySysProps
 import org.slf4j.LoggerFactory
 
 import scala.reflect.macros._
@@ -24,7 +25,7 @@ import scala.reflect.runtime.universe._
 
 private[types] object MacroUtil {
 
-  private val logger = LoggerFactory.getLogger(this.getClass)
+  private[this] val logger = LoggerFactory.getLogger(this.getClass)
 
   // Case class helpers for runtime reflection
 
@@ -33,15 +34,16 @@ private[types] object MacroUtil {
       List(typeOf[Product], typeOf[Serializable], typeOf[Equals])
         .forall(b => t.baseClasses.contains(b.typeSymbol))
 
-  def isField(s: Symbol): Boolean = s.isPublic && s.isMethod && !s.isSynthetic && !s.isConstructor
+  def isField(s: Symbol): Boolean =
+    s.isPublic && s.isMethod && !s.isSynthetic && !s.isConstructor
 
   // Case class helpers for macros
 
   def isCaseClass(c: blackbox.Context)(t: c.Type): Boolean = {
     import c.universe._
     !t.toString.startsWith("scala.") &&
-      List(typeOf[Product], typeOf[Serializable], typeOf[Equals])
-        .forall(b => t.baseClasses.contains(b.typeSymbol))
+    List(typeOf[Product], typeOf[Serializable], typeOf[Equals])
+      .forall(b => t.baseClasses.contains(b.typeSymbol))
   }
 
   def isField(c: blackbox.Context)(s: c.Symbol): Boolean =
@@ -67,8 +69,8 @@ private[types] object MacroUtil {
 
   // Debugging
 
-  def debug(msg: Any): Unit = {
-    if (sys.props("bigquery.types.debug") != null && sys.props("bigquery.types.debug").toBoolean) {
+  @inline def debug(msg: Any): Unit = {
+    if (BigQuerySysProps.Debug.value("false").toBoolean) {
       logger.info(msg.toString)
     }
   }

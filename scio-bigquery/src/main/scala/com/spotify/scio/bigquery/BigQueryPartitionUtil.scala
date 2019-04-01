@@ -20,23 +20,24 @@ package com.spotify.scio.bigquery
 import java.util.regex.Pattern
 
 import com.google.api.services.bigquery.model.TableReference
-import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers
 import com.google.common.primitives.Longs
+import com.spotify.scio.bigquery.client.BigQuery
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers
 
 private[bigquery] object BigQueryPartitionUtil {
 
   // Ported from com.google.cloud.dataflow.sdk.io.BigQueryHelpers
 
-  private val PROJECT_ID_REGEXP = "[a-z][-a-z0-9:.]{4,61}[a-z0-9]"
-  private val DATASET_REGEXP = "[-\\w.]{1,1024}"
-  private val TABLE_REGEXP = "[-\\w$@]{1,1024}($LATEST)?"
-  private val DATASET_TABLE_REGEXP_LEGACY =
+  private[this] val PROJECT_ID_REGEXP = "[a-z][-a-z0-9:.]{4,61}[a-z0-9]"
+  private[this] val DATASET_REGEXP = "[-\\w.]{1,1024}"
+  private[this] val TABLE_REGEXP = "[-\\w$@]{1,1024}($LATEST)?"
+  private[this] val DATASET_TABLE_REGEXP_LEGACY =
     s"((?<PROJECT>$PROJECT_ID_REGEXP):)?(?<DATASET>$DATASET_REGEXP)\\.(?<TABLE>$TABLE_REGEXP)"
-  private val DATASET_TABLE_REGEXP_STANDARD =
+  private[this] val DATASET_TABLE_REGEXP_STANDARD =
     s"((?<PROJECT>$PROJECT_ID_REGEXP).)?(?<DATASET>$DATASET_REGEXP)\\.(?<TABLE>$TABLE_REGEXP)"
-  private val QUERY_TABLE_SPEC_LEGACY =
+  private[this] val QUERY_TABLE_SPEC_LEGACY =
     Pattern.compile(s"(?<=\\[)$DATASET_TABLE_REGEXP_LEGACY(?=\\])")
-  private val QUERY_TABLE_SPEC_STANDARD =
+  private[this] val QUERY_TABLE_SPEC_STANDARD =
     Pattern.compile(s"(?<=\\`)$DATASET_TABLE_REGEXP_STANDARD(?=\\`)")
 
   private def extractTables(sqlQuery: String): Map[String, TableReference] = {
@@ -54,9 +55,10 @@ private[bigquery] object BigQueryPartitionUtil {
     b.result()
   }
 
-  private def getPartitions(bq: BigQueryClient, tableRef: TableReference): Set[String] = {
+  private def getPartitions(bq: BigQuery, tableRef: TableReference): Set[String] = {
     val prefix = tableRef.getTableId.split('$')(0)
-    bq.getTables(tableRef.getProjectId, tableRef.getDatasetId)
+    bq.tables
+      .tableReferences(tableRef.getProjectId, tableRef.getDatasetId)
       .filter(_.getTableId.startsWith(prefix))
       .map(_.getTableId.substring(prefix.length))
       .toSet
@@ -65,25 +67,26 @@ private[bigquery] object BigQueryPartitionUtil {
       .filter(e => Longs.tryParse(e) != null)
   }
 
-  def latestQuery(bq: BigQueryClient, sqlQuery: String): String = {
-    val tables = extractTables(sqlQuery).filter(_._2.getTableId.endsWith("$LATEST"))
+  def latestQuery(bq: BigQuery, sqlQuery: String): String = {
+    val tables =
+      extractTables(sqlQuery).filter(_._2.getTableId.endsWith("$LATEST"))
     if (tables.isEmpty) {
       sqlQuery
     } else {
       val overlaps = tables
         .map(t => getPartitions(bq, t._2))
         .reduce(_ intersect _)
-      require(
-        overlaps.nonEmpty,
-        "Cannot find latest common partition for " + tables.keys.mkString(", "))
+      require(overlaps.nonEmpty,
+              "Cannot find latest common partition for " + tables.keys.mkString(", "))
       val latest = overlaps.max
-      tables.foldLeft(sqlQuery) { case (q, (spec, _)) =>
-        q.replace(spec, spec.replace("$LATEST", latest))
+      tables.foldLeft(sqlQuery) {
+        case (q, (spec, _)) =>
+          q.replace(spec, spec.replace("$LATEST", latest))
       }
     }
   }
 
-  def latestTable(bq: BigQueryClient, tableSpec: String): String = {
+  def latestTable(bq: BigQuery, tableSpec: String): String = {
     val ref = BigQueryHelpers.parseTableSpec(tableSpec)
     if (ref.getTableId.endsWith("$LATEST")) {
       val partitions = getPartitions(bq, ref)

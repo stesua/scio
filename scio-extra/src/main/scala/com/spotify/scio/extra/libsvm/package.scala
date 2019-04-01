@@ -19,6 +19,8 @@ package com.spotify.scio.extra
 
 import breeze.linalg.SparseVector
 import com.spotify.scio.ScioContext
+import com.spotify.scio.coders.Coder
+
 import com.spotify.scio.values.SCollection
 import com.twitter.algebird.Max
 
@@ -38,13 +40,16 @@ package object libsvm {
   private def parseLibSVMRecord(line: String): (Double, Array[Int], Array[Double]) = {
     val items = line.split(' ')
     val label = items.head.toDouble
-    val (indices, values) = items.tail.filter(_.nonEmpty).map { item =>
-      val indexAndValue = item.split(':')
-      val index = indexAndValue(0).toInt - 1
-      // Convert 1-based indices to 0-based.
-      val value = indexAndValue(1).toDouble
-      (index, value)
-    }.unzip
+    val (indices, values) = items.tail
+      .filter(_.nonEmpty)
+      .map { item =>
+        val indexAndValue = item.split(':')
+        val index = indexAndValue(0).toInt - 1
+        // Convert 1-based indices to 0-based.
+        val value = indexAndValue(1).toDouble
+        (index, value)
+      }
+      .unzip
 
     // check if indices are one-based and in ascending order
     var previous = -1
@@ -52,9 +57,10 @@ package object libsvm {
     val indicesLength = indices.length
     while (i < indicesLength) {
       val current = indices(i)
-      require(current > previous, s"indices should be one-based and in ascending order;"
-        +
-        s""" found current=$current, previous=$previous; line="$line"""")
+      require(current > previous,
+              s"indices should be one-based and in ascending order;"
+                +
+                  s""" found current=$current, previous=$previous; line="$line"""")
       previous = current
       i += 1
     }
@@ -62,8 +68,8 @@ package object libsvm {
   }
 
   def libSVMCollection(col: SCollection[String],
-                       numFeatures: Int = 0)
-  : SCollection[(Double, SparseVector[Double])] = {
+                       numFeatures: Int = 0): SCollection[(Double, SparseVector[Double])] = {
+    implicit val sparseArrayCoder: Coder[SparseVector[Double]] = Coder.kryo[SparseVector[Double]]
     val data = col
       .map(_.trim)
       .filter(line => !(line.isEmpty || line.startsWith("#")))
@@ -72,17 +78,24 @@ package object libsvm {
     val featureCntCol = if (numFeatures > 0) {
       col.context.parallelize(List(numFeatures))
     } else {
-      data.map { case (_, indices, _) =>
-        indices.lastOption.getOrElse(0)
-      }.sum(Max.maxSemigroup).map(_ + 1)
+      data
+        .map {
+          case (_, indices, _) =>
+            indices.lastOption.getOrElse(0)
+        }
+        .sum(Max.maxSemigroup, Coder[Int])
+        .map(_ + 1)
     }
 
-    data.cross(featureCntCol).map { case ((label, indicies, values), featureCount) =>
-      (label, SparseVector[Double](featureCount)(indicies.zip(values): _*))
-    }
+    data
+      .cross(featureCntCol)
+      .map {
+        case ((label, indicies, values), featureCount) =>
+          (label, SparseVector[Double](featureCount)(indicies.zip(values): _*))
+      }
   }
 
-  implicit class SVMReader(@transient val self: ScioContext) extends Serializable {
+  implicit class SVMReader(@transient private val self: ScioContext) extends AnyVal {
 
     /**
      * Loads labeled data in the LIBSVM format into an SCollection[(Double, SparseVector)].
@@ -100,8 +113,7 @@ package object libsvm {
      * @return            labeled data stored as an SCollection[(Double, SparseVector)]
      */
     def libSVMFile(path: String,
-                   numFeatures: Int = 0)
-    : SCollection[(Double, SparseVector[Double])] =
+                   numFeatures: Int = 0): SCollection[(Double, SparseVector[Double])] =
       libSVMCollection(self.textFile(path), numFeatures)
   }
 
