@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,23 +24,20 @@ import org.apache.avro.generic.GenericRecord
 import scala.reflect.macros._
 
 private[types] object ConverterProvider {
-
-  def fromGenericRecordImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[(GenericRecord => T)] = {
+  def fromGenericRecordImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[GenericRecord => T] = {
     val tpe = implicitly[c.WeakTypeTag[T]].tpe
     val r = fromGenericRecordInternal(c)(tpe)
 
-    c.Expr[(GenericRecord => T)](r)
+    c.Expr[GenericRecord => T](r)
   }
 
-  def toGenericRecordImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[(T => GenericRecord)] = {
+  def toGenericRecordImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[T => GenericRecord] = {
     val tpe = implicitly[c.WeakTypeTag[T]].tpe
     val r = toGenericRecordInternal(c)(tpe)
 
-    c.Expr[(T => GenericRecord)](r)
+    c.Expr[T => GenericRecord](r)
   }
 
-  // scalastyle:off cyclomatic.complexity
-  // scalastyle:off method.length
   private def fromGenericRecordInternal(c: blackbox.Context)(tpe: c.Type): c.Tree = {
     import c.universe._
 
@@ -48,7 +45,7 @@ private[types] object ConverterProvider {
     // Converter helpers
     // =======================================================================
 
-    def cast(tree: Tree, tpe: Type): Tree = {
+    def cast(tree: Tree, tpe: Type): Tree =
       tpe match {
         case t if t =:= typeOf[Boolean] => q"$tree.asInstanceOf[Boolean]"
         case t if t =:= typeOf[Int]     => q"$tree.asInstanceOf[Int]"
@@ -80,7 +77,6 @@ private[types] object ConverterProvider {
           """
         case _ => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
       }
-    }
 
     def option(tree: Tree, tpe: Type): Tree =
       q"if ($tree == null) None else Some(${cast(tree, tpe)})"
@@ -92,8 +88,8 @@ private[types] object ConverterProvider {
     }
 
     def map(tree: Tree, tpe: Type): Tree = {
-      val jm = tq"_root_.java.util.Map[String, AnyRef]"
-      q"$tree.asInstanceOf[$jm].asScala.mapValues(x => ${cast(q"x", tpe)}).toMap"
+      val jm = tq"_root_.java.util.Map[AnyRef, AnyRef]"
+      q"$tree.asInstanceOf[$jm].asScala.iterator.map(kv => (kv._1.toString, ${cast(q"kv._2", tpe)})).toMap"
     }
 
     def field(symbol: Symbol, fn: TermName): Tree = {
@@ -112,7 +108,7 @@ private[types] object ConverterProvider {
       val companion = tpe.typeSymbol.companion
       val gets = tpe.erasure match {
         case t if isCaseClass(c)(t) => getFields(c)(t).map(s => field(s, fn))
-        case t                      => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
+        case _                      => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
       }
       q"$companion(..$gets)"
     }
@@ -128,11 +124,7 @@ private[types] object ConverterProvider {
         }
     """
   }
-  // scalastyle:on cyclomatic.complexity
-  // scalastyle:on method.length
 
-  // scalastyle:off cyclomatic.complexity
-  // scalastyle:off method.length
   private def toGenericRecordInternal(c: blackbox.Context)(tpe: c.Type): c.Tree = {
     import c.universe._
 
@@ -140,7 +132,7 @@ private[types] object ConverterProvider {
     // Converter helpers
     // =======================================================================
 
-    def cast(tree: Tree, tpe: Type): Tree = {
+    def cast(tree: Tree, tpe: Type): Tree =
       tpe match {
         case t if t =:= typeOf[Boolean] => tree
         case t if t =:= typeOf[Int]     => tree
@@ -168,7 +160,6 @@ private[types] object ConverterProvider {
           """
         case _ => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
       }
-    }
 
     def option(tree: Tree, tpe: Type): Tree =
       q"if ($tree.isDefined) ${cast(q"$tree.get", tpe)} else null"
@@ -202,9 +193,7 @@ private[types] object ConverterProvider {
         q"val result = new ${p(c, ApacheAvro)}.generic.GenericData.Record($schemaOf)"
       val body = sets.map {
         case (fieldName, value) =>
-          // scalastyle:off line.size.limit
           q"if (${p(c, ScioAvro)}.types.ConverterUtil.notNull($value)) result.put($fieldName, $value)"
-        // scalastyle:on line.size.limit
       }
       val footer = q"result"
       q"{$header; ..$body; $footer}"
@@ -221,8 +210,6 @@ private[types] object ConverterProvider {
         }
     """
   }
-  // scalastyle:on cyclomatic.complexity
-  // scalastyle:on method.length
 }
 
 object ConverterUtil {

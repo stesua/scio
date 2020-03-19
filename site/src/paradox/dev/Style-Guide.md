@@ -6,7 +6,7 @@
 
 We use [scalafmt](https://scalameta.org/scalafmt) to format code automatically and keep the code style consistent.
 
-#### `Sbt` plugin 
+#### `Sbt` plugin
 
 Run the following command to format the entire codebase.
 
@@ -20,23 +20,23 @@ We also want to avoid custom settings as much as possible to make on-boarding ne
 
 - Set _Code Style &rarr; Scala &rarr; Formatter &rarr; scalafmt_
 - Under _Copyright &rarr; Copyright Profiles_, add the following template.
-  
-  ```
+
+```
   Copyright $today.year Spotify AB.
-  
+
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
   You may obtain a copy of the License at
-  
+
       http://www.apache.org/licenses/LICENSE-2.0
-  
+
   Unless required by applicable law or agreed to in writing,
   software distributed under the License is distributed on an
   "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
   KIND, either express or implied.  See the License for the
   specific language governing permissions and limitations
   under the License.
-  ```
+```
 
 ### ScalaStyle
 
@@ -60,7 +60,7 @@ Check `ScalaStyle` [configuration](http://www.scalastyle.org/configuration.html)
 rules = [
   RemoveUnused,
   LeakingImplicitClassVal
-]  
+]
 ```
 
 ### References
@@ -84,8 +84,8 @@ We want to adhere to the styles of well known Scala projects and use the followi
     writeDisposition: WriteDisposition,
     createDisposition: CreateDisposition,
     tableDescription: String,
-    timePartitioning: TimePartitioning)(implicit ev: T <:< TableRow): Future[Tap[TableRow]] = {
-   // method body 
+    timePartitioning: TimePartitioning)(implicit ev: T <:< TableRow): ClosedTap[TableRow] = {
+   // method body
   }
 
   def saveAsTypedBigQuery(
@@ -95,7 +95,7 @@ We want to adhere to the styles of well known Scala projects and use the followi
     timePartitioning: TimePartitioning = TableWriteParam.DefaultTimePartitioning)(
     implicit tt: TypeTag[T],
     ev: T <:< HasAnnotation,
-    coder: Coder[T]): Future[Tap[T]] = {
+    coder: Coder[T]): ClosedTap[T] = {
       // method body
   }
 ```
@@ -109,8 +109,7 @@ class Foo(val param1: String,
   extends FooInterface  // 2 space indent here
   with Logging {
 
-  def firstMethod(): Unit = { ... }  // blank line above
-
+  def firstMethod(): Unit = { /* body */ }  // blank line above
 }
 ```
 

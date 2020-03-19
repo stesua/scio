@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import com.google.protobuf.Message
 import com.spotify.scio.avro.types.AvroType.HasAvroAnnotation
 import com.spotify.scio.coders.{AvroBytesUtil, Coder, CoderMaterializer}
 import com.spotify.scio.io._
-import com.spotify.scio.util.ScioUtil
+import com.spotify.scio.util.{Functions, ProtobufUtil, ScioUtil}
 import com.spotify.scio.values._
 import com.spotify.scio.{avro, ScioContext}
 import org.apache.avro.Schema
@@ -34,12 +34,12 @@ import org.apache.beam.sdk.{io => beam}
 
 import scala.collection.JavaConverters._
 import scala.reflect.runtime.universe._
-import scala.reflect.{classTag, ClassTag}
+import scala.reflect.ClassTag
 
 final case class ObjectFileIO[T: Coder](path: String) extends ScioIO[T] {
   override type ReadP = Unit
   override type WriteP = ObjectFileIO.WriteParam
-  override final val tapT = TapOf[T]
+  final override val tapT = TapOf[T]
 
   /**
    * Get an SCollection for an object file using default serialization.
@@ -47,11 +47,10 @@ final case class ObjectFileIO[T: Coder](path: String) extends ScioIO[T] {
    * Serialized objects are stored in Avro files to leverage Avro's block file format. Note that
    * serialization is not guaranteed to be compatible across Scio releases.
    */
-  override def read(sc: ScioContext, params: ReadP): SCollection[T] = {
-    val coder = CoderMaterializer.beam(sc, Coder[T])
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[T] = {
+    val coder = CoderMaterializer.beamWithDefault(Coder[T])
     implicit val bcoder = Coder.avroGenericRecordCoder(AvroBytesUtil.schema)
-    GenericRecordIO[GenericRecord](path, AvroBytesUtil.schema)
-      .read(sc, params)
+    sc.read(GenericRecordIO(path, AvroBytesUtil.schema))
       .parDo(new DoFn[GenericRecord, T] {
         @ProcessElement
         private[scio] def processElement(c: DoFn[GenericRecord, T]#ProcessContext): Unit =
@@ -65,17 +64,17 @@ final case class ObjectFileIO[T: Coder](path: String) extends ScioIO[T] {
    * Serialized objects are stored in Avro files to leverage Avro's block file format. Note that
    * serialization is not guaranteed to be compatible across Scio releases.
    */
-  override def write(data: SCollection[T], params: WriteP): Tap[T] = {
-    val elemCoder = CoderMaterializer.beam(data.context, Coder[T])
+  override protected def write(data: SCollection[T], params: WriteP): Tap[T] = {
+    val elemCoder = CoderMaterializer.beamWithDefault(Coder[T])
     implicit val bcoder = Coder.avroGenericRecordCoder(AvroBytesUtil.schema)
-    val bytes = data
+    data
       .parDo(new DoFn[T, GenericRecord] {
         @ProcessElement
         private[scio] def processElement(c: DoFn[T, GenericRecord]#ProcessContext): Unit =
           c.output(AvroBytesUtil.encode(elemCoder, c.element()))
       })
-    GenericRecordIO[GenericRecord](path, AvroBytesUtil.schema).write(bytes, params)
-    tap(Unit)
+      .write(GenericRecordIO(path, AvroBytesUtil.schema))(params)
+    tap(())
   }
 
   override def tap(read: ReadP): Tap[T] =
@@ -90,12 +89,8 @@ object ObjectFileIO {
 final case class ProtobufIO[T <: Message: ClassTag](path: String) extends ScioIO[T] {
   override type ReadP = Unit
   override type WriteP = ProtobufIO.WriteParam
-  override final val tapT = TapOf[T]
-
-  private val protoCoder =
-    Coder
-      .protoMessageCoder[Message](classTag[T].asInstanceOf[ClassTag[Message]])
-      .asInstanceOf[Coder[T]]
+  final override val tapT = TapOf[T]
+  private val protoCoder = Coder.protoMessageCoder[T]
 
   /**
    * Get an SCollection for a Protobuf file.
@@ -103,8 +98,8 @@ final case class ProtobufIO[T <: Message: ClassTag](path: String) extends ScioIO
    * Protobuf messages are serialized into `Array[Byte]` and stored in Avro files to leverage
    * Avro's block file format.
    */
-  override def read(sc: ScioContext, params: ReadP): SCollection[T] =
-    ObjectFileIO[T](path)(protoCoder).read(sc, params)
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[T] =
+    sc.read(ObjectFileIO[T](path)(protoCoder))
 
   /**
    * Save this SCollection as a Protobuf file.
@@ -112,13 +107,9 @@ final case class ProtobufIO[T <: Message: ClassTag](path: String) extends ScioIO
    * Protobuf messages are serialized into `Array[Byte]` and stored in Avro files to leverage
    * Avro's block file format.
    */
-  override def write(data: SCollection[T], params: WriteP): Tap[T] = {
-    import me.lyh.protobuf.generic
-    val schema = generic.Schema
-      .of[Message](classTag[T].asInstanceOf[ClassTag[Message]])
-      .toJson
-    val metadata = params.metadata ++ Map("protobuf.generic.schema" -> schema)
-    ObjectFileIO[T](path)(protoCoder).write(data, params.copy(metadata = metadata))
+  override protected def write(data: SCollection[T], params: WriteP): Tap[T] = {
+    val metadata = params.metadata ++ ProtobufUtil.schemaMetadataOf[T]
+    data.write(ObjectFileIO[T](path)(protoCoder))(params.copy(metadata = metadata)).underlying
   }
 
   override def tap(read: ReadP): Tap[T] =
@@ -131,22 +122,23 @@ object ProtobufIO {
 }
 
 sealed trait AvroIO[T] extends ScioIO[T] {
-  override final val tapT = TapOf[T]
+  final override val tapT = TapOf[T]
 
-  protected def avroOut[U](sc: SCollection[T],
-                           write: beam.AvroIO.Write[U],
-                           path: String,
-                           numShards: Int,
-                           suffix: String,
-                           codec: CodecFactory,
-                           metadata: Map[String, AnyRef]) =
+  protected def avroOut[U](
+    sc: SCollection[T],
+    write: beam.AvroIO.Write[U],
+    path: String,
+    numShards: Int,
+    suffix: String,
+    codec: CodecFactory,
+    metadata: Map[String, AnyRef]
+  ) =
     write
       .to(ScioUtil.pathWithShards(path))
       .withNumShards(numShards)
       .withSuffix(suffix)
       .withCodec(codec)
       .withMetadata(metadata.asJava)
-
 }
 
 final case class SpecificRecordIO[T <: SpecificRecord: ClassTag: Coder](path: String)
@@ -160,7 +152,7 @@ final case class SpecificRecordIO[T <: SpecificRecord: ClassTag: Coder](path: St
    * Get an SCollection of [[org.apache.avro.specific.SpecificRecord SpecificRecord]]
    * from an Avro file.
    */
-  override def read(sc: ScioContext, params: ReadP): SCollection[T] = {
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[T] = {
     val cls = ScioUtil.classOf[T]
     val t = beam.AvroIO.read(cls).from(path)
     sc.wrap(sc.applyInternal(t))
@@ -170,20 +162,56 @@ final case class SpecificRecordIO[T <: SpecificRecord: ClassTag: Coder](path: St
    * Save this SCollection of [[org.apache.avro.specific.SpecificRecord SpecificRecord]] as
    * an Avro file.
    */
-  override def write(data: SCollection[T], params: WriteP): Tap[T] = {
+  override protected def write(data: SCollection[T], params: WriteP): Tap[T] = {
     val cls = ScioUtil.classOf[T]
     val t = beam.AvroIO.write(cls)
     data.applyInternal(
-      avroOut(data, t, path, params.numShards, params.suffix, params.codec, params.metadata))
-    tap(Unit)
+      avroOut(data, t, path, params.numShards, params.suffix, params.codec, params.metadata)
+    )
+    tap(())
   }
 
   override def tap(read: ReadP): Tap[T] =
     SpecificRecordTap[T](ScioUtil.addPartSuffix(path))
 }
 
-final case class GenericRecordIO[T: ClassTag: Coder](path: String, schema: Schema)
-    extends AvroIO[T] {
+@deprecated(
+  "The use of reflective records is discouraged. Consider converting to GenericRecord explicitly",
+  "0.8.0"
+)
+final case class ReflectiveRecordIO[T: Coder](path: String, schema: Schema) extends AvroIO[T] {
+  override type ReadP = Unit
+  override type WriteP = AvroIO.WriteParam
+
+  override def testId: String = s"AvroIO($path)"
+
+  /**
+   * Get an SCollection of [[T]] from an Avro file using reflection.
+   */
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[T] = {
+    val t = beam.AvroIO
+      .readGenericRecords(schema)
+      .from(path)
+      .asInstanceOf[beam.AvroIO.Read[T]]
+    sc.wrap(sc.applyInternal(t))
+  }
+
+  /**
+   * Save this SCollection [[T]] as a Avro file using reflection.
+   */
+  override protected def write(data: SCollection[T], params: WriteP): Tap[T] = {
+    val t = beam.AvroIO.writeGenericRecords(schema).asInstanceOf[beam.AvroIO.Write[T]]
+    data.applyInternal(
+      avroOut(data, t, path, params.numShards, params.suffix, params.codec, params.metadata)
+    )
+    tap(())
+  }
+
+  override def tap(read: ReadP): Tap[T] =
+    ReflectiveRecordTap(ScioUtil.addPartSuffix(path), schema)
+}
+
+final case class GenericRecordIO(path: String, schema: Schema) extends AvroIO[GenericRecord] {
   override type ReadP = Unit
   override type WriteP = AvroIO.WriteParam
 
@@ -194,30 +222,70 @@ final case class GenericRecordIO[T: ClassTag: Coder](path: String, schema: Schem
    * file.
    *
    */
-  override def read(sc: ScioContext, params: ReadP): SCollection[T] = {
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[GenericRecord] = {
     val t = beam.AvroIO
       .readGenericRecords(schema)
       .from(path)
-      .asInstanceOf[beam.AvroIO.Read[T]]
     sc.wrap(sc.applyInternal(t))
   }
 
   /**
    * Save this SCollection [[org.apache.avro.generic.GenericRecord GenericRecord]] as a Avro file.
    */
-  override def write(data: SCollection[T], params: WriteP): Tap[T] = {
-    val t = beam.AvroIO.writeGenericRecords(schema).asInstanceOf[beam.AvroIO.Write[T]]
+  override protected def write(
+    data: SCollection[GenericRecord],
+    params: WriteP
+  ): Tap[GenericRecord] = {
+    val t = beam.AvroIO.writeGenericRecords(schema)
     data.applyInternal(
-      avroOut(data, t, path, params.numShards, params.suffix, params.codec, params.metadata))
-    tap(Unit)
+      avroOut(data, t, path, params.numShards, params.suffix, params.codec, params.metadata)
+    )
+    tap(())
   }
 
-  override def tap(read: ReadP): Tap[T] =
-    GenericRecordTap[T](ScioUtil.addPartSuffix(path), schema)
+  override def tap(read: ReadP): Tap[GenericRecord] =
+    GenericRecordTap(ScioUtil.addPartSuffix(path), schema)
+}
+
+/**
+ * Given a parseFn, read [[org.apache.avro.generic.GenericRecord GenericRecord]]
+ * and apply a function mapping [[GenericRecord => T]] before producing output.
+ * This IO applies the function at the time of de-serializing Avro GenericRecords.
+ *
+ * This IO doesn't define write, and should not be used to write Avro GenericRecords.
+ */
+final case class GenericRecordParseIO[T](path: String, parseFn: GenericRecord => T)(
+  implicit coder: Coder[T]
+) extends AvroIO[T] {
+  override type ReadP = Unit
+  override type WriteP = Nothing // Output is not defined for Avro Generic Parse IO.
+
+  override def testId: String = s"AvroIO($path)"
+
+  /**
+   * Get an SCollection[T] by applying the [[parseFn]] on
+   * [[org.apache.avro.generic.GenericRecord GenericRecord]]
+   * from an Avro file.
+   */
+  override protected def read(sc: ScioContext, params: Unit): SCollection[T] = {
+    val t = beam.AvroIO
+      .parseGenericRecords(Functions.serializableFn(parseFn))
+      .from(path)
+      .withCoder(CoderMaterializer.beam(sc, coder))
+
+    sc.wrap(sc.applyInternal(t))
+  }
+
+  /**
+   * Writes are undefined for [[GenericRecordParseIO]] since it is used only for reading.
+   */
+  override protected def write(data: SCollection[T], params: Nothing): Tap[T] = ???
+
+  override def tap(read: Unit): Tap[T] =
+    GenericRecordParseTap[T](ScioUtil.addPartSuffix(path), parseFn)
 }
 
 object AvroIO {
-
   object WriteParam {
     private[avro] val DefaultNumShards = 0
     private[avro] val DefaultSuffix = ""
@@ -225,10 +293,12 @@ object AvroIO {
     private[avro] val DefaultMetadata: Map[String, AnyRef] = Map.empty
   }
 
-  final case class WriteParam private (numShards: Int = WriteParam.DefaultNumShards,
-                                       private val _suffix: String = WriteParam.DefaultSuffix,
-                                       codec: CodecFactory = WriteParam.DefaultCodec,
-                                       metadata: Map[String, AnyRef] = WriteParam.DefaultMetadata) {
+  final case class WriteParam private (
+    numShards: Int = WriteParam.DefaultNumShards,
+    private val _suffix: String = WriteParam.DefaultSuffix,
+    codec: CodecFactory = WriteParam.DefaultCodec,
+    metadata: Map[String, AnyRef] = WriteParam.DefaultMetadata
+  ) {
     val suffix: String = _suffix + ".avro"
   }
 
@@ -239,21 +309,21 @@ object AvroIO {
 }
 
 object AvroTyped {
-
   final case class AvroIO[T <: HasAvroAnnotation: ClassTag: TypeTag: Coder](path: String)
       extends ScioIO[T] {
-
     override type ReadP = Unit
     override type WriteP = avro.AvroIO.WriteParam
-    override final val tapT = TapOf[T]
+    final override val tapT = TapOf[T]
 
-    private def typedAvroOut[U](sc: SCollection[T],
-                                write: beam.AvroIO.TypedWrite[U, Void, GenericRecord],
-                                path: String,
-                                numShards: Int,
-                                suffix: String,
-                                codec: CodecFactory,
-                                metadata: Map[String, AnyRef]) =
+    private def typedAvroOut[U](
+      sc: SCollection[T],
+      write: beam.AvroIO.TypedWrite[U, Void, GenericRecord],
+      path: String,
+      numShards: Int,
+      suffix: String,
+      codec: CodecFactory,
+      metadata: Map[String, AnyRef]
+    ) =
       write
         .to(ScioUtil.pathWithShards(path))
         .withNumShards(numShards)
@@ -269,7 +339,7 @@ object AvroTyped {
      * [[com.spotify.scio.avro.types.AvroType AvroType.fromPath]], or
      * [[com.spotify.scio.avro.types.AvroType AvroType.toSchema]].
      */
-    override def read(sc: ScioContext, params: ReadP): SCollection[T] = {
+    override protected def read(sc: ScioContext, params: ReadP): SCollection[T] = {
       val avroT = AvroType[T]
       val t = beam.AvroIO.readGenericRecords(avroT.schema).from(path)
       sc.wrap(sc.applyInternal(t)).map(avroT.fromGenericRecord)
@@ -279,7 +349,7 @@ object AvroTyped {
      * Save this SCollection as an Avro file. Note that element type `T` must be a case class
      * annotated with [[com.spotify.scio.avro.types.AvroType AvroType.toSchema]].
      */
-    override def write(data: SCollection[T], params: WriteP): Tap[T] = {
+    override protected def write(data: SCollection[T], params: WriteP): Tap[T] = {
       val avroT = AvroType[T]
       val t = beam.AvroIO
         .writeCustomTypeToGenericRecords()
@@ -289,16 +359,16 @@ object AvroTyped {
         })
         .withSchema(avroT.schema)
       data.applyInternal(
-        typedAvroOut(data, t, path, params.numShards, params.suffix, params.codec, params.metadata))
-      tap(Unit)
+        typedAvroOut(data, t, path, params.numShards, params.suffix, params.codec, params.metadata)
+      )
+      tap(())
     }
 
     override def tap(read: ReadP): Tap[T] = {
       val avroT = AvroType[T]
-      implicit val bcoder = Coder.avroGenericRecordCoder(avroT.schema)
-      GenericRecordTap[GenericRecord](ScioUtil.addPartSuffix(path), avroT.schema)
+      val bcoder = Coder.avroGenericRecordCoder(avroT.schema)
+      GenericRecordTap(ScioUtil.addPartSuffix(path), avroT.schema)
         .map(avroT.fromGenericRecord)
     }
   }
-
 }

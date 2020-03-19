@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,6 @@ import com.twitter.algebird.Max
  * }}}
  */
 package object libsvm {
-
   private def parseLibSVMRecord(line: String): (Double, Array[Int], Array[Double]) = {
     val items = line.split(' ')
     val label = items.head.toDouble
@@ -57,18 +56,23 @@ package object libsvm {
     val indicesLength = indices.length
     while (i < indicesLength) {
       val current = indices(i)
-      require(current > previous,
-              s"indices should be one-based and in ascending order;"
-                +
-                  s""" found current=$current, previous=$previous; line="$line"""")
+      require(
+        current > previous,
+        s"indices should be one-based and in ascending order;"
+          +
+            s""" found current=$current, previous=$previous; line="$line""""
+      )
       previous = current
       i += 1
     }
     (label, indices, values)
   }
 
-  def libSVMCollection(col: SCollection[String],
-                       numFeatures: Int = 0): SCollection[(Double, SparseVector[Double])] = {
+  @deprecated("LibSVM support is deprecated, use TensorFlow, etc. instead", "0.8.0")
+  def libSVMCollection(
+    col: SCollection[String],
+    numFeatures: Int = 0
+  ): SCollection[(Double, SparseVector[Double])] = {
     implicit val sparseArrayCoder: Coder[SparseVector[Double]] = Coder.kryo[SparseVector[Double]]
     val data = col
       .map(_.trim)
@@ -112,9 +116,11 @@ package object libsvm {
      *                    feature dimensions.
      * @return            labeled data stored as an SCollection[(Double, SparseVector)]
      */
-    def libSVMFile(path: String,
-                   numFeatures: Int = 0): SCollection[(Double, SparseVector[Double])] =
+    @deprecated("LibSVM support is deprecated, use TensorFlow, etc. instead", "0.8.0")
+    def libSVMFile(
+      path: String,
+      numFeatures: Int = 0
+    ): SCollection[(Double, SparseVector[Double])] =
       libSVMCollection(self.textFile(path), numFeatures)
   }
-
 }

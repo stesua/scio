@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,12 +19,11 @@ package com.spotify.scio.transforms
 
 import java.nio.file.Files
 
-import com.google.common.base.Charsets
-import com.google.common.io.{Files => GFiles}
 import com.spotify.scio.testing._
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Charsets
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.io.{Files => GFiles}
 
 class PipeDoFnTest extends PipelineSpec {
-
   private val input = Seq("a", "b", "c")
 
   "PipeDoFn" should "work" in {
@@ -81,11 +80,13 @@ class PipeDoFnTest extends PipelineSpec {
       tmpDir.deleteOnExit() // teardown happens asynchronously
       val p1 = sc
         .parallelize(input)
-        .pipe("tr '[:lower:]' '[:upper:]'",
-              null,
-              tmpDir,
-              Seq("touch tmp1.txt", s"wc tmp1.txt"),
-              Seq("wc tmp1.txt", s"rm tmp1.txt"))
+        .pipe(
+          "tr '[:lower:]' '[:upper:]'",
+          null,
+          tmpDir,
+          Seq("touch tmp1.txt", s"wc tmp1.txt"),
+          Seq("wc tmp1.txt", s"rm tmp1.txt")
+        )
       val p2 = sc
         .parallelize(input)
         .pipe(
@@ -100,12 +101,11 @@ class PipeDoFnTest extends PipelineSpec {
     }
   }
 
-  // scalastyle:off no.whitespace.before.left.bracket
   it should "fail if command fails" in {
     // the exception thrown could be UncheckedIOException for broken pipe or IllegalStateException
     // for non-zero exit code, depending on which happens first
     an[Exception] should be thrownBy {
-      runWithContext { _.parallelize(input).pipe("rm /non-existent-path") }
+      runWithContext(_.parallelize(input).pipe("rm /non-existent-path"))
     }
 
     an[Exception] should be thrownBy {
@@ -150,9 +150,7 @@ class PipeDoFnTest extends PipelineSpec {
       }
     } should have message "java.lang.Exception: Exceptions thrown while tearing down DoFns"
   }
-  // scalastyle:on no.whitespace.before.left.bracket
 
   private def errorMessages(t: Throwable): List[String] =
     if (t == null) Nil else t.getMessage :: errorMessages(t.getCause)
-
 }

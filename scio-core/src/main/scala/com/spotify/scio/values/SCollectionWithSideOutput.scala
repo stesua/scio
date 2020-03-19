@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,11 +32,11 @@ import scala.collection.JavaConverters._
  * [[SCollection]]s of the [[SideOutput]]s are accessed via the additional
  * [[SideOutputCollections]] return value.
  */
-class SCollectionWithSideOutput[T] private[values] (val internal: PCollection[T],
-                                                    val context: ScioContext,
-                                                    sides: Iterable[SideOutput[_]])
-    extends PCollectionWrapper[T] {
-
+class SCollectionWithSideOutput[T] private[values] (
+  val internal: PCollection[T],
+  val context: ScioContext,
+  sides: Iterable[SideOutput[_]]
+) extends PCollectionWrapper[T] {
   private val sideTags = TupleTagList.of(sides.map(_.tupleTag).toList.asJava)
 
   private def apply[U: Coder](f: DoFn[T, U]): (SCollection[U], SideOutputCollections) = {
@@ -64,7 +64,8 @@ class SCollectionWithSideOutput[T] private[values] (val internal: PCollection[T]
    * [[SideOutputCollections]] return value.
    */
   def flatMap[U: Coder](
-    f: (T, SideOutputContext[T]) => TraversableOnce[U]): (SCollection[U], SideOutputCollections) =
+    f: (T, SideOutputContext[T]) => TraversableOnce[U]
+  ): (SCollection[U], SideOutputCollections) =
     apply[U](FunctionsWithSideOutput.flatMapFn(f))
 
   /**
@@ -73,5 +74,4 @@ class SCollectionWithSideOutput[T] private[values] (val internal: PCollection[T]
    */
   def map[U: Coder](f: (T, SideOutputContext[T]) => U): (SCollection[U], SideOutputCollections) =
     apply[U](FunctionsWithSideOutput.mapFn(f))
-
 }

@@ -1,9 +1,9 @@
 <img src="images/scio.png" alt="Scio Logo" width="125"/>
 
-> Ecclesiastical Latin IPA: /ˈʃi.o/, [ˈʃiː.o], [ˈʃi.i̯o]  
+> Ecclesiastical Latin IPA: /ˈʃi.o/, [ˈʃiː.o], [ˈʃi.i̯o]
 > Verb: I can, know, understand, have knowledge.
 
-# Scio 
+# Scio
 
 Scio is a Scala API for [Apache Beam](https://beam.apache.org/) and [Google Cloud Dataflow](https://github.com/GoogleCloudPlatform/DataflowJavaSDK) inspired by [Apache Spark](https://spark.apache.org/) and [Scalding](https://github.com/twitter/scalding).
 
@@ -32,15 +32,15 @@ See @scaladoc[Scio Scaladocs](com.spotify.scio.index)  for current API documenta
 
 ### IO
   - @ref:[Type safe BigQuery](io/Type-Safe-BigQuery.md) - tutorial for the type safe BigQuery API
-  - @ref:[HDFS](io/HDFS.md) - using Scio with HDFS files
   - @ref:[Bigtable](io/Bigtable.md) - using Scio with Bigtable
   - @ref:[Avro](io/Avro.md) - using Scio with Avro files
   - @ref:[Protobuf](io/Protobuf.md) - using Scio with Protobuf
   - @ref:[Parquet](io/Parquet.md) - using Scio with Parquet files
-  
+
 ### Extras
   - @ref:[Algebird](extras/Algebird.md)
-  
+  - @ref:[Sort Merge Bucket](extras/Sort-Merge-Bucket.md)
+
 ### Internals
   - @ref:[ScioIO](internals/ScioIO.md) - new IO system to simplify implementation and stubbing in `JobTest`
   - @ref:[OverrideTypeProvider](internals/OverrideTypeProvider.md) - custom mappings for type-safe BigQuery
@@ -75,23 +75,23 @@ See @scaladoc[Scio Scaladocs](com.spotify.scio.index)  for current API documenta
 
 @@@ index
 
-* [Getting Started](Getting-Started.md)
-* [Examples](examples.md)
-* [IO](io/index.md)
-* [Testing](Scio-Unit-Tests.md)
-* [REPL](Scio-REPL.md)
-* [Internals](internals/index.md)
-* [Extras](extras/index.md)
-* [Migration guides](migrations/index.md)
-* [Development](dev/index.md)
-* [Scaladoc](scaladoc.md)
-* [Scio, Beam and Dataflow](Scio,-Beam-and-Dataflow.md)
-* [Scio, Scalding and Spark](Scio,-Scalding-and-Spark.md)
-* [Runners](Runners.md)
-* [Data guideline](Scio-data-guideline.md)
-* [Versions](Apache-Beam.md)
-* [Changelog](Changelog.md)
-* [FAQ](FAQ.md)
-* [Powered By](Powered-By.md)
-  
+* @ref:[Getting Started](Getting-Started.md)
+* @ref:[Examples](examples.md)
+* @ref:[IO](io/index.md)
+* @ref:[Testing](Scio-Unit-Tests.md)
+* @ref:[REPL](Scio-REPL.md)
+* @ref:[Internals](internals/index.md)
+* @ref:[Extras](extras/index.md)
+* @ref:[Migration guides](migrations/index.md)
+* @ref:[Development](dev/index.md)
+* @ref:[Scaladoc](scaladoc.md)
+* @ref:[Scio, Beam and Dataflow](Scio,-Beam-and-Dataflow.md)
+* @ref:[Scio, Scalding and Spark](Scio,-Scalding-and-Spark.md)
+* @ref:[Runners](Runners.md)
+* @ref:[Data guideline](Scio-data-guideline.md)
+* @ref:[Versions](Apache-Beam.md)
+* @ref:[Changelog](Changelog.md)
+* @ref:[FAQ](FAQ.md)
+* @ref:[Powered By](Powered-By.md)
+
 @@@

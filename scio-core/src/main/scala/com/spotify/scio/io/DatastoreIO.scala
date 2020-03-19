@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,13 +23,12 @@ import com.spotify.scio.values.SCollection
 import org.apache.beam.sdk.io.gcp.{datastore => beam}
 
 final case class DatastoreIO(projectId: String) extends ScioIO[Entity] {
-
   override type ReadP = DatastoreIO.ReadParam
   override type WriteP = Unit
 
   override val tapT = EmptyTapOf[Entity]
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[Entity] =
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[Entity] =
     sc.wrap(
       sc.applyInternal(
         beam.DatastoreIO
@@ -37,12 +36,12 @@ final case class DatastoreIO(projectId: String) extends ScioIO[Entity] {
           .read()
           .withProjectId(projectId)
           .withNamespace(params.namespace)
-          .withQuery(params.query)))
+          .withQuery(params.query)
+      )
+    )
 
-  override def write(data: SCollection[Entity], params: WriteP): Tap[Nothing] = {
-    data
-      .asInstanceOf[SCollection[Entity]]
-      .applyInternal(beam.DatastoreIO.v1.write.withProjectId(projectId))
+  override protected def write(data: SCollection[Entity], params: WriteP): Tap[Nothing] = {
+    data.applyInternal(beam.DatastoreIO.v1.write.withProjectId(projectId))
     EmptyTap
   }
 

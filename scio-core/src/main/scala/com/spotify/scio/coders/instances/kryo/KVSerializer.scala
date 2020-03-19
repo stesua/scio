@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import com.twitter.chill.KSerializer
 import org.apache.beam.sdk.values.KV
 
 private[coders] class KVSerializer[K, V] extends KSerializer[KV[K, V]] {
-
   override def write(kser: Kryo, out: Output, obj: KV[K, V]): Unit = {
     kser.writeClassAndObject(out, obj.getKey)
     kser.writeClassAndObject(out, obj.getValue)
@@ -34,5 +33,4 @@ private[coders] class KVSerializer[K, V] extends KSerializer[KV[K, V]] {
     val v = kser.readClassAndObject(in).asInstanceOf[V]
     KV.of(k, v)
   }
-
 }

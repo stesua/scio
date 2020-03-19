@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,8 @@ import com.spotify.scio.bigquery._
 import com.spotify.scio.bigquery.client.BigQuery
 import org.apache.beam.sdk.io.gcp.bigquery.TableDestination
 import org.apache.beam.sdk.options.PipelineOptionsFactory
-import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 object DynamicBigQueryIT {
   val projectId = "data-integration-test"
@@ -43,8 +44,7 @@ object DynamicBigQueryIT {
   def newRecord(x: Int): Record = Record(x, x.toString)
 }
 
-class DynamicBigQueryIT extends FlatSpec with Matchers {
-
+class DynamicBigQueryIT extends AnyFlatSpec with Matchers {
   import DynamicBigQueryIT._
 
   private val bq = BigQuery.defaultInstance()
@@ -63,7 +63,7 @@ class DynamicBigQueryIT extends FlatSpec with Matchers {
           val mod = v.getValue.key % 2
           new TableDestination(tableRef(prefix, mod.toString), s"key % 10 == $mod")
         }
-    sc.close()
+    sc.run()
 
     val expected = (1 to 10).map(newRecord).toSet
     val rows0 = bq.getTypedRows[Record](tableRef(prefix, "0").asTableSpec).toSet
@@ -83,7 +83,7 @@ class DynamicBigQueryIT extends FlatSpec with Matchers {
           val mod = v.getValue.get("key").toString.toInt % 2
           new TableDestination(tableRef(prefix, mod.toString), s"key % 10 == $mod")
         }
-    sc.close()
+    sc.run()
 
     val expected = (1 to 10).map(newRecord).toSet
     val rows0 = bq.getTypedRows[Record](tableRef(prefix, "0").asTableSpec).toSet
@@ -91,5 +91,4 @@ class DynamicBigQueryIT extends FlatSpec with Matchers {
     rows0 shouldBe expected.filter(_.key % 2 == 0)
     rows1 shouldBe expected.filter(_.key % 2 == 1)
   }
-
 }

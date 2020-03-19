@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,23 +21,24 @@ import com.spotify.scio.io._
 import com.spotify.scio.testing._
 
 class WordCountTest extends PipelineSpec {
-
   val inData = Seq("a b c d e", "a b a b", "")
   val expected = Seq("a: 3", "b: 3", "c: 1", "d: 1", "e: 1")
 
+  // #WordCountTest_example
   "WordCount" should "work" in {
     JobTest[com.spotify.scio.examples.WordCount.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), inData)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
+      .output(TextIO("out.txt"))(coll => coll should containInAnyOrder(expected))
       .run()
   }
+  // #WordCountTest_example
 
   "MinimalWordCount" should "work" in {
     JobTest[com.spotify.scio.examples.MinimalWordCount.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), inData)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
+      .output(TextIO("out.txt"))(coll => coll should containInAnyOrder(expected))
       .run()
   }
 
@@ -45,15 +46,23 @@ class WordCountTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.MinimalWordCountTypedArguments.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), inData)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
+      .output(TextIO("out.txt"))(coll => coll should containInAnyOrder(expected))
       .run()
   }
 
-  "MinimalBeamSqlWordCount" should "work" in {
-    JobTest[com.spotify.scio.examples.MinimalBeamSqlWordCountExample.type]
+  "BeamSqlWordCount" should "work" in {
+    JobTest[com.spotify.scio.examples.BeamSqlWordCount.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), inData)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
+      .output(TextIO("out.txt"))(coll => coll should containInAnyOrder(expected))
+      .run()
+  }
+
+  "BeamSqlInterpolatorWordCount" should "work" in {
+    JobTest[com.spotify.scio.examples.BeamSqlInterpolatorWordCount.type]
+      .args("--input=in.txt", "--output=out.txt")
+      .input(TextIO("in.txt"), inData)
+      .output(TextIO("out.txt"))(coll => coll should containInAnyOrder(expected))
       .run()
   }
 
@@ -65,5 +74,4 @@ class WordCountTest extends PipelineSpec {
       .input(TextIO("in.txt"), in)
       .run()
   }
-
 }

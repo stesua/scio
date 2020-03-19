@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ package com.spotify.scio.coders
 import java.{lang => jl, util => ju}
 
 import com.google.api.services.bigquery.model.TableRow
-import com.google.common.collect.ImmutableList
 import com.spotify.scio.ScioContext
 import com.spotify.scio.avro.AvroUtils._
 import com.spotify.scio.coders.CoderTestUtils._
@@ -37,14 +36,12 @@ import org.joda.time.Instant
 
 import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
+import org.apache.beam.sdk.testing.CoderProperties
 
 case class RecordA(name: String, value: Int)
 case class RecordB(name: String, value: Int)
 
 class KryoAtomicCoderTest extends PipelineSpec {
-
-  import com.spotify.scio.testing.TestingUtils._
-
   type CoderFactory = () => BCoder[Any]
   val cf = () => new KryoAtomicCoder[Any](KryoOptions())
 
@@ -67,7 +64,7 @@ class KryoAtomicCoderTest extends PipelineSpec {
 
   it should "support wrapped iterables" in {
     // handle immutable underlying Java collections
-    val list = ImmutableList.of(1, 2, 3)
+    val list = List(1, 2, 3).asJava
 
     // Iterable/Collection should have proper equality
     list.asInstanceOf[jl.Iterable[Int]].asScala coderShould roundtripKryo()
@@ -101,12 +98,12 @@ class KryoAtomicCoderTest extends PipelineSpec {
   }
 
   it should "support TableRow" in {
-    val r = new TableRow().set("repeated_field", ImmutableList.of("a", "b"))
+    val r = new TableRow().set("repeated_field", List("a", "b").asJava)
     r coderShould roundtripKryo()
   }
 
   it should "support large objects" in {
-    val vs = iterable((1 to 1000000).map("value-%08d".format(_)): _*)
+    val vs = Iterable((1 to 1000000).map("value-%08d".format(_)): _*)
     val kv = ("key", vs)
     kv coderShould roundtripKryo()
   }
@@ -147,9 +144,7 @@ class KryoAtomicCoderTest extends PipelineSpec {
 
     sc.parallelize(1 to 10).map(x => RecordB(x.toString, x))
 
-    // scalastyle:off no.whitespace.before.left.bracket
-    val e = the[PipelineExecutionException] thrownBy { sc.close() }
-    // scalastyle:on no.whitespace.before.left.bracket
+    val e = the[PipelineExecutionException] thrownBy { sc.run() }
 
     val msg = "Class is not registered: com.spotify.scio.coders.RecordB"
     e.getCause.getMessage should startWith(msg)
@@ -164,19 +159,28 @@ class KryoAtomicCoderTest extends PipelineSpec {
     val sc = ScioContext(options)
     sc.parallelize(1 to 10).map(x => RecordB(x.toString, x))
 
-    // scalastyle:off no.whitespace.before.left.bracket
-    val e = the[PipelineExecutionException] thrownBy { sc.close() }
-    // scalastyle:on no.whitespace.before.left.bracket
+    val e = the[PipelineExecutionException] thrownBy { sc.run() }
 
     val msg = "Class is not registered: com.spotify.scio.coders.RecordB"
     e.getCause.getMessage should startWith(msg)
   }
 
+  it should "support registerByteSizeObserver" in {
+    val c = cf()
+    val s: Seq[String] = (1 to 10).map(_.toString)
+    // Check that registerByteSizeObserver() and encode() are consistent
+    CoderProperties.testByteCount(c, BCoder.Context.OUTER, Array[Object](s))
+    CoderProperties.testByteCount(
+      c,
+      BCoder.Context.OUTER,
+      Array[Object](s.map(x => (x, s.toIterable.asJava)))
+    )
+  }
 }
 
 @KryoRegistrar
 class RecordAKryoRegistrar extends IKryoRegistrar {
-  override def apply(k: Kryo): Unit =
+  override def apply(k: Kryo): Unit = {
     k.forClass(new KSerializer[RecordA] {
       override def write(k: Kryo, output: Output, obj: RecordA): Unit = {
         output.writeString(obj.name)
@@ -186,10 +190,12 @@ class RecordAKryoRegistrar extends IKryoRegistrar {
       override def read(kryo: Kryo, input: Input, tpe: Class[RecordA]): RecordA =
         RecordA(input.readString(), input.readInt() + 10)
     })
+    ()
+  }
 }
 
 class RecordBKryoRegistrar extends IKryoRegistrar {
-  override def apply(k: Kryo): Unit =
+  override def apply(k: Kryo): Unit = {
     k.forClass(new KSerializer[RecordB] {
       override def write(k: Kryo, output: Output, obj: RecordB): Unit = {
         output.writeString(obj.name)
@@ -199,6 +205,8 @@ class RecordBKryoRegistrar extends IKryoRegistrar {
       override def read(kryo: Kryo, input: Input, tpe: Class[RecordB]): RecordB =
         RecordB(input.readString(), input.readInt() + 10)
     })
+    ()
+  }
 }
 
 // Dummy registrar that when reference tracing disabled requires registration

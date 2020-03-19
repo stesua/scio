@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import java.io.File
 import java.net.URI
 import java.nio.file.{Files, Paths}
 
-import com.spotify.scio.util.{RemoteFileUtil, ScioUtil}
 import com.spotify.scio.coders.Coder
+import com.spotify.scio.util.{RemoteFileUtil, ScioUtil}
 import com.spotify.sparkey.extra.ThreadLocalSparkeyReader
 import com.spotify.sparkey.{Sparkey, SparkeyReader}
 import org.apache.beam.sdk.options.PipelineOptions
@@ -39,6 +39,7 @@ import scala.collection.JavaConverters._
 trait SparkeyUri extends Serializable {
   val basePath: String
   def getReader: SparkeyReader
+
   private[sparkey] def exists: Boolean
   override def toString: String = basePath
 }
@@ -46,26 +47,28 @@ trait SparkeyUri extends Serializable {
 private[sparkey] object SparkeyUri {
   def apply(basePath: String, opts: PipelineOptions): SparkeyUri =
     if (ScioUtil.isLocalUri(new URI(basePath))) {
-      new LocalSparkeyUri(basePath)
+      LocalSparkeyUri(basePath)
     } else {
-      new RemoteSparkeyUri(basePath, opts)
+      RemoteSparkeyUri(basePath, opts)
     }
   def extensions: Seq[String] = Seq(".spi", ".spl")
 
   implicit def coderSparkeyURI: Coder[SparkeyUri] = Coder.kryo[SparkeyUri]
 }
 
-private class LocalSparkeyUri(val basePath: String) extends SparkeyUri {
+private case class LocalSparkeyUri(basePath: String) extends SparkeyUri {
   override def getReader: SparkeyReader =
     new ThreadLocalSparkeyReader(new File(basePath))
   override private[sparkey] def exists: Boolean =
     SparkeyUri.extensions.map(e => new File(basePath + e)).exists(_.exists)
 }
 
-private class RemoteSparkeyUri(val basePath: String, options: PipelineOptions) extends SparkeyUri {
+private object RemoteSparkeyUri {
+  def apply(basePath: String, options: PipelineOptions): RemoteSparkeyUri =
+    RemoteSparkeyUri(basePath, RemoteFileUtil.create(options))
+}
 
-  val rfu: RemoteFileUtil = RemoteFileUtil.create(options)
-
+private case class RemoteSparkeyUri(basePath: String, rfu: RemoteFileUtil) extends SparkeyUri {
   override def getReader: SparkeyReader = {
     val uris = SparkeyUri.extensions.map(e => new URI(basePath + e))
     val paths = rfu.download(uris.asJava).asScala
@@ -77,14 +80,17 @@ private class RemoteSparkeyUri(val basePath: String, options: PipelineOptions) e
 }
 
 private[sparkey] class SparkeyWriter(val uri: SparkeyUri, maxMemoryUsage: Long = -1) {
-
   private val localFile = uri match {
     case u: LocalSparkeyUri => u.basePath
     case _: RemoteSparkeyUri =>
       Files.createTempDirectory("sparkey-").resolve("data").toString
   }
 
-  private lazy val delegate = Sparkey.createNew(new File(localFile))
+  private lazy val delegate = {
+    val file = new File(localFile)
+    Files.createDirectories(file.getParentFile.toPath)
+    Sparkey.createNew(file)
+  }
 
   def put(key: String, value: String): Unit = delegate.put(key, value)
 
@@ -108,5 +114,4 @@ private[sparkey] class SparkeyWriter(val uri: SparkeyUri, maxMemoryUsage: Long =
       case _ => ()
     }
   }
-
 }

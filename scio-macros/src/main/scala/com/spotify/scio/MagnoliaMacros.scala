@@ -20,7 +20,6 @@ package com.spotify.scio
 import scala.reflect.macros._
 
 private[scio] object MagnoliaMacros {
-
   // Add a level of indirection to prevent the macro from capturing
   // $outer which would make the Coder serialization fail
   def genWithoutAnnotations[T: c.WeakTypeTag](c: whitebox.Context): c.Tree = {
@@ -28,28 +27,28 @@ private[scio] object MagnoliaMacros {
     val wtt = weakTypeOf[T]
 
     if (wtt <:< typeOf[Iterable[_]]) {
-      c.abort(c.enclosingPosition,
-              s"Automatic coder derivation can't derive a Coder for $wtt <: Seq")
+      c.abort(
+        c.enclosingPosition,
+        s"Automatic coder derivation can't derive a Coder for $wtt <: Seq"
+      )
     }
 
-    val magTree = magnolia.Magnolia.gen[T](c)
-
-    def getLazyVal =
-      magTree match {
-        case q"val $name = $body; $rest" =>
-          body
-      }
+    val magnoliaTree = magnolia.Magnolia.gen[T](c)
 
     // Remove annotations from magnolia since they are
-    // not serialiazable and we don't use them anyway
-    // scalastyle:off line.size.limit
+    // not serializable and we don't use them anyway
+
     val removeAnnotations = new Transformer {
-      override def transform(tree: Tree): c.universe.Tree = {
+      override def transform(tree: Tree): c.universe.Tree =
         tree match {
-          case Apply(AppliedTypeTree(Select(pack, TypeName("CaseClass")), ps),
-                     List(typeName, isObject, isValueClass, params, annotations)) =>
-            val t2 = Apply(AppliedTypeTree(Select(pack, TypeName("CaseClass")), ps),
-                           List(typeName, isObject, isValueClass, params, q"""Array()"""))
+          case Apply(
+              AppliedTypeTree(Select(pack, TypeName("CaseClass")), ps),
+              List(typeName, isObject, isValueClass, params, annotations)
+              ) =>
+            val t2 = Apply(
+              AppliedTypeTree(Select(pack, TypeName("CaseClass")), ps),
+              List(typeName, isObject, isValueClass, params, q"""Array()""")
+            )
             super.transform(t2)
           case q"""magnolia.Magnolia.param[$tc, $t, $p]($name, $idx, $repeated, $tcParam, $defaultVal, $annotations)""" =>
             val t2 =
@@ -65,10 +64,8 @@ private[scio] object MagnoliaMacros {
           case t =>
             super.transform(t)
         }
-      }
     }
-    // scalastyle:on line.size.limit
-    removeAnnotations.transform(getLazyVal)
-  }
 
+    removeAnnotations.transform(magnoliaTree)
+  }
 }

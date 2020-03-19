@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,16 +27,18 @@ import org.apache.beam.sdk.util.CoderUtils
 import scala.collection.JavaConverters._
 
 private[scio] object AvroBytesUtil {
-
   val schema: ASchema = {
     val s = ASchema.createRecord("AvroBytesRecord", null, null, false)
     s.setFields(
       List(
-        new ASchema.Field("bytes",
-                          ASchema.create(ASchema.Type.BYTES),
-                          null,
-                          null.asInstanceOf[Object])
-      ).asJava)
+        new ASchema.Field(
+          "bytes",
+          ASchema.create(ASchema.Type.BYTES),
+          null,
+          null.asInstanceOf[Object]
+        )
+      ).asJava
+    )
     s
   }
 
@@ -53,5 +55,4 @@ private[scio] object AvroBytesUtil {
       java.util.Arrays.copyOfRange(bb.array(), bb.position(), bb.limit())
     CoderUtils.decodeFromByteArray(coder, bytes)
   }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,41 +20,53 @@ package com.spotify.scio.bigquery.types
 import com.google.api.services.bigquery.model.TableRow
 import org.apache.beam.sdk.util.SerializableUtils
 import org.joda.time.Instant
-import org.scalatest.{Assertion, FlatSpec, Matchers}
+import org.scalatest.Assertion
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
 
 import scala.annotation.StaticAnnotation
 import scala.reflect.runtime.universe._
+import org.apache.avro.generic.GenericRecord
 
-// scalastyle:off number.of.types
 object TypeProviderTest {
   @BigQueryType.toTable
   case class RefinedClass(a1: Int)
 
-  @BigQueryType.fromSchema(
-    """{"fields": [{"mode": "REQUIRED", "name": "f1", "type": "INTEGER"}]}""")
+  @BigQueryType.fromSchema("""
+      |{"fields": [{"mode": "REQUIRED", "name": "f1", "type": "INTEGER"}]}
+      |""".stripMargin)
   class S1
 
   @BigQueryType.fromSchema("""
-       {"fields": [{"mode": "REQUIRED", "name": "f1", "type": "INTEGER"}]}
-    """)
+       |{"fields": [{"mode": "REQUIRED", "name": "f1", "type": "INTEGER"}]}
+       |""".stripMargin)
   class S2
 
   @BigQueryType.fromSchema("""
       |{"fields": [{"mode": "REQUIRED", "name": "f1", "type": "INTEGER"}]}
-    """.stripMargin)
+      |""".stripMargin)
   class S3
 
   @BigQueryType.fromSchema("""
       |{"fields": [{"mode": "REQUIRED", "name": "f1", "type": "INTEGER"}]}
-    """.stripMargin)
+      |""".stripMargin)
   @description("Table S4")
   class S4
 
+  @BigQueryType.fromSchema(
+    """
+      |{
+      |  "fields": [
+      |    {"mode": "REPEATED", "name": "f1", "type": "INTEGER", "description": "description"}
+      |  ]
+      |}
+    """.stripMargin
+  )
+  class RecordWithDescription
 }
 
 // TODO: mock BigQueryClient for fromTable and fromQuery
-class TypeProviderTest extends FlatSpec with Matchers {
-
+class TypeProviderTest extends AnyFlatSpec with Matchers {
   val NOW = Instant.now()
 
   import TypeProviderTest._
@@ -82,11 +94,21 @@ class TypeProviderTest extends FlatSpec with Matchers {
     SerializableUtils.ensureSerializable(S1(1))
   }
 
+  it should "infer the same schema" in {
+    BigQueryType[RecordWithDescription].schema shouldBe RecordWithDescription.schema
+  }
+
+  it should "infer the same avro schema" in {
+    BigQueryType[RecordWithDescription].avroSchema shouldBe RecordWithDescription.avroSchema
+  }
+
   "BigQueryTag" should "be a serializable annotation" in {
     SerializableUtils.ensureSerializable[BigQueryTag](new BigQueryTag())
   }
 
-  @BigQueryType.fromSchema("""{"fields": [{"name": "f1", "type": "INTEGER"}]}""")
+  @BigQueryType.fromSchema("""
+      |{"fields": [{"name": "f1", "type": "INTEGER"}]}
+      |""".stripMargin)
   class MissingMode
 
   it should "support missing mode" in {
@@ -139,12 +161,12 @@ class TypeProviderTest extends FlatSpec with Matchers {
   }
 
   it should "support .fromTableRow in companion object" in {
-    (classOf[(TableRow => RecordWithRequiredPrimitives)]
+    (classOf[TableRow => RecordWithRequiredPrimitives]
       isAssignableFrom RecordWithRequiredPrimitives.fromTableRow.getClass) shouldBe true
   }
 
   it should "support .toTableRow in companion object" in {
-    (classOf[(ToTable => RecordWithRequiredPrimitives)]
+    (classOf[ToTable => RecordWithRequiredPrimitives]
       isAssignableFrom RecordWithRequiredPrimitives.toTableRow.getClass) shouldBe true
   }
 
@@ -191,11 +213,13 @@ class TypeProviderTest extends FlatSpec with Matchers {
   class RecordWithRepeatedPrimitives
 
   it should "support repeated primitive types" in {
-    val r1 = RecordWithRepeatedPrimitives(List(1L, 2L),
-                                          List(1.5, 2.5),
-                                          List(true, false),
-                                          List("hello", "world"),
-                                          List(NOW, NOW.plus(1000)))
+    val r1 = RecordWithRepeatedPrimitives(
+      List(1L, 2L),
+      List(1.5, 2.5),
+      List(true, false),
+      List("hello", "world"),
+      List(NOW, NOW.plus(1000))
+    )
     r1.f1 shouldBe List(1L, 2L)
     r1.f2 shouldBe List(1.5, 2.5)
     r1.f3 shouldBe List(true, false)
@@ -311,11 +335,11 @@ class TypeProviderTest extends FlatSpec with Matchers {
   }
 
   it should "support .fromTableRow in companion object" in {
-    (classOf[(TableRow => ToTable)] isAssignableFrom ToTable.fromTableRow.getClass) shouldBe true
+    (classOf[TableRow => ToTable] isAssignableFrom ToTable.fromTableRow.getClass) shouldBe true
   }
 
   it should "support .toTableRow in companion object" in {
-    (classOf[(ToTable => TableRow)] isAssignableFrom ToTable.toTableRow.getClass) shouldBe true
+    (classOf[ToTable => TableRow] isAssignableFrom ToTable.toTableRow.getClass) shouldBe true
   }
 
   it should "create companion object that is a Function subtype" in {
@@ -389,29 +413,31 @@ class TypeProviderTest extends FlatSpec with Matchers {
   }
 
   @BigQueryType.toTable
-  case class TwentyThree(a1: Int,
-                         a2: Int,
-                         a3: Int,
-                         a4: Int,
-                         a5: Int,
-                         a6: Int,
-                         a7: Int,
-                         a8: Int,
-                         a9: Int,
-                         a10: Int,
-                         a11: Int,
-                         a12: Int,
-                         a13: Int,
-                         a14: Int,
-                         a15: Int,
-                         a16: Int,
-                         a17: Int,
-                         a18: Int,
-                         a19: Int,
-                         a20: Int,
-                         a21: Int,
-                         a22: Int,
-                         a23: Int)
+  case class TwentyThree(
+    a1: Int,
+    a2: Int,
+    a3: Int,
+    a4: Int,
+    a5: Int,
+    a6: Int,
+    a7: Int,
+    a8: Int,
+    a9: Int,
+    a10: Int,
+    a11: Int,
+    a12: Int,
+    a13: Int,
+    a14: Int,
+    a15: Int,
+    a16: Int,
+    a17: Int,
+    a18: Int,
+    a19: Int,
+    a20: Int,
+    a21: Int,
+    a22: Int,
+    a23: Int
+  )
 
   "BigQueryType.toTable" should "not provide .tupled in companion object with >22 fields" in {
     TwentyThree.getClass.getMethods.map(_.getName) should not contain "tupled"
@@ -421,14 +447,23 @@ class TypeProviderTest extends FlatSpec with Matchers {
     TwentyThree.schema should not be null
   }
 
+  it should "support .avroSchema in companion object with >22 fields" in {
+    TwentyThree.avroSchema should not be null
+  }
+
   it should "support .fromTableRow in companion object with >22 fields" in {
-    val cls = classOf[(TableRow => TwentyThree)]
+    val cls = classOf[TableRow => TwentyThree]
     (cls isAssignableFrom TwentyThree.fromTableRow.getClass) shouldBe true
   }
 
-  it should "support .toTableRow in companion object with >22 fields" in {
-    val cls = classOf[(TwentyThree => TableRow)]
-    (cls isAssignableFrom TwentyThree.toTableRow.getClass) shouldBe true
+  it should "support .fromAvro in companion object with >22 fields" in {
+    val cls = classOf[GenericRecord => TwentyThree]
+    (cls isAssignableFrom TwentyThree.fromAvro.getClass) shouldBe true
+  }
+
+  it should "support .toAvro in companion object with >22 fields" in {
+    val cls = classOf[TwentyThree => GenericRecord]
+    (cls isAssignableFrom TwentyThree.toAvro.getClass) shouldBe true
   }
 
   @BigQueryType.toTable
@@ -456,9 +491,9 @@ class TypeProviderTest extends FlatSpec with Matchers {
     Artisanal1Field.getClass.getMethods
       .map(_.getName) should not contain "tupled"
     RecordWithRequiredPrimitives.schema should not be null
-    (classOf[(TableRow => RecordWithRequiredPrimitives)]
+    (classOf[TableRow => RecordWithRequiredPrimitives]
       isAssignableFrom RecordWithRequiredPrimitives.fromTableRow.getClass) shouldBe true
-    (classOf[(ToTable => RecordWithRequiredPrimitives)]
+    (classOf[ToTable => RecordWithRequiredPrimitives]
       isAssignableFrom RecordWithRequiredPrimitives.toTableRow.getClass) shouldBe true
     Artisanal1FieldWithBody(3).bar shouldBe 42L
     Artisanal1FieldWithBody(3).foo shouldBe "foo"
@@ -515,7 +550,9 @@ class TypeProviderTest extends FlatSpec with Matchers {
   }
 
   @Annotation1
-  @BigQueryType.fromSchema("""{"fields": [ {"mode": "REQUIRED", "name": "f1", "type": "DATE"} ]}""")
+  @BigQueryType.fromSchema("""
+      |{"fields": [ {"mode": "REQUIRED", "name": "f1", "type": "DATE"} ]}
+      |""".stripMargin)
   @Annotation2
   class SchemaWithSurroundingAnnotations
 
@@ -523,7 +560,9 @@ class TypeProviderTest extends FlatSpec with Matchers {
     containsAllAnnotTypes[SchemaWithSurroundingAnnotations]
   }
 
-  @BigQueryType.fromSchema("""{"fields": [ {"mode": "REQUIRED", "name": "f1", "type": "DATE"} ]}""")
+  @BigQueryType.fromSchema("""
+      |{"fields": [ {"mode": "REQUIRED", "name": "f1", "type": "DATE"} ]}
+      |""".stripMargin)
   @Annotation1
   @Annotation2
   class SchemaWithSequentialAnnotations
@@ -536,5 +575,18 @@ class TypeProviderTest extends FlatSpec with Matchers {
     noException should be thrownBy
       BigQueryType[TypeProviderTest.RefinedClass with BigQueryType.HasAnnotation]
   }
+  @BigQueryType.fromSchema("""
+      |{"fields": [{"mode": "REQUIRED", "name": "f1", "type": "GEOGRAPHY"}]}
+    """.stripMargin)
+  class GeoRecordFrom
+
+  @BigQueryType.toTable
+  case class GeoRecordTo(f1: Geography)
+
+  it should "#1882: support GEOGRAPHY type" in {
+    val wkt = "POINT (30 10)"
+    val cc = GeoRecordFrom(Geography(wkt))
+    cc.f1 shouldBe Geography(wkt)
+    GeoRecordTo(Geography(wkt))
+  }
 }
-// scalastyle:on number.of.types

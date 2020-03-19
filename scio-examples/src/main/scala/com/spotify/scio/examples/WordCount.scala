@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Word Count Example with Metrics
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.WordCount
+// `sbt "runMain com.spotify.scio.examples.WordCount
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/shakespeare/kinglear.txt
 // --output=gs://[BUCKET]/[PATH]/wordcount"`
@@ -29,7 +29,6 @@ import com.spotify.scio.examples.common.ExampleData
 import org.slf4j.LoggerFactory
 
 object WordCount {
-
   // Logger is an object instance, i.e. statically initialized and thus can be used safely in an
   // anonymous function without serialization issue
   private val logger = LoggerFactory.getLogger(this.getClass)
@@ -74,8 +73,8 @@ object WordCount {
       // Save result as text files under the output path
       .saveAsTextFile(output)
 
-    // Close the context, execute the pipeline and block until it finishes
-    val result = sc.close().waitUntilFinish()
+    // Execute the pipeline and block until it finishes
+    val result = sc.run().waitUntilFinish()
 
     // Retrieve metric values
     logger.info("Max: " + result.distribution(lineDist).committed.map(_.getMax))

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,14 +20,11 @@ package com.spotify.scio.values
 import com.spotify.scio.testing.PipelineSpec
 
 class SCollectionWithSideOutputTest extends PipelineSpec {
-
   "SCollectionWithSideOutput" should "support map()" in {
     runWithContext { sc =>
       val p1 = sc.parallelize(Seq("a", "b", "c"))
       val p2 = SideOutput[String]()
-      val (main, side) = p1.withSideOutputs(p2).map { (x, s) =>
-        s.output(p2, x + "2"); x + "1"
-      }
+      val (main, side) = p1.withSideOutputs(p2).map { (x, s) => s.output(p2, x + "2"); x + "1" }
       main should containInAnyOrder(Seq("a1", "b1", "c1"))
       side(p2) should containInAnyOrder(Seq("a2", "b2", "c2"))
     }
@@ -65,5 +62,4 @@ class SCollectionWithSideOutputTest extends PipelineSpec {
 
     even should containInAnyOrder(expected)
   }
-
 }

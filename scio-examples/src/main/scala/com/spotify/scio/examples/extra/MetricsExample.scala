@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,20 +15,16 @@
  * under the License.
  */
 
-// scalastyle:off method.length
-// scalastyle:off regex
-
 // Example: Metrics Example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.MetricsExample
+// `sbt "runMain com.spotify.scio.examples.extra.MetricsExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]"`
 package com.spotify.scio.examples.extra
 
 import com.spotify.scio._
 
 object MetricsExample {
-
   // ## Creating metrics
 
   // Create counters to be incremented inside the pipeline
@@ -48,6 +44,7 @@ object MetricsExample {
     // Create and initialize counters from ScioContext
     val ctxCount1 = sc.initCounter("ctxcount")
     val ctxCount2 = sc.initCounter("namespace", "ctxcount")
+    val ctxCount3 = sc.initCounter(count)
 
     // ## Accessing metrics
     sc.parallelize(1 to 100)
@@ -69,7 +66,7 @@ object MetricsExample {
         sum2.inc(i)
       }
 
-    val result = sc.close().waitUntilFinish()
+    val result = sc.run().waitUntilFinish()
 
     // # Retrieving metrics
 
@@ -122,5 +119,4 @@ object MetricsExample {
           println(name.getName + ": " + value.committed.get)
       }
   }
-
 }

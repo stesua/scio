@@ -24,17 +24,18 @@ import org.tensorflow.example._
 import scala.collection.JavaConverters._
 
 object TFSequenceExampleIOTest {
-
   case class Record(i: Int, ss: Seq[String])
 
   def toSequenceExample(r: Record): SequenceExample = {
     val context = Features
       .newBuilder()
-      .putFeature("i",
-                  Feature
-                    .newBuilder()
-                    .setInt64List(Int64List.newBuilder().addValue(r.i).build())
-                    .build())
+      .putFeature(
+        "i",
+        Feature
+          .newBuilder()
+          .setInt64List(Int64List.newBuilder().addValue(r.i).build())
+          .build()
+      )
       .build()
     val fs = r.ss.map { s =>
       Feature
@@ -43,7 +44,8 @@ object TFSequenceExampleIOTest {
           BytesList
             .newBuilder()
             .addValue(ByteString.copyFromUtf8(s))
-            .build())
+            .build()
+        )
         .build()
     }
     val featureLists = FeatureLists
@@ -59,7 +61,6 @@ object TFSequenceExampleIOTest {
 }
 
 class TFSequenceExampleIOTest extends ScioIOSpec {
-
   import TFSequenceExampleIOTest._
 
   "TFSequenceExampleIO" should "work" in {
@@ -69,5 +70,4 @@ class TFSequenceExampleIOTest extends ScioIOSpec {
       _.saveAsTfRecordFile(_)
     )
   }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,6 @@
 
 package com.spotify
 
-import com.twitter.algebird.Monoid
-
-import scala.reflect.ClassTag
-
 /**
  * Main package for public APIs. Import all.
  *
@@ -29,64 +25,30 @@ import scala.reflect.ClassTag
  * }}}
  */
 package object scio {
-
-  /** [[com.twitter.algebird.Monoid Monoid]] for `Array[Int]`. */
-  implicit val intArrayMon: Monoid[Array[Int]] = new ArrayMonoid[Int]
-
-  /** [[com.twitter.algebird.Monoid Monoid]] for `Array[Long]`. */
-  implicit val longArrayMon: Monoid[Array[Long]] = new ArrayMonoid[Long]
-
-  /** [[com.twitter.algebird.Monoid Monoid]] for `Array[Float]`. */
-  implicit val floatArrayMon: Monoid[Array[Float]] = new ArrayMonoid[Float]
-
-  /** [[com.twitter.algebird.Monoid Monoid]] for `Array[Double]`. */
-  implicit val doubleArrayMon: Monoid[Array[Double]] = new ArrayMonoid[Double]
-
-  private class ArrayMonoid[@specialized(Int, Long, Float, Double) T: ClassTag: Numeric]
-      extends Monoid[Array[T]] {
-
-    private val num = implicitly[Numeric[T]]
-
-    private def plusI(l: Array[T], r: Array[T]): Array[T] = {
-      require(l.length == r.length, "Array lengths do not match")
-      import num.mkNumericOps
-      var i = 0
-      while (i < l.length) {
-        l(i) += r(i)
-        i += 1
-      }
-      l
-    }
-
-    override val zero: Array[T] = Array.empty[T]
-    override def plus(l: Array[T], r: Array[T]): Array[T] = {
-      if (l.length == 0) {
-        r
-      } else if (r.length == 0) {
-        l
-      } else {
-        val s = Array.fill[T](l.length)(num.zero)
-        plusI(s, l)
-        plusI(s, r)
-        s
-      }
-    }
-
-    override def sumOption(xs: TraversableOnce[Array[T]]): Option[Array[T]] = {
-      var s: Array[T] = null
-      val i = xs.toIterator
-      while (i.hasNext) {
-        val a = i.next()
-        if (a.length > 0) {
-          if (s == null) {
-            s = Array.fill[T](a.length)(num.zero)
-          }
-          plusI(s, a)
-        }
-      }
-      Option(s)
-    }
-
+  import scala.concurrent.duration.Duration
+  import scala.concurrent.Future
+  import scala.concurrent.Await
+  import com.spotify.scio.io.Tap
+  @deprecated("Scio does not rely on Future anymore. See https://git.io/JeAt1", since = "0.8.0")
+  implicit class WaitableFutureTap[T](self: Future[Tap[T]]) {
+    def waitForResult(atMost: Duration = Duration.Inf): Tap[T] =
+      Await.result(self, atMost)
   }
 
+  @deprecated("Scio does not rely on Future anymore. See https://git.io/JeAt1", since = "0.8.0")
+  implicit class WaitableClosedTap[T](self: com.spotify.scio.io.ClosedTap[T]) {
+    def waitForResult(atMost: Duration = Duration.Inf): Tap[T] =
+      self.underlying
+  }
+
+  /**
+   * Wait for nested [[com.spotify.scio.io.Tap Tap]] to be available, flatten result and get Tap
+   * reference from `Future`.
+   */
+  @deprecated("Scio does not rely on Future anymore. See https://git.io/JeAt1", since = "0.8.0")
+  implicit class WaitableNestedFutureTap[T](self: Future[Future[Tap[T]]]) {
+    import scala.concurrent.ExecutionContext.Implicits.global
+    def waitForResult(atMost: Duration = Duration.Inf): Tap[T] =
+      Await.result(self.flatMap(identity), atMost)
+  }
 }

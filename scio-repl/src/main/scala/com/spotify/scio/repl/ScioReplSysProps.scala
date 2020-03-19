@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import com.spotify.scio.{registerSysProps, SysProp}
 
 @registerSysProps
 object ScioReplSysProps {
-  val Key = SysProp("key", "")
+  val Key: SysProp = SysProp("key", "")
 
-  val MaxPrintString =
+  val MaxPrintString: SysProp =
     SysProp("scala.repl.maxprintstring", "Max characters to display in REPL before truncation")
 }

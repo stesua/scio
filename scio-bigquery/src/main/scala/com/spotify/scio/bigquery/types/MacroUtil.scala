@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import scala.reflect.macros._
 import scala.reflect.runtime.universe._
 
 private[types] object MacroUtil {
-
   private[this] val logger = LoggerFactory.getLogger(this.getClass)
 
   // Case class helpers for runtime reflection
@@ -69,11 +68,10 @@ private[types] object MacroUtil {
 
   // Debugging
 
-  @inline def debug(msg: Any): Unit = {
+  @inline def debug(msg: Any): Unit =
     if (BigQuerySysProps.Debug.value("false").toBoolean) {
       logger.info(msg.toString)
     }
-  }
 
   // Namespace helpers
 
@@ -82,7 +80,7 @@ private[types] object MacroUtil {
   val GBQIO = "_root_.org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO"
   val SType = s"$SBQ.types.BigQueryType"
   val SUtil = s"$SBQ.BigQueryUtil"
+  val BigQueryUtils = s"_root_.org.apache.beam.sdk.io.gcp.bigquery.BigQueryUtils"
 
   def p(c: blackbox.Context, code: String): c.Tree = c.parse(code)
-
 }

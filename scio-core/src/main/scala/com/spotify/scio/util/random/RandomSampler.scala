@@ -1,4 +1,3 @@
-// scalastyle:off header.matches
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -15,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// scalastyle:on header.matches
 
 /* Ported from org.apache.spark.util.random.RandomSampler */
 
@@ -40,8 +38,7 @@ private[scio] object RandomSampler {
   val roundingEpsilon = 1e-6
 }
 
-private[scio] abstract class RandomSampler[T, R] extends DoFn[T, T] {
-
+abstract private[scio] class RandomSampler[T, R] extends DoFn[T, T] {
   protected var rng: R = _
   protected var seed: Long = -1
 
@@ -63,7 +60,6 @@ private[scio] abstract class RandomSampler[T, R] extends DoFn[T, T] {
   def init: R
   def samples: Int
   def setSeed(seed: Long): Unit = this.seed = seed
-
 }
 
 /**
@@ -97,7 +93,6 @@ private[scio] class BernoulliSampler[T](val fraction: Double) extends RandomSamp
     } else {
       if (rng.nextDouble() <= fraction) 1 else 0
     }
-
 }
 
 /**
@@ -110,8 +105,10 @@ private[scio] class PoissonSampler[T](val fraction: Double)
     extends RandomSampler[T, IntegerDistribution] {
 
   /** Epsilon slop to avoid failure from floating point jitter. */
-  require(fraction >= (0.0 - RandomSampler.roundingEpsilon),
-          s"Sampling fraction ($fraction) must be >= 0")
+  require(
+    fraction >= (0.0 - RandomSampler.roundingEpsilon),
+    s"Sampling fraction ($fraction) must be >= 0"
+  )
 
   // PoissonDistribution throws an exception when fraction <= 0
   // If fraction is <= 0, 0 is used below, so we can use any placeholder value.
@@ -126,9 +123,8 @@ private[scio] class PoissonSampler[T](val fraction: Double)
   override def samples: Int = if (fraction <= 0.0) 0 else rng.sample()
 }
 
-private[scio] abstract class RandomValueSampler[K, V, R](val fractions: Map[K, Double])
+abstract private[scio] class RandomValueSampler[K, V, R](val fractions: Map[K, Double])
     extends DoFn[(K, V), (K, V)] {
-
   protected var rngs: Map[K, R] = null.asInstanceOf[Map[K, R]]
   protected var seed: Long = -1
 
@@ -151,7 +147,6 @@ private[scio] abstract class RandomValueSampler[K, V, R](val fractions: Map[K, D
   def init(fraction: Double): R
   def samples(fraction: Double, rng: R): Int
   def setSeed(seed: Long): Unit = this.seed = seed
-
 }
 
 private[scio] class BernoulliValueSampler[K, V](fractions: Map[K, Double])
@@ -182,15 +177,16 @@ private[scio] class BernoulliValueSampler[K, V](fractions: Map[K, Double])
     } else {
       if (rng.nextDouble() <= fraction) 1 else 0
     }
-
 }
 
 private[scio] class PoissonValueSampler[K, V](fractions: Map[K, Double])
     extends RandomValueSampler[K, V, IntegerDistribution](fractions) {
 
   /** Epsilon slop to avoid failure from floating point jitter. */
-  require(fractions.values.forall(f => f >= (0.0 - RandomSampler.roundingEpsilon)),
-          s"Sampling fractions must be >= 0")
+  require(
+    fractions.values.forall(f => f >= (0.0 - RandomSampler.roundingEpsilon)),
+    s"Sampling fractions must be >= 0"
+  )
 
   // TODO: is it necessary to setSeed for each instance like Spark does?
   override def init(fraction: Double): IntegerDistribution = {
@@ -203,5 +199,4 @@ private[scio] class PoissonValueSampler[K, V](fractions: Map[K, Double])
 
   override def samples(fraction: Double, rng: IntegerDistribution): Int =
     if (fraction <= 0.0) 0 else rng.sample()
-
 }

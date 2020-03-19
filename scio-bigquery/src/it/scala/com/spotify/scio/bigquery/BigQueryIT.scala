@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@
 package com.spotify.scio.bigquery
 
 import org.scalatest.Inspectors.forAll
-import org.scalatest._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
 
 object BigQueryIT {
-
   val tableRef = "bigquery-public-data:samples.shakespeare"
   val legacyQuery =
     "SELECT word, word_count FROM [bigquery-public-data:samples.shakespeare] LIMIT 10"
@@ -32,13 +32,12 @@ object BigQueryIT {
   class Shakespeare
 
   @BigQueryType.fromQuery(
-    "SELECT word, word_count FROM `bigquery-public-data.samples.shakespeare` LIMIT 10")
+    "SELECT word, word_count FROM `bigquery-public-data.samples.shakespeare` LIMIT 10"
+  )
   class WordCount
-
 }
 
-class BigQueryIT extends FlatSpec with Matchers {
-
+class BigQueryIT extends AnyFlatSpec with Matchers {
   import BigQueryIT._
 
   // =======================================================================
@@ -53,9 +52,11 @@ class BigQueryIT extends FlatSpec with Matchers {
     def wordCount(w: String, wc: Long): TableRow =
       TableRow("word" -> w, "word_count" -> wc.toString)
 
-    val inData = Seq(shakespeare("i", 10, "kinglear", 1600),
-                     shakespeare("thou", 20, "kinglear", 1600),
-                     shakespeare("thy", 30, "kinglear", 1600))
+    val inData = Seq(
+      shakespeare("i", 10, "kinglear", 1600),
+      shakespeare("thou", 20, "kinglear", 1600),
+      shakespeare("thy", 30, "kinglear", 1600)
+    )
     val expected = Seq(wordCount("i", 10), wordCount("thou", 20), wordCount("thy", 30))
 
     val mbq = MockBigQuery()
@@ -69,12 +70,16 @@ class BigQueryIT extends FlatSpec with Matchers {
   // =======================================================================
 
   it should "support typed BigQuery" in {
-    val inData = Seq(Shakespeare("i", 10, "kinglear", 1600),
-                     Shakespeare("thou", 20, "kinglear", 1600),
-                     Shakespeare("thy", 30, "kinglear", 1600))
-    val expected = Seq(WordCount(Some("i"), Some(10)),
-                       WordCount(Some("thou"), Some(20)),
-                       WordCount(Some("thy"), Some(30)))
+    val inData = Seq(
+      Shakespeare("i", 10, "kinglear", 1600),
+      Shakespeare("thou", 20, "kinglear", 1600),
+      Shakespeare("thy", 30, "kinglear", 1600)
+    )
+    val expected = Seq(
+      WordCount(Some("i"), Some(10)),
+      WordCount(Some("thou"), Some(20)),
+      WordCount(Some("thy"), Some(30))
+    )
 
     val mbq = MockBigQuery()
     mbq.mockTable(tableRef).withTypedData(inData)
@@ -104,7 +109,6 @@ class BigQueryIT extends FlatSpec with Matchers {
   it should "fail insufficient sample data" in {
     val t = "clouddataflow-readonly:samples.weather_stations"
 
-    // scalastyle:off no.whitespace.before.left.bracket
     the[IllegalArgumentException] thrownBy {
       val mbq = MockBigQuery()
       mbq.mockTable(t).withSample(2000)
@@ -141,6 +145,4 @@ class BigQueryIT extends FlatSpec with Matchers {
     } should have message
       "404 Not Found, this is most likely caused by missing source table or mock data"
   }
-  // scalastyle:on no.whitespace.before.left.bracket
-
 }

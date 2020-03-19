@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@
 
 package com.spotify.scio.testing
 
-import org.scalatest.{Args, ConfigMap, FlatSpec, Matchers, Status}
+import org.scalatest.{Args, ConfigMap, Status}
 import JobTest.BeamOptions
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 /**
  * Trait for unit testing pipelines.
@@ -35,12 +37,11 @@ import JobTest.BeamOptions
  * }}}
  */
 trait PipelineSpec
-    extends FlatSpec
+    extends AnyFlatSpec
     with Matchers
     with SCollectionMatchers
     with PipelineTestUtils
     with RunEnforcementJobTest {
-
   private val Beam = """beam\.(.*)""".r
 
   private var beamOpts: BeamOptions = _
@@ -48,7 +49,8 @@ trait PipelineSpec
   private val aliases =
     Map(
       "flink" ->
-        List("runner" -> "FlinkRunner", "flinkMaster" -> "[local]"))
+        List("runner" -> "FlinkRunner", "flinkMaster" -> "[local]")
+    )
 
   private def getBeamOptions(m: ConfigMap): List[String] =
     m.collect { case (Beam(k), v) => k -> v }
@@ -57,7 +59,11 @@ trait PipelineSpec
       .toList
 
   implicit def beamOptions: BeamOptions = {
-    assume(beamOpts != null)
+    assume(
+      beamOpts != null,
+      "PipelineSpec#beamOpts is null, are you using JobTest outside of a " +
+        "`\"Test\" should \"work\" in {}` block?"
+    )
     beamOpts
   }
 
@@ -67,5 +73,4 @@ trait PipelineSpec
     }
     super.run(testName, args)
   }
-
 }

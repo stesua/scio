@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,14 +21,14 @@ import com.spotify.scio.values.SCollection
 import com.spotify.scio.ScioContext
 import com.spotify.scio.io.{EmptyTap, EmptyTapOf, ScioIO, Tap}
 
+@deprecated("scio-cassandra2 will be removed", "0.8.0")
 final case class CassandraIO[T](opts: CassandraOptions) extends ScioIO[T] {
-
   override type ReadP = Nothing
   override type WriteP = CassandraIO.WriteParam[T]
   override val tapT = EmptyTapOf[T]
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[T] =
-    throw new IllegalStateException("Can't read from Cassandra")
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[T] =
+    throw new UnsupportedOperationException("Can't read from Cassandra")
 
   /**
    * Save this SCollection as a Cassandra table.
@@ -39,7 +39,7 @@ final case class CassandraIO[T](opts: CassandraOptions) extends ScioIO[T] {
    * occur at the end of each window in streaming mode. The bulk writer writes to all nodes in a
    * cluster so remote nodes in a multi-datacenter cluster may become a bottleneck.
    */
-  override def write(data: SCollection[T], params: WriteP): Tap[Nothing] = {
+  override protected def write(data: SCollection[T], params: WriteP): Tap[Nothing] = {
     val bulkOps = new BulkOperations(opts, params.parallelism)
     data
       .map(params.outputFn.andThen(bulkOps.serializeFn))
@@ -57,6 +57,8 @@ object CassandraIO {
     private[cassandra] val DefaultPar = 0
   }
 
-  final case class WriteParam[T] private (outputFn: T => Seq[Any],
-                                          parallelism: Int = WriteParam.DefaultPar)
+  final case class WriteParam[T] private (
+    outputFn: T => Seq[Any],
+    parallelism: Int = WriteParam.DefaultPar
+  )
 }

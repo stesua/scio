@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import scala.util.{Failure, Success, Try}
 
 /** Common finder for the proper [[OverrideTypeProvider]]. */
 object OverrideTypeProviderFinder {
-
   var typeProvider: String = System.getProperty("override.type.provider", "")
 
   var provider: OverrideTypeProvider = instance()
@@ -32,8 +31,10 @@ object OverrideTypeProviderFinder {
     val classInstance = Try(
       Class
         .forName(System.getProperty("override.type.provider", ""))
+        .getConstructor()
         .newInstance()
-        .asInstanceOf[OverrideTypeProvider])
+        .asInstanceOf[OverrideTypeProvider]
+    )
     classInstance match {
       case Success(value)       => value
       case Failure(NonFatal(_)) => new DummyOverrideTypeProvider

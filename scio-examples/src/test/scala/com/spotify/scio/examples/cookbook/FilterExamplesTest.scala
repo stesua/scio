@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.spotify.scio.examples.common.ExampleData
 import com.spotify.scio.testing._
 
 class FilterExamplesTest extends PipelineSpec {
-
   private def gsodRow(year: Int, month: Int, day: Int, meanTemp: Double) =
     TableRow("year" -> year, "month" -> month, "day" -> day, "mean_temp" -> meanTemp)
 
@@ -41,8 +40,9 @@ class FilterExamplesTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.cookbook.FilterExamples.type]
       .args("--output=dataset.table")
       .input(BigQueryIO(ExampleData.WEATHER_SAMPLES_TABLE), input)
-      .output(BigQueryIO[TableRow]("dataset.table"))(_ should containInAnyOrder(expected))
+      .output(BigQueryIO[TableRow]("dataset.table")) { coll =>
+        coll should containInAnyOrder(expected)
+      }
       .run()
   }
-
 }

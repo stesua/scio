@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,7 @@ package com.spotify.scio.values
 import com.spotify.scio.testing.PipelineSpec
 
 class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
-
-  val (skewSeed, skewEps) = (42, 0.001D)
+  val (skewSeed, skewEps) = (42, 0.001d)
 
   it should "support skewedJoin() without hotkeys and no duplicate keys" in {
     import com.twitter.algebird.CMSHasherImplicits._
@@ -40,7 +39,8 @@ class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
       val p2 = sc.parallelize(Seq(("a", 11), ("b", 12), ("b", 13)))
       val p = p1.skewedJoin(p2, Long.MaxValue, skewEps, skewSeed)
       p should containInAnyOrder(
-        Seq(("a", (1, 11)), ("a", (2, 11)), ("b", (3, 12)), ("b", (3, 13))))
+        Seq(("a", (1, 11)), ("a", (2, 11)), ("b", (3, 12)), ("b", (3, 13)))
+      )
     }
   }
 
@@ -52,7 +52,8 @@ class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
       // set threshold to 2, to hash join on "a"
       val p = p1.skewedJoin(p2, 2, skewEps, skewSeed)
       p should containInAnyOrder(
-        Seq(("a", (1, 11)), ("a", (2, 11)), ("b", (3, 12)), ("b", (3, 13))))
+        Seq(("a", (1, 11)), ("a", (2, 11)), ("b", (3, 12)), ("b", (3, 13)))
+      )
     }
   }
 
@@ -65,7 +66,8 @@ class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
       // set threshold to 3, given 0.5 fraction for sample - "a" should not be hash joined
       val p = p1.skewedJoin(p2, 3, skewEps, skewSeed, sampleFraction = 0.5)
       p should containInAnyOrder(
-        Seq(("a", (1, 11)), ("a", (2, 11)), ("a", (3, 11)), ("b", (3, 12)), ("b", (3, 13))))
+        Seq(("a", (1, 11)), ("a", (2, 11)), ("a", (3, 11)), ("b", (3, 12)), ("b", (3, 13)))
+      )
     }
   }
 
@@ -81,49 +83,80 @@ class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
     }
   }
 
-  it should "support skewedLeftJoin() without hotkeys and no duplicate keys" in {
+  it should "support skewedLeftOuterJoin() without hotkeys and no duplicate keys" in {
     import com.twitter.algebird.CMSHasherImplicits._
     runWithContext { sc =>
       val p1 = sc.parallelize(Seq(("a", 1), ("b", 2), ("c", 3)))
       val p2 = sc.parallelize(Seq(("a", 11), ("b", 12), ("b", 13)))
-      val p = p1.skewedLeftJoin(p2, Long.MaxValue, skewEps, skewSeed)
+      val p = p1.skewedLeftOuterJoin(p2, Long.MaxValue, skewEps, skewSeed)
+      val pd = p1.skewedLeftJoin(p2, Long.MaxValue, skewEps, skewSeed)
       p should containInAnyOrder(
-        Seq(("a", (1, Some(11))), ("b", (2, Some(12))), ("b", (2, Some(13))), ("c", (3, None))))
+        Seq(("a", (1, Some(11))), ("b", (2, Some(12))), ("b", (2, Some(13))), ("c", (3, None)))
+      )
+      pd should containInAnyOrder(
+        Seq(("a", (1, Some(11))), ("b", (2, Some(12))), ("b", (2, Some(13))), ("c", (3, None)))
+      )
     }
   }
 
-  it should "support skewedLeftJoin() without hotkeys" in {
+  it should "support skewedLeftOuterJoin() without hotkeys" in {
     import com.twitter.algebird.CMSHasherImplicits._
     runWithContext { sc =>
       val p1 = sc.parallelize(Seq(("a", 1), ("a", 2), ("b", 3), ("c", 4)))
       val p2 = sc.parallelize(Seq(("a", 11), ("b", 12), ("b", 13)))
-      val p = p1.skewedLeftJoin(p2, Long.MaxValue, skewEps, skewSeed)
+      val p = p1.skewedLeftOuterJoin(p2, Long.MaxValue, skewEps, skewSeed)
+      val pd = p1.skewedLeftJoin(p2, Long.MaxValue, skewEps, skewSeed)
       p should containInAnyOrder(
-        Seq(("a", (1, Some(11))),
-            ("a", (2, Some(11))),
-            ("b", (3, Some(12))),
-            ("b", (3, Some(13))),
-            ("c", (4, None))))
+        Seq(
+          ("a", (1, Some(11))),
+          ("a", (2, Some(11))),
+          ("b", (3, Some(12))),
+          ("b", (3, Some(13))),
+          ("c", (4, None))
+        )
+      )
+      pd should containInAnyOrder(
+        Seq(
+          ("a", (1, Some(11))),
+          ("a", (2, Some(11))),
+          ("b", (3, Some(12))),
+          ("b", (3, Some(13))),
+          ("c", (4, None))
+        )
+      )
     }
   }
 
-  it should "support skewedLeftJoin() with hotkey" in {
+  it should "support skewedLeftOuterJoin() with hotkey" in {
     import com.twitter.algebird.CMSHasherImplicits._
     runWithContext { sc =>
       val p1 = sc.parallelize(Seq(("a", 1), ("a", 2), ("b", 3), ("c", 4)))
       val p2 = sc.parallelize(Seq(("a", 11), ("b", 12), ("b", 13)))
       // set threshold to 2, to hash join on "a"
-      val p = p1.skewedLeftJoin(p2, 2, skewEps, skewSeed)
+      val p = p1.skewedLeftOuterJoin(p2, 2, skewEps, skewSeed)
+      val pd = p1.skewedLeftJoin(p2, 2, skewEps, skewSeed)
       p should containInAnyOrder(
-        Seq(("a", (1, Some(11))),
-            ("a", (2, Some(11))),
-            ("b", (3, Some(12))),
-            ("b", (3, Some(13))),
-            ("c", (4, None))))
+        Seq(
+          ("a", (1, Some(11))),
+          ("a", (2, Some(11))),
+          ("b", (3, Some(12))),
+          ("b", (3, Some(13))),
+          ("c", (4, None))
+        )
+      )
+      pd should containInAnyOrder(
+        Seq(
+          ("a", (1, Some(11))),
+          ("a", (2, Some(11))),
+          ("b", (3, Some(12))),
+          ("b", (3, Some(13))),
+          ("c", (4, None))
+        )
+      )
     }
   }
 
-  it should "support skewedLeftJoin() with 0.5 sample" in {
+  it should "support skewedLeftOuterJoin() with 0.5 sample" in {
     import com.twitter.algebird.CMSHasherImplicits._
     runWithContext { sc =>
       val p1 =
@@ -131,26 +164,42 @@ class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
       val p2 = sc.parallelize(Seq(("a", 11), ("b", 12), ("b", 13)))
 
       // set threshold to 3, given 0.5 fraction for sample - "a" should not be hash joined
-      val p = p1.skewedLeftJoin(p2, 3, skewEps, skewSeed, sampleFraction = 0.5)
+      val p = p1.skewedLeftOuterJoin(p2, 3, skewEps, skewSeed, sampleFraction = 0.5)
+      val pd = p1.skewedLeftJoin(p2, 3, skewEps, skewSeed, sampleFraction = 0.5)
       p should containInAnyOrder(
-        Seq(("a", (1, Some(11))),
-            ("a", (2, Some(11))),
-            ("a", (3, Some(11))),
-            ("b", (3, Some(12))),
-            ("b", (3, Some(13))),
-            ("c", (4, None))))
+        Seq(
+          ("a", (1, Some(11))),
+          ("a", (2, Some(11))),
+          ("a", (3, Some(11))),
+          ("b", (3, Some(12))),
+          ("b", (3, Some(13))),
+          ("c", (4, None))
+        )
+      )
+      pd should containInAnyOrder(
+        Seq(
+          ("a", (1, Some(11))),
+          ("a", (2, Some(11))),
+          ("a", (3, Some(11))),
+          ("b", (3, Some(12))),
+          ("b", (3, Some(13))),
+          ("c", (4, None))
+        )
+      )
     }
   }
 
-  it should "support skewedLeftJoin() with empty key count (no hash join)" in {
+  it should "support skewedLeftOuterJoin() with empty key count (no hash join)" in {
     import com.twitter.algebird.CMSHasherImplicits._
     runWithContext { sc =>
       val p1 = sc.parallelize(Seq(("a", 1), ("a", 2), ("b", 3)))
       val p2 = sc.parallelize(Seq(("a", 11)))
 
       // Small sample size to force empty key count
-      val p = p1.skewedLeftJoin(p2, 3, skewEps, skewSeed, sampleFraction = 0.01)
+      val p = p1.skewedLeftOuterJoin(p2, 3, skewEps, skewSeed, sampleFraction = 0.01)
+      val pd = p1.skewedLeftJoin(p2, 3, skewEps, skewSeed, sampleFraction = 0.01)
       p should containInAnyOrder(Seq(("a", (2, Some(11))), ("a", (1, Some(11))), ("b", (3, None))))
+      pd should containInAnyOrder(Seq(("a", (2, Some(11))), ("a", (1, Some(11))), ("b", (3, None))))
     }
   }
 
@@ -161,11 +210,14 @@ class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
       val p2 = sc.parallelize(Seq(("a", 11), ("b", 12), ("b", 13), ("d", 14)))
       val p = p1.skewedFullOuterJoin(p2, Long.MaxValue, skewEps, skewSeed)
       p should containInAnyOrder(
-        Seq(("a", (Some(1), Some(11))),
-            ("b", (Some(2), Some(12))),
-            ("b", (Some(2), Some(13))),
-            ("c", (Some(3), None)),
-            ("d", (None, Some(14)))))
+        Seq(
+          ("a", (Some(1), Some(11))),
+          ("b", (Some(2), Some(12))),
+          ("b", (Some(2), Some(13))),
+          ("c", (Some(3), None)),
+          ("d", (None, Some(14)))
+        )
+      )
     }
   }
 
@@ -176,12 +228,15 @@ class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
       val p2 = sc.parallelize(Seq(("a", 11), ("b", 12), ("b", 13), ("d", 14)))
       val p = p1.skewedFullOuterJoin(p2, Long.MaxValue, skewEps, skewSeed)
       p should containInAnyOrder(
-        Seq(("a", (Some(1), Some(11))),
-            ("a", (Some(2), Some(11))),
-            ("b", (Some(3), Some(12))),
-            ("b", (Some(3), Some(13))),
-            ("c", (Some(4), None)),
-            ("d", (None, Some(14)))))
+        Seq(
+          ("a", (Some(1), Some(11))),
+          ("a", (Some(2), Some(11))),
+          ("b", (Some(3), Some(12))),
+          ("b", (Some(3), Some(13))),
+          ("c", (Some(4), None)),
+          ("d", (None, Some(14)))
+        )
+      )
     }
   }
 
@@ -193,12 +248,15 @@ class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
       // set threshold to 2, to hash join on "a"
       val p = p1.skewedFullOuterJoin(p2, 2, skewEps, skewSeed)
       p should containInAnyOrder(
-        Seq(("a", (Some(1), Some(11))),
-            ("a", (Some(2), Some(11))),
-            ("b", (Some(3), Some(12))),
-            ("b", (Some(3), Some(13))),
-            ("c", (Some(4), None)),
-            ("d", (None, Some(14)))))
+        Seq(
+          ("a", (Some(1), Some(11))),
+          ("a", (Some(2), Some(11))),
+          ("b", (Some(3), Some(12))),
+          ("b", (Some(3), Some(13))),
+          ("c", (Some(4), None)),
+          ("d", (None, Some(14)))
+        )
+      )
     }
   }
 
@@ -221,7 +279,8 @@ class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
           ("b", (Some(3), Some(13))),
           ("c", (Some(4), None)),
           ("d", (None, Some(14)))
-        ))
+        )
+      )
     }
   }
 
@@ -235,10 +294,13 @@ class PairSkewedSCollectionFunctionsTest extends PipelineSpec {
       val p =
         p1.skewedFullOuterJoin(p2, 3, skewEps, skewSeed, sampleFraction = 0.01)
       p should containInAnyOrder(
-        Seq(("a", (Some(2), Some(11))),
-            ("a", (Some(1), Some(11))),
-            ("b", (Some(3), None)),
-            ("c", (None, Some(12)))))
+        Seq(
+          ("a", (Some(2), Some(11))),
+          ("a", (Some(1), Some(11))),
+          ("b", (Some(3), None)),
+          ("c", (None, Some(12)))
+        )
+      )
     }
   }
 }

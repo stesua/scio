@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Word Count Example with Assertions
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.DebuggingWordCount
+// `sbt "runMain com.spotify.scio.examples.DebuggingWordCount
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/shakespeare/kinglear.txt
 // --output=gs://[BUCKET]/[PATH]/wordcount"`
@@ -34,7 +34,6 @@ import org.slf4j.LoggerFactory
 import scala.collection.JavaConverters._
 
 object DebuggingWordCount {
-
   // Logger is an object instance, i.e. statically initialized and thus can be used safely in an
   // anonymous function without serialization issue
   private val logger = LoggerFactory.getLogger(this.getClass)
@@ -75,12 +74,11 @@ object DebuggingWordCount {
       .that(filteredWords.internal)
       .containsInAnyOrder(List(("Flourish", 3L), ("stomach", 1L)).asJava)
 
-    // Close the context, execute the pipeline and block until it finishes
-    val result = sc.close().waitUntilFinish()
+    // Execute the pipeline and block until it finishes
+    val result = sc.run().waitUntilFinish()
 
     // Retrieve metric values
     require(result.counter(matchedWords).committed.get == 2)
     require(result.counter(unmatchedWords).committed.get > 100)
   }
-
 }

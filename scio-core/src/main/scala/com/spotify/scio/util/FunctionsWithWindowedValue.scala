@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,15 +21,17 @@ import com.spotify.scio.values.WindowedValue
 import org.apache.beam.sdk.transforms.DoFn
 import org.apache.beam.sdk.transforms.DoFn.ProcessElement
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow
+import com.twitter.chill.ClosureCleaner
 
 private[scio] object FunctionsWithWindowedValue {
-
   def filterFn[T, U](f: WindowedValue[T] => Boolean): DoFn[T, T] =
     new NamedDoFn[T, T] {
-      val g = ClosureCleaner(f) // defeat closure
+      val g = ClosureCleaner.clean(f) // defeat closure
       @ProcessElement
-      private[scio] def processElement(c: DoFn[T, T]#ProcessContext,
-                                       window: BoundedWindow): Unit = {
+      private[scio] def processElement(
+        c: DoFn[T, T]#ProcessContext,
+        window: BoundedWindow
+      ): Unit = {
         val wv = WindowedValue(c.element(), c.timestamp(), window, c.pane())
         if (g(wv)) c.output(c.element())
       }
@@ -37,10 +39,12 @@ private[scio] object FunctionsWithWindowedValue {
 
   def flatMapFn[T, U](f: WindowedValue[T] => TraversableOnce[WindowedValue[U]]): DoFn[T, U] =
     new NamedDoFn[T, U] {
-      val g = ClosureCleaner(f) // defeat closure
+      val g = ClosureCleaner.clean(f) // defeat closure
       @ProcessElement
-      private[scio] def processElement(c: DoFn[T, U]#ProcessContext,
-                                       window: BoundedWindow): Unit = {
+      private[scio] def processElement(
+        c: DoFn[T, U]#ProcessContext,
+        window: BoundedWindow
+      ): Unit = {
         val wv = WindowedValue(c.element(), c.timestamp(), window, c.pane())
         val i = g(wv).toIterator
         while (i.hasNext) {
@@ -52,13 +56,14 @@ private[scio] object FunctionsWithWindowedValue {
 
   def mapFn[T, U](f: WindowedValue[T] => WindowedValue[U]): DoFn[T, U] =
     new NamedDoFn[T, U] {
-      val g = ClosureCleaner(f) // defeat closure
+      val g = ClosureCleaner.clean(f) // defeat closure
       @ProcessElement
-      private[scio] def processElement(c: DoFn[T, U]#ProcessContext,
-                                       window: BoundedWindow): Unit = {
+      private[scio] def processElement(
+        c: DoFn[T, U]#ProcessContext,
+        window: BoundedWindow
+      ): Unit = {
         val wv = g(WindowedValue(c.element(), c.timestamp(), window, c.pane()))
         c.outputWithTimestamp(wv.value, wv.timestamp)
       }
     }
-
 }

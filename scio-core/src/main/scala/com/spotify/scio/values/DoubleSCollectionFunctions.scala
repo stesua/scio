@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@
 
 package com.spotify.scio.values
 
-import com.spotify.scio._
 import com.spotify.scio.util.StatCounter
 
 /**
@@ -74,12 +73,14 @@ class DoubleSCollectionFunctions(self: SCollection[Double]) {
     val minMax =
       self.aggregate((Double.PositiveInfinity, Double.NegativeInfinity))(
         (acc, x) => (x.min(acc._1), x.max(acc._2)),
-        (l, r) => (l._1.min(r._1), l._2.max(r._2)))
+        (l, r) => (l._1.min(r._1), l._2.max(r._2))
+      )
     val buckets = minMax.map {
       case (min, max) =>
         if (min.isNaN || max.isNaN || max.isInfinity || min.isInfinity) {
           throw new UnsupportedOperationException(
-            "Histogram on either an empty SCollection or SCollection containing +/-infinity or NaN")
+            "Histogram on either an empty SCollection or SCollection containing +/-infinity or NaN"
+          )
         }
         val range = if (min != max) {
           // Range.Double.inclusive(min, max, increment)
@@ -113,8 +114,10 @@ class DoubleSCollectionFunctions(self: SCollection[Double]) {
   def histogram(buckets: Array[Double], evenBuckets: Boolean = false): SCollection[Array[Long]] =
     histogramImpl(self.context.parallelize(Seq(buckets)), evenBuckets)
 
-  private def histogramImpl(buckets: SCollection[Array[Double]],
-                            evenBuckets: Boolean): SCollection[Array[Long]] = {
+  private def histogramImpl(
+    buckets: SCollection[Array[Double]],
+    evenBuckets: Boolean
+  ): SCollection[Array[Long]] = {
     import com.spotify.scio.values.BucketFunctions._
     // Map buckets into a side input of bucket function
     val side = buckets.map { b =>
@@ -151,7 +154,15 @@ class DoubleSCollectionFunctions(self: SCollection[Double]) {
           b(bin) = count
           b
       }
-      .sum
+      .reduce { (x, y) =>
+        val r = x.clone()
+        var i = 0
+        while (i < x.length) {
+          r(i) += y(i)
+          i += 1
+        }
+        r
+      }
 
     // Workaround since hist may be empty
     val bSide = bucketSize.asSingletonSideInput
@@ -169,7 +180,6 @@ class DoubleSCollectionFunctions(self: SCollection[Double]) {
       }
       .toSCollection
   }
-
 }
 
 private object BucketFunctions {
@@ -200,7 +210,7 @@ private object BucketFunctions {
   }
 
   // Determine the bucket function in constant time. Requires that buckets are evenly spaced
-  def fastBucketFunction(min: Double, max: Double, count: Int)(e: Double): Option[Int] = {
+  def fastBucketFunction(min: Double, max: Double, count: Int)(e: Double): Option[Int] =
     // If our input is not a number unless the increment is also NaN then we fail fast
     if (e.isNaN || e < min || e > max) {
       None
@@ -211,5 +221,4 @@ private object BucketFunctions {
       // it's part of the last end-range-inclusive bucket, so return count-1
       Some(math.min(bucketNumber, count - 1))
     }
-  }
 }

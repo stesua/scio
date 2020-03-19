@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,20 +23,21 @@ import com.spotify.scio.coders.Coder
 import scala.collection.concurrent.TrieMap
 
 private[scio] object InMemorySink {
-
   private val cache: TrieMap[String, Iterable[Any]] = TrieMap.empty
 
   def save[T: Coder](id: String, data: SCollection[T]): Unit = {
     require(data.context.isTest, "In memory sink can only be used in tests")
-    data
-      .groupBy(_ => ())
-      .values
-      .map { values =>
-        cache += (id -> values)
-        ()
-      }
+    cache += id -> Nil
+    data.transform {
+      _.groupBy(_ => ()).values
+        .map { values =>
+          cache += (id -> values)
+          ()
+        }
+    }
+
+    ()
   }
 
   def get[T](id: String): Iterable[T] = cache(id).asInstanceOf[Iterable[T]]
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Compute TF-IDF from a Text Corpus
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.complete.TfIdf
+// `sbt "runMain com.spotify.scio.examples.complete.TfIdf
 // --project=[PROJECT] --runner=DataflowPRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/shakespeare/?*.txt
 // --output=gs://[BUCKET]/[PATH]/tf_idf"`
@@ -35,7 +35,6 @@ import scala.collection.JavaConverters._
 import scala.io.Source
 
 object TfIdf {
-
   def main(cmdlineArgs: Array[String]): Unit = {
     val (sc, args) = ContextAndArgs(cmdlineArgs)
 
@@ -82,12 +81,14 @@ object TfIdf {
       }
       .saveAsTextFile(args("output"))
 
-    sc.close()
+    sc.run()
+    ()
   }
 
   // Compute TF-IDF from an input collection of `(doc, line)`
   def computeTfIdf(
-    uriToContent: SCollection[(String, String)]): SCollection[(String, (String, Double))] = {
+    uriToContent: SCollection[(String, String)]
+  ): SCollection[(String, (String, Double))] = {
     // Split lines into terms as (doc, term)
     val uriToWords = uriToContent.flatMap {
       case (uri, line) =>
@@ -126,5 +127,4 @@ object TfIdf {
       // Compute `(term, (doc, TF-IDF))`
       .map { case (t, ((d, tf), df)) => (t, (d, tf * math.log(1 / df))) }
   }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,15 +24,16 @@ import com.google.api.client.util.Sleeper
 import com.google.api.services.cloudresourcemanager.CloudResourceManager
 import com.google.api.services.storage.model.Bucket
 import com.google.cloud.hadoop.util.{ResilientOperation, RetryDeterminer}
-import com.google.common.base.Strings.isNullOrEmpty
 import org.apache.beam.sdk.extensions.gcp.options.{GcpOptions, GcsOptions}
 import org.apache.beam.sdk.options.PipelineOptions
-import org.apache.beam.sdk.util.gcsfs.GcsPath
-import org.apache.beam.sdk.util.{BackOff, BackOffAdapter, FluentBackoff}
+import org.apache.beam.sdk.extensions.gcp.util.gcsfs.GcsPath
+import org.apache.beam.sdk.extensions.gcp.util.BackOffAdapter
+import org.apache.beam.sdk.util.{BackOff, FluentBackoff}
 import org.joda.time.Duration
 import org.slf4j.{Logger, LoggerFactory}
 
 private object DefaultBucket {
+  private[this] val isNullOrEmpty: String => Boolean = s => !Option(s).exists(_.nonEmpty)
 
   def tryCreateDefaultBucket(options: PipelineOptions, crmClient: CloudResourceManager): String = {
     val gcpOptions = options.as(classOf[GcsOptions])
@@ -64,13 +65,17 @@ private object DefaultBucket {
     // by the project executing the job.
     try {
       val owner = gcpOptions.getGcsUtil.bucketOwner(GcsPath.fromComponents(bucketName, ""))
-      require(owner == projectNumber,
-              s"Bucket owner does not match the project from --project: $owner vs. $projectNumber")
+      require(
+        owner == projectNumber,
+        s"Bucket owner does not match the project from --project: $owner vs. $projectNumber"
+      )
     } catch {
       case e: IOException =>
-        throw new RuntimeException("Unable to determine the owner of the default bucket at gs://" +
-                                     bucketName,
-                                   e)
+        throw new RuntimeException(
+          "Unable to determine the owner of the default bucket at gs://" +
+            bucketName,
+          e
+        )
     }
     "gs://" + bucketName
   }
@@ -85,10 +90,12 @@ private object DefaultBucket {
   private def getProjectNumber(projectId: String, crmClient: CloudResourceManager): Long =
     getProjectNumber(projectId, crmClient, BACKOFF_FACTORY.backoff(), Sleeper.DEFAULT)
 
-  private def getProjectNumber(projectId: String,
-                               crmClient: CloudResourceManager,
-                               backoff: BackOff,
-                               sleeper: Sleeper): Long = {
+  private def getProjectNumber(
+    projectId: String,
+    crmClient: CloudResourceManager,
+    backoff: BackOff,
+    sleeper: Sleeper
+  ): Long = {
     val getProject = crmClient.projects.get(projectId)
     try {
       val project = ResilientOperation.retry(

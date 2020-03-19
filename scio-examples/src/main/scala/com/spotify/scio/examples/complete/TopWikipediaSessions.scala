@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Top Wikipedia Sessions
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.complete.TopWikipediaSessions
+// `sbt "runMain com.spotify.scio.examples.complete.TopWikipediaSessions
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/wikipedia_edits/wiki_data-*.json
 // --output=gs://[BUCKET]/[PATH]/top_wikipedia_sessions"`
@@ -40,11 +40,14 @@ object TopWikipediaSessions {
     val input = sc.tableRowJsonFile(args.getOrElse("input", ExampleData.EXPORTED_WIKI_TABLE))
     computeTopSessions(input, samplingThreshold).saveAsTextFile(args("output"))
 
-    sc.close()
+    sc.run()
+    ()
   }
 
-  def computeTopSessions(input: SCollection[TableRow],
-                         samplingThreshold: Double): SCollection[String] = {
+  def computeTopSessions(
+    input: SCollection[TableRow],
+    samplingThreshold: Double
+  ): SCollection[String] =
     input
     // Extract fields from `TableRow` JSON
       .flatMap { row =>
@@ -88,6 +91,4 @@ object TopWikipediaSessions {
       }
       // End of windowed operation, convert back to a regular `SCollection`
       .toSCollection
-  }
-
 }

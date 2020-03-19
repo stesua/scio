@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 // Usage:
 
 // To upload the template:
-// `sbt runMain "com.spotify.scio.examples.extra.TemplateExample
+// `sbt "runMain com.spotify.scio.examples.extra.TemplateExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --stagingLocation=gs://[BUCKET]/staging --templateLocation=gs://[BUCKET]/TemplateExample"`
 
@@ -31,7 +31,7 @@
 //  outputTopic=projects/[PROJECT]/topics/[TOPIC]`
 
 // To run the job directly:
-// `sbt runMain "com.spotify.scio.examples.extra.TemplateExample
+// `sbt "runMain com.spotify.scio.examples.extra.TemplateExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --inputSub=projects/[PROJECT]/subscriptions/sub
 // --outputTopic=projects/[PROJECT]/topics/[TOPIC]"`
@@ -49,7 +49,6 @@ import org.apache.beam.sdk.options.{
 import org.apache.beam.sdk.options.Validation.Required
 
 object TemplateExample {
-
   trait Options extends PipelineOptions with StreamingOptions {
     @Description("The Cloud Pub/Sub subscription to read from")
     @Required
@@ -82,7 +81,8 @@ object TemplateExample {
     sc.customInput("input", inputIO)
       .saveAsCustomOutput("output", outputIO)
 
-    // Close the context
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 }

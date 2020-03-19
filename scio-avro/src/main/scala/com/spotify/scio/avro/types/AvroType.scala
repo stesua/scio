@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ package com.spotify.scio.avro.types
 import org.apache.avro.Schema
 import org.apache.avro.generic.GenericRecord
 
-import scala.annotation.StaticAnnotation
+import scala.annotation.{compileTimeOnly, StaticAnnotation}
 import scala.language.experimental.macros
 import scala.reflect.runtime.universe._
 
@@ -80,6 +80,7 @@ object AvroType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
+  @compileTimeOnly("enable macro paradise to expand macro annotations")
   class fromSchema(schema: String) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.schemaImpl
   }
@@ -120,6 +121,7 @@ object AvroType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
+  @compileTimeOnly("enable macro paradise to expand macro annotations")
   class fromPath(folderGlob: String) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.pathImpl
   }
@@ -146,6 +148,7 @@ object AvroType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
+  @compileTimeOnly("enable macro paradise to expand macro annotations")
   class fromSchemaFile(schemaFile: String) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.schemaFileImpl
   }
@@ -170,6 +173,7 @@ object AvroType {
    * Rule of thumb is to only add new fields, without removing the old ones.
    * @group annotation
    */
+  @compileTimeOnly("enable macro paradise to expand macro annotations")
   class toSchema extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.toSchemaImpl
   }
@@ -181,9 +185,9 @@ object AvroType {
   trait HasAvroSchema[T] {
     def schema: Schema
 
-    def fromGenericRecord: (GenericRecord => T)
+    def fromGenericRecord: GenericRecord => T
 
-    def toGenericRecord: (T => GenericRecord)
+    def toGenericRecord: T => GenericRecord
 
     def toPrettyString(indent: Int = 0): String
   }
@@ -212,7 +216,7 @@ object AvroType {
    * to the given case class `T`.
    * @group converters
    */
-  def fromGenericRecord[T]: (GenericRecord => T) =
+  def fromGenericRecord[T]: GenericRecord => T =
     macro ConverterProvider.fromGenericRecordImpl[T]
 
   /**
@@ -220,12 +224,11 @@ object AvroType {
    * [[org.apache.avro.generic.GenericRecord GenericRecord]].
    * @group converters
    */
-  def toGenericRecord[T]: (T => GenericRecord) =
+  def toGenericRecord[T]: T => GenericRecord =
     macro ConverterProvider.toGenericRecordImpl[T]
 
   /** Create a new AvroType instance. */
   def apply[T: TypeTag]: AvroType[T] = new AvroType[T]
-
 }
 
 /**
@@ -234,7 +237,6 @@ object AvroType {
  * This decouples generated fields and methods from macro expansion to keep core macro free.
  */
 class AvroType[T: TypeTag] extends Serializable {
-
   private val instance = runtimeMirror(getClass.getClassLoader)
     .reflectModule(typeOf[T].typeSymbol.companion.asModule)
     .instance
@@ -243,15 +245,14 @@ class AvroType[T: TypeTag] extends Serializable {
     instance.getClass.getMethod(key).invoke(instance)
 
   /** GenericRecord to `T` converter. */
-  def fromGenericRecord: (GenericRecord => T) =
-    getField("fromGenericRecord").asInstanceOf[(GenericRecord => T)]
+  def fromGenericRecord: GenericRecord => T =
+    getField("fromGenericRecord").asInstanceOf[GenericRecord => T]
 
   /** `T` to GenericRecord converter. */
-  def toGenericRecord: (T => GenericRecord) =
-    getField("toGenericRecord").asInstanceOf[(T => GenericRecord)]
+  def toGenericRecord: T => GenericRecord =
+    getField("toGenericRecord").asInstanceOf[T => GenericRecord]
 
   /** Schema of `T`. */
   def schema: Schema =
     getField("schema").asInstanceOf[Schema]
-
 }

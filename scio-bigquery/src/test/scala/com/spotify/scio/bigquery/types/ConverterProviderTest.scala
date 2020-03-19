@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,12 @@
 package com.spotify.scio.bigquery.types
 
 import com.spotify.scio.bigquery._
-import org.scalatest._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
 
-class ConverterProviderTest extends FlatSpec with Matchers {
-
+class ConverterProviderTest extends AnyFlatSpec with Matchers {
   import ConverterProviderTest._
 
-  // scalastyle:off no.whitespace.before.left.bracket
   "ConverterProvider" should "throw NPE with meaningful message for null in REQUIRED field" in {
     the[NullPointerException] thrownBy {
       Required.fromTableRow(TableRow())
@@ -40,11 +39,20 @@ class ConverterProviderTest extends FlatSpec with Matchers {
       Repeated.fromTableRow(TableRow())
     } should have message """REPEATED field "a" is null"""
   }
-  // scalastyle:on no.whitespace.before.left.bracket
 
+  // scalastyle:on no.whitespace.before.left.bracket
+  it should "handle required geography type" in {
+    val wkt = "POINT (30 10)"
+    RequiredGeo.fromTableRow(TableRow("a" -> wkt)) shouldBe RequiredGeo(Geography(wkt))
+    BigQueryType.toTableRow[RequiredGeo](RequiredGeo(Geography(wkt))) shouldBe TableRow("a" -> wkt)
+  }
 }
 
 object ConverterProviderTest {
+
+  @BigQueryType.toTable
+  case class RequiredGeo(a: Geography)
+
   @BigQueryType.toTable
   case class Required(a: String)
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import com.spotify.scio.jdbc._
 
 // Read from Google Cloud SQL database table and write to a different table in the same database
 object CloudSqlExample {
-
   def main(cmdlineArgs: Array[String]): Unit = {
     // Parse database connection details as `CloudSqlOptions`
     val (opts, _) = ScioContext.parseArguments[CloudSqlOptions](cmdlineArgs)
@@ -38,7 +37,8 @@ object CloudSqlExample {
       .map(kv => (kv._1.toUpperCase, kv._2))
       // Write to Cloud SQL
       .saveAsJdbc(writeOptions)
-    sc.close()
+    sc.run()
+    ()
   }
 
   // `socketFactory=com.google.cloud.sql.mysql.SocketFactory` enables a secure connection to a
@@ -51,24 +51,27 @@ object CloudSqlExample {
   // other options
   // - See this [page](https://github.com/GoogleCloudPlatform/cloud-sql-mysql-socket-factory) for
   // more information on socket factory
-  def getJdbcUrl(opts: CloudSqlOptions): String = {
+  def getJdbcUrl(opts: CloudSqlOptions): String =
     s"jdbc:mysql://google/${opts.getCloudSqlDb}?" +
       s"cloudSqlInstance=${opts.getCloudSqlInstanceConnectionName}&" +
       s"socketFactory=com.google.cloud.sql.mysql.SocketFactory"
-  }
 
   // Basic connection details
   def getConnectionOptions(opts: CloudSqlOptions): JdbcConnectionOptions =
-    JdbcConnectionOptions(username = opts.getCloudSqlUsername,
-                          password = Some(opts.getCloudSqlPassword),
-                          driverClass = classOf[com.mysql.jdbc.Driver],
-                          connectionUrl = getJdbcUrl(opts))
+    JdbcConnectionOptions(
+      username = opts.getCloudSqlUsername,
+      password = Some(opts.getCloudSqlPassword),
+      driverClass = classOf[com.mysql.jdbc.Driver],
+      connectionUrl = getJdbcUrl(opts)
+    )
 
   // Read from a table called `word_count` with two columns `word` and `count`
   def getReadOptions(connOpts: JdbcConnectionOptions): JdbcReadOptions[(String, Long)] =
-    JdbcReadOptions(connectionOptions = connOpts,
-                    query = "SELECT * FROM word_count",
-                    rowMapper = r => (r.getString(1), r.getLong(2)))
+    JdbcReadOptions(
+      connectionOptions = connOpts,
+      query = "SELECT * FROM word_count",
+      rowMapper = r => (r.getString(1), r.getLong(2))
+    )
 
   // Write to a table called `result_word_count` with two columns `word` and `count`
   def getWriteOptions(connOpts: JdbcConnectionOptions): JdbcWriteOptions[(String, Long)] =
@@ -80,5 +83,4 @@ object CloudSqlExample {
         s.setLong(2, kv._2)
       }
     )
-
 }

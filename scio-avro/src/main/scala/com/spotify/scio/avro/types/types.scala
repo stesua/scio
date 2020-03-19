@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,8 +35,5 @@ package object types {
    *                 @doc("user age") age: Int)
    * }}}
    */
-  // scalastyle:off class.name
   class doc(value: String) extends StaticAnnotation
-  // scalastyle:on class.name
-
 }

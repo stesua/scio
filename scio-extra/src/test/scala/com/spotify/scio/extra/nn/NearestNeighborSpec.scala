@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,12 +23,9 @@ import com.spotify.scio.extra.PropertySpec
 import org.scalacheck._
 
 class NearestNeighborSpec extends PropertySpec {
-
   val dimension = 40
   private def randVec = DenseVector.rand[Double](dimension)
-  val vector = Gen.resultOf { _: Int =>
-    randVec
-  }
+  val vector = Gen.resultOf { _: Int => randVec }
   val vecs = Gen
     .nonEmptyListOf(vector)
     .map(_.zipWithIndex.map(kv => ("key" + kv._2, kv._1)))
@@ -52,13 +49,15 @@ class NearestNeighborSpec extends PropertySpec {
     }
   }
 
-  private def verify(builder: NearestNeighborBuilder[String, Double],
-                     vectors: List[(String, DenseVector[Double])],
-                     maxResult: Int,
-                     minSimilarity: Double,
-                     minPrecision: Double,
-                     minRecall: Double,
-                     minF1: Double) = {
+  private def verify(
+    builder: NearestNeighborBuilder[String, Double],
+    vectors: List[(String, DenseVector[Double])],
+    maxResult: Int,
+    minSimilarity: Double,
+    minPrecision: Double,
+    minRecall: Double,
+    minF1: Double
+  ) = {
     vectors.foreach(kv => builder.add(kv._1, kv._2))
     val nn = builder.build
     nn.lookup(randVec, maxResult).size should be <= maxResult
@@ -67,11 +66,13 @@ class NearestNeighborSpec extends PropertySpec {
     coverage(vectors, nn, minPrecision, minRecall, minF1)
   }
 
-  private def coverage(vectors: List[(String, DenseVector[Double])],
-                       nn: NearestNeighbor[String, Double],
-                       minPrecision: Double,
-                       minRecall: Double,
-                       minF1: Double) = {
+  private def coverage(
+    vectors: List[(String, DenseVector[Double])],
+    nn: NearestNeighbor[String, Double],
+    minPrecision: Double,
+    minRecall: Double,
+    minF1: Double
+  ) = {
     val v = randVec
     val expected = vectors
       .map(kv => (kv._1, kv._2 dot v))
@@ -87,5 +88,4 @@ class NearestNeighborSpec extends PropertySpec {
     minRecall should be >= minRecall
     f1 should be >= minF1
   }
-
 }

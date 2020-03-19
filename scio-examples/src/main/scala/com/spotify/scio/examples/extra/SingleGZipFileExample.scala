@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Gzip File write
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.SingleGZipFileExample
+// `sbt "runMain com.spotify.scio.examples.extra.SingleGZipFileExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=[INPUT.txt] --output=[OUTPUT]"`
 package com.spotify.scio.examples.extra
@@ -43,11 +43,11 @@ object SingleGZipFileExample {
       .countByValue
       // Map `(String, Long)` tuples into strings
       .map(t => t._1 + ": " + t._2)
-
       // Save result as a single text files under the output path, with deflate compression
       .saveAsTextFile(args("output"), numShards = 1, compression = Compression.DEFLATE)
 
-    // Close the context and execute the pipeline
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 }

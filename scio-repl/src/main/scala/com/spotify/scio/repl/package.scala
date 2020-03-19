@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,18 +21,16 @@ import com.spotify.scio.values.SCollection
 import com.spotify.scio.coders.Coder
 
 package object repl {
-
   implicit class ReplSCollection[T](private val self: SCollection[T]) extends AnyVal {
 
     /** Convenience method to close the current [[ScioContext]] and collect elements. */
-    def closeAndCollect()(implicit c: Coder[T]): Iterator[T] = {
+    def runAndCollect()(implicit c: Coder[T]): Iterator[T] = {
       val closedTap = self.materialize
       self.context
-        .close()
+        .run()
         .waitUntilDone()
         .tap(closedTap)
         .value
     }
   }
-
 }

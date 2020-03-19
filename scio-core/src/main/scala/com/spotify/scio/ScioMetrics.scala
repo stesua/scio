@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ import scala.reflect.ClassTag
  * [[org.apache.beam.sdk.metrics.Gauge]].
  */
 object ScioMetrics {
-
   private def namespace[T: ClassTag]: String = {
     val cls = implicitly[ClassTag[T]].runtimeClass
     val ns: Class[_] =
@@ -64,5 +63,4 @@ object ScioMetrics {
    * Default is "com.spotify.scio.ScioMetrics" if `T` is not specified.
    */
   def gauge[T: ClassTag](name: String): Gauge = gauge(namespace[T], name)
-
 }

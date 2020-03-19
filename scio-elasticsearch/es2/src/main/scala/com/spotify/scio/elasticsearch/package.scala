@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@ import org.joda.time.Duration
  * }}}
  */
 package object elasticsearch {
-
   final case class ElasticsearchOptions(clusterName: String, servers: Seq[InetSocketAddress])
 
   implicit class ElasticsearchSCollection[T](@transient private val self: SCollection[T])
@@ -51,15 +50,16 @@ package object elasticsearch {
      *                   number of pipeline workers
      * @param errorFn function to handle error when performing Elasticsearch bulk writes
      */
-    def saveAsElasticsearch(esOptions: ElasticsearchOptions,
-                            flushInterval: Duration = WriteParam.DefaultFlushInterval,
-                            numOfShards: Long = WriteParam.DefaultNumShards,
-                            maxBulkRequestSize: Int = WriteParam.DefaultMaxBulkRequestSize,
-                            errorFn: BulkExecutionException => Unit = WriteParam.DefaultErrorFn)(
-      f: T => Iterable[ActionRequest[_]])(implicit coder: Coder[T]): ClosedTap[Nothing] = {
+    @deprecated("scio-elasticsearch2 will be removed", "0.8.0")
+    def saveAsElasticsearch(
+      esOptions: ElasticsearchOptions,
+      flushInterval: Duration = WriteParam.DefaultFlushInterval,
+      numOfShards: Long = WriteParam.DefaultNumShards,
+      maxBulkRequestSize: Int = WriteParam.DefaultMaxBulkRequestSize,
+      errorFn: BulkExecutionException => Unit = WriteParam.DefaultErrorFn
+    )(f: T => Iterable[ActionRequest[_]])(implicit coder: Coder[T]): ClosedTap[Nothing] = {
       val param = WriteParam(f, errorFn, flushInterval, numOfShards, maxBulkRequestSize)
       self.write(ElasticsearchIO[T](esOptions))(param)
     }
   }
-
 }

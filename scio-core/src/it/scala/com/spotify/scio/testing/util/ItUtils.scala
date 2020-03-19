@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,23 +17,21 @@
 
 package com.spotify.scio.testing.util
 
-import java.util.UUID
+import java.util.{Collections, UUID}
 
 import com.google.api.client.http.HttpRequestInitializer
 import com.google.api.services.cloudresourcemanager.CloudResourceManager
 import com.google.auth.Credentials
 import com.google.auth.http.HttpCredentialsAdapter
 import com.google.cloud.hadoop.util.ChainingHttpRequestInitializer
-import com.google.common.collect.ImmutableList
 import org.apache.beam.sdk.extensions.gcp.auth.NullCredentialInitializer
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions.DefaultProjectFactory
 import org.apache.beam.sdk.extensions.gcp.options._
 import org.apache.beam.sdk.options.PipelineOptionsFactory
-import org.apache.beam.sdk.util.{RetryHttpRequestInitializer, Transport}
+import org.apache.beam.sdk.extensions.gcp.util.{RetryHttpRequestInitializer, Transport}
 
 /** Integration test utilities. */
 private[scio] object ItUtils {
-
   // XXX: Copied from BigQueryClient
   val PROJECT_KEY: String = "bigquery.project"
 
@@ -53,13 +51,15 @@ private[scio] object ItUtils {
     opts.setProject(project)
     val bucket = DefaultBucket.tryCreateDefaultBucket(
       opts,
-      newCloudResourceManagerClient(opts.as(classOf[CloudResourceManagerOptions])))
+      newCloudResourceManagerClient(opts.as(classOf[CloudResourceManagerOptions]))
+    )
     val uuid = UUID.randomUUID().toString
     s"$bucket/$prefix-$uuid"
   }
 
   private def newCloudResourceManagerClient(
-    options: CloudResourceManagerOptions): CloudResourceManager = {
+    options: CloudResourceManagerOptions
+  ): CloudResourceManager = {
     val credentials = options.getGcpCredential
     if (credentials == null) {
       NullCredentialInitializer.throwNullCredentialException()
@@ -70,7 +70,7 @@ private[scio] object ItUtils {
       chainHttpRequestInitializer(
         credentials,
         // Do not log 404. It clutters the output and is possibly even required by the caller.
-        new RetryHttpRequestInitializer(ImmutableList.of(404))
+        new RetryHttpRequestInitializer(Collections.singletonList(404))
       )
     ).setApplicationName(options.getAppName)
       .setGoogleClientRequestInitializer(options.getGoogleApiTrace)
@@ -79,12 +79,14 @@ private[scio] object ItUtils {
 
   private def chainHttpRequestInitializer(
     credential: Credentials,
-    httpRequestInitializer: HttpRequestInitializer): HttpRequestInitializer = {
+    httpRequestInitializer: HttpRequestInitializer
+  ): HttpRequestInitializer =
     if (credential == null) {
       new ChainingHttpRequestInitializer(new NullCredentialInitializer(), httpRequestInitializer)
     } else {
-      new ChainingHttpRequestInitializer(new HttpCredentialsAdapter(credential),
-                                         httpRequestInitializer)
+      new ChainingHttpRequestInitializer(
+        new HttpCredentialsAdapter(credential),
+        httpRequestInitializer
+      )
     }
-  }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import java.io.File
 import java.util.Locale
 
 object BuildCredentials {
-
   private val CREDENTIAL_ENV_VAR = "GOOGLE_APPLICATION_CREDENTIALS"
   private val CLOUDSDK_CONFIG_DIRECTORY = "gcloud"
   private val WELL_KNOWN_CREDENTIALS_FILE =
@@ -57,5 +56,4 @@ object BuildCredentials {
 
   private def fileExists(file: File): Boolean =
     file.exists() && !file.isDirectory
-
 }

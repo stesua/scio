@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,15 +35,13 @@ import org.apache.beam.sdk.io.gcp.pubsub.PubsubOptions
 import scala.util.Try
 
 object PubSubAdmin {
-
   private object GrpcClient {
-    private def newChannel: ManagedChannel = {
+    private def newChannel: ManagedChannel =
       NettyChannelBuilder
         .forAddress("pubsub.googleapis.com", 443)
         .negotiationType(NegotiationType.TLS)
         .sslContext(GrpcSslContexts.forClient.ciphers(null).build)
         .build
-    }
 
     def subscriber[A](pubsubOptions: PubsubOptions)(f: SubscriberBlockingStub => A): Try[A] = {
       val channel = newChannel
@@ -100,9 +98,11 @@ object PubSubAdmin {
    * @return a Subscription if it alreadys exists or has been successfully created, a failure
    * otherwise
    */
-  def ensureSubscription(pubsubOptions: PubsubOptions,
-                         topic: String,
-                         name: String): Try[Subscription] =
+  def ensureSubscription(
+    pubsubOptions: PubsubOptions,
+    topic: String,
+    name: String
+  ): Try[Subscription] =
     GrpcClient.subscriber(pubsubOptions) { client =>
       val sub = Subscription.newBuilder().setTopic(topic).setName(name).build()
       client.createSubscription(sub)

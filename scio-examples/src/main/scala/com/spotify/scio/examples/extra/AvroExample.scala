@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Read and Write specific and generic Avro records
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.AvroExample
+// `sbt "runMain com.spotify.scio.examples.extra.AvroExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=[INPUT].avro --output=[OUTPUT].avro --method=[METHOD]"`
 package com.spotify.scio.examples.extra
@@ -28,6 +28,7 @@ import com.spotify.scio.coders.Coder
 import com.spotify.scio.avro._
 import com.spotify.scio.avro.Account
 import com.spotify.scio.avro.types.AvroType
+import com.spotify.scio.io.ClosedTap
 import org.apache.avro.Schema
 import org.apache.avro.generic.{GenericData, GenericRecord}
 
@@ -76,10 +77,11 @@ object AvroExample {
       case _ => throw new RuntimeException(s"Invalid method $m")
     }
 
-    sc.close()
+    sc.run()
+    ()
   }
 
-  private def specificOut(sc: ScioContext, args: Args): Unit = {
+  private def specificOut(sc: ScioContext, args: Args): ClosedTap[Account] =
     sc.parallelize(1 to 100)
       .map { i =>
         Account
@@ -91,15 +93,13 @@ object AvroExample {
           .build()
       }
       .saveAsAvroFile(args("output"))
-  }
 
-  private def specificIn(sc: ScioContext, args: Args): Unit = {
+  private def specificIn(sc: ScioContext, args: Args): ClosedTap[String] =
     sc.avroFile[Account](args("input"))
       .map(_.toString)
       .saveAsTextFile(args("output"))
-  }
 
-  private def genericOut(sc: ScioContext, args: Args): Unit = {
+  private def genericOut(sc: ScioContext, args: Args): ClosedTap[GenericRecord] = {
     // Avro generic record encoding is more efficient with an explicit schema
     implicit def genericCoder = Coder.avroGenericRecordCoder(schema)
     sc.parallelize(1 to 100)
@@ -114,19 +114,18 @@ object AvroExample {
       .saveAsAvroFile(args("output"), schema = schema)
   }
 
-  private def typedIn(sc: ScioContext, args: Args): Unit =
+  private def typedIn(sc: ScioContext, args: Args): ClosedTap[String] =
     sc.typedAvroFile[AccountFromSchema](args("input"))
       .saveAsTextFile(args("output"))
 
-  private def typedOut(sc: ScioContext, args: Args): Unit = {
+  private def typedOut(sc: ScioContext, args: Args): ClosedTap[AccountToSchema] =
     sc.parallelize(1 to 100)
       .map { i =>
         AccountToSchema(id = i, amount = i.toDouble, name = "account" + i, `type` = "checking")
       }
       .saveAsTypedAvroFile(args("output"))
-  }
 
-  private def genericIn(sc: ScioContext, args: Args): Unit = {
+  private def genericIn(sc: ScioContext, args: Args): ClosedTap[String] = {
     implicit def genericCoder = Coder.avroGenericRecordCoder(schema)
     sc.avroFile[GenericRecord](args("input"), schema)
       .map(_.toString)
@@ -139,7 +138,8 @@ object AvroExample {
         name,
         Schema.createUnion(List(Schema.create(Schema.Type.NULL), Schema.create(tpe)).asJava),
         null: String,
-        null: AnyRef)
+        null: AnyRef
+      )
 
     val s = Schema.createRecord("GenericAccountRecord", null, null, false)
     s.setFields(
@@ -148,8 +148,8 @@ object AvroExample {
         f("amount", Schema.Type.DOUBLE),
         f("name", Schema.Type.STRING),
         f("type", Schema.Type.STRING)
-      ).asJava)
+      ).asJava
+    )
     s
   }
-
 }

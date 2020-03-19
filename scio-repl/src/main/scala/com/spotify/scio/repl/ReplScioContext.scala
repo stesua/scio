@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,34 +18,31 @@
 package com.spotify.scio.repl
 
 import org.apache.beam.sdk.options.PipelineOptions
-import com.spotify.scio.{ClosedScioContext, CoreSysProps, ScioContext}
+import com.spotify.scio.{ScioContext, ScioExecutionContext}
 
 class ReplScioContext(options: PipelineOptions, artifacts: List[String])
     extends ScioContext(options, artifacts) {
 
-  this.setAppName("sciorepl")
-  this.setJobName(s"""sciorepl-${CoreSysProps.User.value}-${System.currentTimeMillis()}""")
-
   /** Enhanced version that dumps REPL session jar. */
-  override def close(): ClosedScioContext = {
+  override def run(): ScioExecutionContext = {
     createJar()
-    super.close()
+    super.run()
   }
 
   /** Ensure an operation is called before the pipeline is closed. */
   override private[scio] def requireNotClosed[T](body: => T): T = {
-    require(!this.isClosed,
-            "ScioContext already closed, use :newScio <[context-name] | sc> to create new context")
+    require(
+      !this.isClosed,
+      "ScioContext has already been executed, use :newScio <[context-name] | sc> to create new context"
+    )
     super.requireNotClosed(body)
   }
 
   private def createJar(): Unit = {
-    // scalastyle:off structural.type
     import scala.language.reflectiveCalls
     this.getClass.getClassLoader
       .asInstanceOf[{ def createReplCodeJar: String }]
       .createReplCodeJar
-    // scalastyle:on structural.type
+    ()
   }
-
 }

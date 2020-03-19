@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,6 @@ import scala.reflect.runtime.universe
 import scala.reflect.runtime.universe._
 
 private[types] object SchemaProvider {
-
   private[this] val m: ConcurrentHashMap[Type, Schema] =
     new ConcurrentHashMap[Type, Schema]()
 
@@ -47,7 +46,6 @@ private[types] object SchemaProvider {
     })
   }
 
-  // scalastyle:off cyclomatic.complexity
   private def toSchema(tpe: Type): (Schema, Any) = tpe match {
     case t if t =:= typeOf[Boolean] =>
       (Schema.create(Schema.Type.BOOLEAN), null)
@@ -82,7 +80,6 @@ private[types] object SchemaProvider {
 
     case _ => throw new RuntimeException(s"Unsupported type: $tpe")
   }
-  // scalastyle:on cyclomatic.complexity
 
   private def toField(f: (Symbol, Option[String])): Field = {
     val (symbol, doc) = f

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,13 @@
 package com.spotify.scio
 
 import caseapp._
-import com.spotify.scio.ContextAndArgs.TypedParser
-import org.scalatest.{FlatSpec, Matchers}
+import com.spotify.scio.ContextAndArgs.{ArgsParser, TypedParser, UsageOrHelpException}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
-class ArgsTest extends FlatSpec with Matchers {
+import scala.util.{Failure, Success, Try}
 
+class ArgsTest extends AnyFlatSpec with Matchers {
   "Args" should "support String" in {
     Args("--str=value".split(" "))("str") shouldBe "value"
   }
@@ -47,7 +49,6 @@ class ArgsTest extends FlatSpec with Matchers {
     Args("--key=value".split(" ")).required("key") shouldBe "value"
   }
 
-  // scalastyle:off no.whitespace.before.left.bracket
   it should "fail required with missing value" in {
     the[IllegalArgumentException] thrownBy {
       Args(Array.empty).required("key")
@@ -59,7 +60,6 @@ class ArgsTest extends FlatSpec with Matchers {
       Args("--key=value1 --key=value2".split(" ")).required("key")
     } should have message "Multiple values for property 'key'"
   }
-  // scalastyle:on no.whitespace.before.left.bracket
 
   it should "support int" in {
     val args = Args("--key1=10".split(" "))
@@ -75,8 +75,8 @@ class ArgsTest extends FlatSpec with Matchers {
 
   it should "support float" in {
     val args = Args("--key1=1.5".split(" "))
-    args.float("key1") shouldBe 1.5F
-    args.float("key2", 2.5F) shouldBe 2.5F
+    args.float("key1") shouldBe 1.5f
+    args.float("key2", 2.5f) shouldBe 2.5f
   }
 
   it should "support double" in {
@@ -116,12 +116,14 @@ class ArgsTest extends FlatSpec with Matchers {
   @AppName("FooBar App")
   @AppVersion(BuildInfo.version)
   @ProgName("foobar")
-  case class Arguments(@HelpMessage("Path of the file to read from")
-                       @ExtraName("i")
-                       input: String,
-                       @HelpMessage("Path of the file to write to")
-                       @ExtraName("o")
-                       output: String)
+  case class Arguments(
+    @HelpMessage("Path of the file to read from")
+    @ExtraName("i")
+    input: String,
+    @HelpMessage("Path of the file to write to")
+    @ExtraName("o")
+    output: String
+  )
 
   it should "support typed args" in {
     val rawArgs = Array("--input=value1", "--output=value2")
@@ -147,13 +149,15 @@ class ArgsTest extends FlatSpec with Matchers {
   @AppName("Scio Examples")
   @AppVersion(BuildInfo.version)
   @ProgName("com.spotify.scio.examples.MinimalWordCount")
-  case class CamelCaseArguments(@HelpMessage("Path of the file to read from")
-                                @ExtraName("i")
-                                input: String = "/path/to/input",
-                                @HelpMessage("Path of the file to write to")
-                                @ExtraName("o")
-                                output: String,
-                                camelCaseTest: String)
+  case class CamelCaseArguments(
+    @HelpMessage("Path of the file to read from")
+    @ExtraName("i")
+    input: String = "/path/to/input",
+    @HelpMessage("Path of the file to write to")
+    @ExtraName("o")
+    output: String,
+    camelCaseTest: String
+  )
 
   it should "#1436: support camelCase" in {
     val rawArgs = Array("--output=/path/to/output", "--camelCaseTest=value1")
@@ -167,4 +171,24 @@ class ArgsTest extends FlatSpec with Matchers {
     result should be a 'failure
   }
 
+  "ContextAndArgs" should "rethrow parser exception" in {
+    class FailingParserException extends Exception
+    class FailingParser extends ArgsParser[Try] {
+      override type ArgsType = Unit
+      override def parse(args: Array[String]): Try[Result] = Failure(new FailingParserException)
+    }
+    assertThrows[FailingParserException] {
+      ContextAndArgs.withParser(new FailingParser)(Array())
+    }
+  }
+
+  it should "throw UsageOrHelpException on usage or help request" in {
+    class UsageOrHelpParser extends ArgsParser[Try] {
+      override type ArgsType = Unit
+      override def parse(args: Array[String]): Try[Result] = Success(Left("This is usage message"))
+    }
+    assertThrows[UsageOrHelpException] {
+      ContextAndArgs.withParser(new UsageOrHelpParser)(Array())
+    }
+  }
 }

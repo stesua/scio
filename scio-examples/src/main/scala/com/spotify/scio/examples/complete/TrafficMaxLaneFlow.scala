@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Traffic max lane flow computation from sensor data
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.complete.TrafficMaxLaneFlow
+// `sbt "runMain com.spotify.scio.examples.complete.TrafficMaxLaneFlow
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/traffic_sensor/Freeways-5Minaa2010-01-01_to_2010-02-15_test2.csv
 // --output=[DATASET].traffic_max_lane_flow"`
@@ -34,30 +34,32 @@ import org.joda.time.{Duration, Instant}
 import scala.util.control.NonFatal
 
 object TrafficMaxLaneFlow {
-
-  case class LaneInfo(stationId: String,
-                      lane: String,
-                      direction: String,
-                      freeway: String,
-                      recordedTimestamp: String,
-                      flow: Int,
-                      avgOcc: Double,
-                      avgSpeed: Double,
-                      totalFlow: Int)
+  case class LaneInfo(
+    stationId: String,
+    lane: String,
+    direction: String,
+    freeway: String,
+    recordedTimestamp: String,
+    flow: Int,
+    avgOcc: Double,
+    avgSpeed: Double,
+    totalFlow: Int
+  )
 
   @BigQueryType.toTable
-  case class Record(station_id: String,
-                    direction: String,
-                    freeway: String,
-                    lane_max_flow: Int,
-                    lane: String,
-                    avg_occ: Double,
-                    avg_speed: Double,
-                    totalFlow: Int,
-                    recorded_timestamp: String,
-                    window_timestamp: Instant)
+  case class Record(
+    station_id: String,
+    direction: String,
+    freeway: String,
+    lane_max_flow: Int,
+    lane: String,
+    avg_occ: Double,
+    avg_speed: Double,
+    totalFlow: Int,
+    recorded_timestamp: String,
+    window_timestamp: Instant
+  )
 
-  // scalastyle:off method.length
   def main(cmdlineArgs: Array[String]): Unit = {
     // set up example wiring
     val (opts, args) = ScioContext.parseArguments[ExampleOptions](cmdlineArgs)
@@ -83,45 +85,51 @@ object TrafficMaxLaneFlow {
             val laneFlow = items(6 + 5 * i).toInt
             val laneAvgOccupancy = items(7 + 5 * i).toDouble
             val laneAvgSpeed = items(8 + 5 * i).toDouble
-            (stationId,
-             LaneInfo(stationId,
-                      "lane" + i,
-                      direction,
-                      freeway,
-                      timestamp,
-                      laneFlow,
-                      laneAvgOccupancy,
-                      laneAvgSpeed,
-                      totalFlow))
+            (
+              stationId,
+              LaneInfo(
+                stationId,
+                "lane" + i,
+                direction,
+                freeway,
+                timestamp,
+                laneFlow,
+                laneAvgOccupancy,
+                laneAvgSpeed,
+                totalFlow
+              )
+            )
           }
         } catch {
           case NonFatal(_) => Seq.empty
         }
       }
       .timestampBy(v => new Instant(formatter.parseMillis(v._2.recordedTimestamp)))
-      .withSlidingWindows(Duration.standardMinutes(windowDuration),
-                          Duration.standardMinutes(windowSlideEvery))
+      .withSlidingWindows(
+        Duration.standardMinutes(windowDuration),
+        Duration.standardMinutes(windowSlideEvery)
+      )
       .maxByKey(Ordering.by(_.flow))
       .values
       .withTimestamp
       .map {
         case (l, ts) => // (lane flow, timestamp)
-          Record(l.stationId,
-                 l.direction,
-                 l.freeway,
-                 l.flow,
-                 l.lane,
-                 l.avgOcc,
-                 l.avgSpeed,
-                 l.totalFlow,
-                 l.recordedTimestamp,
-                 ts)
+          Record(
+            l.stationId,
+            l.direction,
+            l.freeway,
+            l.flow,
+            l.lane,
+            l.avgOcc,
+            l.avgSpeed,
+            l.totalFlow,
+            l.recordedTimestamp,
+            ts
+          )
       }
-      .saveAsTypedBigQuery(args("output"))
+      .saveAsTypedBigQueryTable(Table.Spec(args("output")))
 
-    val result = sc.close()
+    val result = sc.run()
     exampleUtils.waitToFinish(result.pipelineResult)
   }
-  // scalastyle:on method.length
-
 }

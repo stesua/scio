@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Read and write using typed BigQuery API with annotated case classes
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.TypedBigQueryTornadoes
+// `sbt "runMain com.spotify.scio.examples.extra.TypedBigQueryTornadoes
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --output=[PROJECT]:[DATASET].[TABLE]"`
 package com.spotify.scio.examples.extra
@@ -27,7 +27,6 @@ import com.spotify.scio.bigquery._
 import com.spotify.scio.ContextAndArgs
 
 object TypedBigQueryTornadoes {
-
   // Annotate input class with schema inferred from a BigQuery SELECT.
   // Class `Row` will be expanded into a case class with fields from the SELECT query. A companion
   // object will also be generated to provide easy access to original query/table from annotation,
@@ -51,9 +50,13 @@ object TypedBigQueryTornadoes {
       .countByValue
       .map(kv => Result(kv._1, kv._2))
       // Convert elements from Result to TableRow and save output to BigQuery.
-      .saveAsTypedBigQuery(args("output"), WRITE_TRUNCATE, CREATE_IF_NEEDED)
+      .saveAsTypedBigQueryTable(
+        Table.Spec(args("output")),
+        writeDisposition = WRITE_TRUNCATE,
+        createDisposition = CREATE_IF_NEEDED
+      )
 
-    sc.close()
+    sc.run()
+    ()
   }
-
 }

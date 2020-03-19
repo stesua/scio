@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,16 +27,17 @@ import org.joda.time.Duration
 
 // This depends on APIs from `scio-bigtable` and imports from `com.spotify.scio.bigtable._`.
 object BigtableExample {
-
   val FAMILY_NAME: String = "count"
   val COLUMN_QUALIFIER: ByteString = ByteString.copyFromUtf8("long")
 
   // Convert a key-value pair to a Bigtable `Mutation` for writing
   def toMutation(key: String, value: Long): (ByteString, Iterable[Mutation]) = {
-    val m = Mutations.newSetCell(FAMILY_NAME,
-                                 COLUMN_QUALIFIER,
-                                 ByteString.copyFromUtf8(value.toString),
-                                 0L)
+    val m = Mutations.newSetCell(
+      FAMILY_NAME,
+      COLUMN_QUALIFIER,
+      ByteString.copyFromUtf8(value.toString),
+      0L
+    )
     (ByteString.copyFromUtf8(key), Iterable(m))
   }
 
@@ -46,7 +47,6 @@ object BigtableExample {
       .getValue(FAMILY_NAME, COLUMN_QUALIFIER)
       .get
       .toStringUtf8
-
 }
 
 // ## Bigtable Write example
@@ -54,7 +54,7 @@ object BigtableExample {
 
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.BigtableWriteExample
+// `sbt "runMain com.spotify.scio.examples.extra.BigtableWriteExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/shakespeare/kinglear.txt
 // --bigtableProjectId=[BIG_TABLE_PROJECT_ID]
@@ -73,11 +73,13 @@ object BigtableWriteExample {
     sc.updateNumberOfBigtableNodes(btProjectId, btInstanceId, 15)
 
     // Ensure that destination tables and column families exist
-    sc.ensureTables(btProjectId,
-                    btInstanceId,
-                    Map(
-                      btTableId -> List(BigtableExample.FAMILY_NAME)
-                    ))
+    sc.ensureTables(
+      btProjectId,
+      btInstanceId,
+      Map(
+        btTableId -> List(BigtableExample.FAMILY_NAME)
+      )
+    )
 
     sc.textFile(args.getOrElse("input", ExampleData.KING_LEAR))
       .flatMap(_.split("[^a-zA-Z']+").filter(_.nonEmpty))
@@ -85,7 +87,7 @@ object BigtableWriteExample {
       .map(kv => BigtableExample.toMutation(kv._1, kv._2))
       .saveAsBigtable(btProjectId, btInstanceId, btTableId)
 
-    sc.close()
+    sc.run()
 
     // Bring down the number of nodes after the job ends to save cost. There is no need to wait
     // after bumping the nodes down.
@@ -98,7 +100,7 @@ object BigtableWriteExample {
 
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.BigtableReadExample
+// `sbt "runMain com.spotify.scio.examples.extra.BigtableReadExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --bigtableProjectId=[BIG_TABLE_PROJECT_ID]
 // --bigtableInstanceId=[BIG_TABLE_INSTANCE_ID]
@@ -115,6 +117,7 @@ object BigtableReadExample {
       .map(BigtableExample.fromRow)
       .saveAsTextFile(args("output"))
 
-    sc.close()
+    sc.run()
+    ()
   }
 }

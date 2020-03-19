@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ package com.spotify.scio.io
 
 import java.nio.file.Files
 
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
-class FileStorageTest extends FlatSpec with Matchers {
-
+class FileStorageTest extends AnyFlatSpec with Matchers {
   "FileStorage.isDone" should "return true on an empty directory" in {
     val dir = Files.createTempDirectory("file-storage-")
     dir.toFile.deleteOnExit()
@@ -44,5 +44,4 @@ class FileStorageTest extends FlatSpec with Matchers {
     f2.toFile.deleteOnExit()
     FileStorage(dir.toFile.getAbsolutePath + "/*.avro").isDone shouldBe true
   }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,8 +32,15 @@ package object types {
    *                 @description("user age") age: Int)
    * }}}
    */
-  // scalastyle:off class.name
   final class description(value: String) extends StaticAnnotation with Serializable
-  // scalastyle:on class.name
 
+  // scalastyle:on class.name
+  /**
+   * Case class to serve as raw type for Geography instances to distinguish them from Strings.
+   *
+   * See also https://cloud.google.com/bigquery/docs/gis-data
+   *
+   * @param wkt Well Known Text formatted string that BigQuery displays for Geography
+   */
+  case class Geography(wkt: String)
 }

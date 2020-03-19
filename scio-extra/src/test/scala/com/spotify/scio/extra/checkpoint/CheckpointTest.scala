@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,35 +20,32 @@ package com.spotify.scio.extra.checkpoint
 import java.nio.file.Files
 
 import com.spotify.scio.{ContextAndArgs, ScioMetrics}
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.reflect.io.File
 import scala.util.Try
 
 object CheckpointMetrics {
-
   def runJob(checkpointArg: String, tempLocation: String = null): (Long, Long) = {
     val elemsBefore = ScioMetrics.counter("elemsBefore")
     val elemsAfter = ScioMetrics.counter("elemsAfter")
 
     val (sc, args) = ContextAndArgs(
       Array(s"--checkpoint=$checkpointArg") ++
-        Option(tempLocation).map(e => s"--tempLocation=$e"))
+        Option(tempLocation).map(e => s"--tempLocation=$e")
+    )
     sc.checkpoint(args("checkpoint")) {
         sc.parallelize(1 to 10)
-          .map { x =>
-            elemsBefore.inc(); x
-          }
+          .map { x => elemsBefore.inc(); x }
       }
-      .map { x =>
-        elemsAfter.inc(); x
-      }
-    val r = sc.close().waitUntilDone()
+      .map { x => elemsAfter.inc(); x }
+    val r = sc.run().waitUntilDone()
     (Try(r.counter(elemsBefore).committed.get).getOrElse(0), r.counter(elemsAfter).committed.get)
   }
 }
 
-class CheckpointTest extends FlatSpec with Matchers {
+class CheckpointTest extends AnyFlatSpec with Matchers {
   import CheckpointMetrics._
 
   "checkpoint" should "work on path" in {
@@ -68,5 +65,4 @@ class CheckpointTest extends FlatSpec with Matchers {
     File(s"$tempLocation/$checkpointName").deleteRecursively()
     runJob(checkpointName, tempLocation) shouldBe ((10L, 10L))
   }
-
 }

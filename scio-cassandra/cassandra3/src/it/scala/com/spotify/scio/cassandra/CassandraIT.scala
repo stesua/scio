@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,12 +25,13 @@ import java.util.{Date, UUID}
 import com.datastax.driver.core.utils.UUIDs
 import com.datastax.driver.core.{Cluster, LocalDate, Row}
 import com.spotify.scio._
-import org.scalatest._
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.collection.JavaConverters._
 
-class CassandraIT extends FlatSpec with Matchers with BeforeAndAfterAll {
-
+class CassandraIT extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
   import CassandraIT._
 
   private val n = 1000
@@ -97,6 +98,7 @@ class CassandraIT extends FlatSpec with Matchers with BeforeAndAfterAll {
         cluster.close()
         throw e
     }
+    ()
   }
 
   ignore should "work with single key" in {
@@ -113,7 +115,7 @@ class CassandraIT extends FlatSpec with Matchers with BeforeAndAfterAll {
       val sc = ScioContext()
       sc.parallelize(1 to n)
         .saveAsCassandra(opts)(toValues1)
-      sc.close()
+      sc.run()
 
       val result = cluster.connect().execute("SELECT * FROM scio.table1").asScala
       val expected = (1 to n).map(toValues1)
@@ -137,7 +139,7 @@ class CassandraIT extends FlatSpec with Matchers with BeforeAndAfterAll {
       val sc = ScioContext()
       sc.parallelize(1 to n)
         .saveAsCassandra(opts)(toValues2)
-      sc.close()
+      sc.run()
 
       val result = cluster.connect().execute("SELECT * FROM scio.table2").asScala
       val expected = (1 to n).map(toValues2)
@@ -147,11 +149,9 @@ class CassandraIT extends FlatSpec with Matchers with BeforeAndAfterAll {
       CassandraUtil.cleanup()
     }
   }
-
 }
 
 object CassandraIT {
-
   private val u1: UUID = UUID.randomUUID()
   private val u2: UUID = UUIDs.timeBased()
   private val date = LocalDate.fromMillisSinceEpoch(System.currentTimeMillis())
@@ -209,11 +209,12 @@ object CassandraIT {
   def toValues2(i: Int): Seq[Any] = Seq(s"k1_$i", s"k2_$i", s"k3_$i", s"v1_$i", i, i.toFloat)
 
   def fromRow2(r: Row): Seq[Any] =
-    Seq(r.getString("k1"),
-        r.getString("k2"),
-        r.getString("k3"),
-        r.getString("v1"),
-        r.getInt("v2"),
-        r.getFloat("v3"))
-
+    Seq(
+      r.getString("k1"),
+      r.getString("k2"),
+      r.getString("k3"),
+      r.getString("v1"),
+      r.getInt("v2"),
+      r.getFloat("v3")
+    )
 }

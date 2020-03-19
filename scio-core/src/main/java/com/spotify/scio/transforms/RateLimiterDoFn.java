@@ -17,13 +17,13 @@
 
 package com.spotify.scio.transforms;
 
-import com.google.common.util.concurrent.RateLimiter;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.util.concurrent.RateLimiter;
 
 /**
  * DoFn which will rate limit the number of elements processed per second.
  *
- * Used to rate limit throughput for a job writing to a database or making
- * calls to external services.
+ * <p>Used to rate limit throughput for a job writing to a database or making calls to external
+ * services.
  */
 public class RateLimiterDoFn<InputT> extends DoFnWithResource<InputT, InputT, RateLimiter> {
 

@@ -17,38 +17,30 @@
 
 package com.spotify.scio.transforms;
 
-import com.google.common.collect.Maps;
-import com.google.common.collect.Queues;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.joda.time.Instant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
-import java.util.function.Function;
 
-/**
- * A {@link DoFn} that handles asynchronous requests to an external service.
- */
+/** A {@link DoFn} that handles asynchronous requests to an external service. */
 public abstract class BaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
-    extends DoFnWithResource<InputT, OutputT, ResourceT> {
+    extends DoFnWithResource<InputT, OutputT, ResourceT>
+    implements FutureHandlers.Base<FutureT, OutputT> {
+  private static final Logger LOG = LoggerFactory.getLogger(BaseAsyncDoFn.class);
 
-  /**
-   * Process an element asynchronously.
-   */
+  /** Process an element asynchronously. */
   public abstract FutureT processElement(InputT input);
 
-  protected abstract void waitForFutures(Iterable<FutureT> futures)
-      throws InterruptedException, ExecutionException;
-  protected abstract FutureT addCallback(FutureT future,
-                                         Function<OutputT, Void> onSuccess,
-                                         Function<Throwable, Void> onFailure);
-
-  private final ConcurrentMap<UUID, FutureT> futures = Maps.newConcurrentMap();
-  private final ConcurrentLinkedQueue<Result> results = Queues.newConcurrentLinkedQueue();
-  private final ConcurrentLinkedQueue<Throwable> errors = Queues.newConcurrentLinkedQueue();
+  private final ConcurrentMap<UUID, FutureT> futures = new ConcurrentHashMap<>();
+  private final ConcurrentLinkedQueue<Result> results = new ConcurrentLinkedQueue<>();
+  private final ConcurrentLinkedQueue<Throwable> errors = new ConcurrentLinkedQueue<>();
 
   @StartBundle
   public void startBundle() {
@@ -64,8 +56,10 @@ public abstract class BaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
         waitForFutures(futures.values());
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
+        LOG.error("Failed to process futures", e);
         throw new RuntimeException("Failed to process futures", e);
       } catch (ExecutionException e) {
+        LOG.error("Failed to process futures", e);
         throw new RuntimeException("Failed to process futures", e);
       }
     }
@@ -77,15 +71,19 @@ public abstract class BaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
     flush(c);
 
     final UUID uuid = UUID.randomUUID();
-    FutureT future = addCallback(processElement(c.element()), r -> {
-      results.add(new Result(r, c.timestamp(), window));
-      futures.remove(uuid);
-      return null;
-    }, t -> {
-      errors.add(t);
-      futures.remove(uuid);
-      return null;
-    });
+    FutureT future =
+        addCallback(
+            processElement(c.element()),
+            r -> {
+              results.add(new Result(r, c.timestamp(), window));
+              futures.remove(uuid);
+              return null;
+            },
+            t -> {
+              errors.add(t);
+              futures.remove(uuid);
+              return null;
+            });
     // This `put` may happen after `remove` in the callbacks but it's OK since either the result
     // or the error would've already been pushed to the corresponding queues and we are not losing
     // data. `waitForFutures` in `finishBundle` blocks until all pending futures, including ones
@@ -138,5 +136,4 @@ public abstract class BaseAsyncDoFn<InputT, OutputT, ResourceT, FutureT>
       this.window = window;
     }
   }
-
 }

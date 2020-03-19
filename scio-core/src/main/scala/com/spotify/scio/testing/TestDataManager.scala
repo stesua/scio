@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,24 +17,58 @@
 
 package com.spotify.scio.testing
 
-import com.spotify.scio.ScioResult
+import com.spotify.scio.coders.Coder
 import com.spotify.scio.io.ScioIO
 import com.spotify.scio.values.SCollection
+import com.spotify.scio.{ScioContext, ScioResult}
+import org.apache.beam.sdk.testing.TestStream
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.{Set => MSet}
+import scala.util.{Failure, Success, Try}
 
-/* Inputs are Scala Iterables to be parallelized for TestPipeline */
-private[scio] class TestInput(val m: Map[String, Iterable[_]]) {
+/* Inputs are Scala Iterables to be parallelized for TestPipeline, or PTransforms to be applied */
+sealed private[scio] trait JobInputSource[T] {
+  def toSCollection(sc: ScioContext)(implicit coder: Coder[T]): SCollection[T]
+  val asIterable: Try[Iterable[T]]
+}
+
+final private[scio] case class TestStreamInputSource[T](
+  stream: TestStream[T]
+) extends JobInputSource[T] {
+  override val asIterable = Failure(
+    new UnsupportedOperationException(
+      s"Test input $this can't be converted to Iterable[T] to test this ScioIO type"
+    )
+  )
+
+  override def toSCollection(sc: ScioContext)(implicit coder: Coder[T]): SCollection[T] =
+    sc.wrap(sc.applyInternal(stream))
+
+  override def toString: String = s"TestStream(${stream.getEvents})"
+}
+
+final private[scio] case class IterableInputSource[T](
+  iterable: Iterable[T]
+) extends JobInputSource[T] {
+  override val asIterable = Success(iterable)
+  override def toSCollection(sc: ScioContext)(implicit coder: Coder[T]): SCollection[T] =
+    sc.parallelize(iterable)
+  override def toString: String = iterable.toString
+}
+
+private[scio] class TestInput(val m: Map[String, JobInputSource[_]]) {
   val s: MSet[String] = MSet.empty
 
-  def apply[T](io: ScioIO[T]): Iterable[T] = {
+  def apply[T](io: ScioIO[T]): JobInputSource[T] = {
     val key = io.testId
-    require(m.contains(key),
-            s"Missing test input: $key, available: ${m.keys.mkString("[", ", ", "]")}")
+    require(
+      m.contains(key),
+      s"Missing test input: $key, available: ${m.keys.mkString("[", ", ", "]")}"
+    )
     require(!s.contains(key), s"Test input $key has already been read from once.")
     s.add(key)
-    m(key).asInstanceOf[Iterable[T]]
+    m(key).asInstanceOf[JobInputSource[T]]
   }
 
   def validate(): Unit = {
@@ -44,14 +78,16 @@ private[scio] class TestInput(val m: Map[String, Iterable[_]]) {
 }
 
 /* Outputs are lambdas that apply assertions on SCollections */
-private[scio] class TestOutput(val m: Map[String, SCollection[_] => Unit]) {
+private[scio] class TestOutput(val m: Map[String, SCollection[_] => Any]) {
   val s: MSet[String] = MSet.empty
 
-  def apply[T](io: ScioIO[T]): SCollection[T] => Unit = {
+  def apply[T](io: ScioIO[T]): SCollection[T] => Any = {
     // TODO: support Materialize outputs, maybe Materialized[T]?
     val key = io.testId
-    require(m.contains(key),
-            s"Missing test output: $key, available: ${m.keys.mkString("[", ", ", "]")}")
+    require(
+      m.contains(key),
+      s"Missing test output: $key, available: ${m.keys.mkString("[", ", ", "]")}"
+    )
     require(!s.contains(key), s"Test output $key has already been written to once.")
     s.add(key)
     m(key)
@@ -66,8 +102,10 @@ private[scio] class TestOutput(val m: Map[String, SCollection[_] => Unit]) {
 private[scio] class TestDistCache(val m: Map[DistCacheIO[_], _]) {
   val s: MSet[DistCacheIO[_]] = MSet.empty
   def apply[T](key: DistCacheIO[T]): () => T = {
-    require(m.contains(key),
-            s"Missing test dist cache: $key, available: ${m.keys.mkString("[", ", ", "]")}")
+    require(
+      m.contains(key),
+      s"Missing test dist cache: $key, available: ${m.keys.mkString("[", ", ", "]")}"
+    )
     s.add(key)
     m(key).asInstanceOf[() => T]
   }
@@ -78,7 +116,6 @@ private[scio] class TestDistCache(val m: Map[DistCacheIO[_], _]) {
 }
 
 private[scio] object TestDataManager {
-
   private val inputs = TrieMap.empty[String, TestInput]
   private val outputs = TrieMap.empty[String, TestOutput]
   private val distCaches = TrieMap.empty[String, TestDistCache]
@@ -99,22 +136,25 @@ private[scio] object TestDataManager {
   def getDistCache(testId: String): TestDistCache =
     getValue(testId, distCaches, "using dist cache")
 
-  def setup(testId: String,
-            ins: Map[String, Iterable[_]],
-            outs: Map[String, SCollection[_] => Unit],
-            dcs: Map[DistCacheIO[_], _]): Unit = {
+  def setup(
+    testId: String,
+    ins: Map[String, JobInputSource[_]],
+    outs: Map[String, SCollection[_] => Any],
+    dcs: Map[DistCacheIO[_], _]
+  ): Unit = {
     inputs += (testId -> new TestInput(ins))
     outputs += (testId -> new TestOutput(outs))
     distCaches += (testId -> new TestDistCache(dcs))
   }
 
-  def tearDown(testId: String, f: ScioResult => Unit = _ => Unit): Unit = {
+  def tearDown(testId: String, f: ScioResult => Unit = _ => ()): Unit = {
     inputs.remove(testId).foreach(_.validate())
     outputs.remove(testId).foreach(_.validate())
     distCaches.remove(testId).get.validate()
     ensureClosed(testId)
     val result = results.remove(testId).get
     f(result)
+    ()
   }
 
   def startTest(testId: String): Unit = closed(testId) = false
@@ -124,10 +164,9 @@ private[scio] object TestDataManager {
   }
 
   def ensureClosed(testId: String): Unit = {
-    require(closed(testId), "ScioContext was not closed. Did you forget close()?")
+    require(closed(testId), "ScioContext was not executed. Did you forget .run()?")
     closed -= testId
   }
-
 }
 
 case class DistCacheIO[T](uri: String)

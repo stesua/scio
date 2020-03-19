@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,8 @@ import com.google.bigtable.admin.v2._
 import com.google.bigtable.admin.v2.ModifyColumnFamiliesRequest.Modification
 import com.google.cloud.bigtable.config.BigtableOptions
 import com.google.cloud.bigtable.grpc._
-import com.google.protobuf.ByteString
+import com.google.protobuf.{ByteString, Duration => ProtoDuration}
+import org.joda.time.Duration
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.JavaConverters._
@@ -35,10 +36,11 @@ import scala.util.Try
 object TableAdmin {
   private val log: Logger = LoggerFactory.getLogger(TableAdmin.getClass)
 
-  private def adminClient[A](bigtableOptions: BigtableOptions)(
-    f: BigtableTableAdminClient => A): Try[A] = {
+  private def adminClient[A](
+    bigtableOptions: BigtableOptions
+  )(f: BigtableTableAdminClient => A): Try[A] = {
     val channel =
-      ChannelPoolCreator.createPool(bigtableOptions.getAdminHost)
+      ChannelPoolCreator.createPool(bigtableOptions)
     val executorService =
       BigtableSessionSharedThreadPools.getInstance().getRetryExecutor
     val client = new BigtableTableAdminGrpcClient(channel, executorService, bigtableOptions)
@@ -49,6 +51,26 @@ object TableAdmin {
   }
 
   /**
+   * Retrieves a set of tables from the given instancePath.
+   *
+   * @param client Client for calling Bigtable.
+   * @param instancePath String of the form "projects/$project/instances/$instance".
+   * @return
+   */
+  private def fetchTables(client: BigtableTableAdminClient, instancePath: String): Set[String] =
+    client
+      .listTables(
+        ListTablesRequest
+          .newBuilder()
+          .setParent(instancePath)
+          .build()
+      )
+      .getTablesList
+      .asScala
+      .map(_.getName)
+      .toSet
+
+  /**
    * Ensure that tables and column families exist.
    * Checks for existence of tables or creates them if they do not exist.  Also checks for
    * existence of column families within each table and creates them if they do not exist.
@@ -56,8 +78,64 @@ object TableAdmin {
    * @param tablesAndColumnFamilies A map of tables and column families.  Keys are table names.
    *                                Values are a list of column family names.
    */
-  def ensureTables(bigtableOptions: BigtableOptions,
-                   tablesAndColumnFamilies: Map[String, List[String]]): Unit = {
+  def ensureTables(
+    bigtableOptions: BigtableOptions,
+    tablesAndColumnFamilies: Map[String, List[String]]
+  ): Unit =
+    ensureTablesImpl(bigtableOptions, tablesAndColumnFamilies.mapValues(l => l.map(_ -> None))).get
+
+  /**
+   * Ensure that tables and column families exist.
+   * Checks for existence of tables or creates them if they do not exist.  Also checks for
+   * existence of column families within each table and creates them if they do not exist.
+   *
+   * @param tablesAndColumnFamiliesWithExpiration A map of tables and column families.
+   *                                              Keys are table names. Values are a
+   *                                              list of column family names along with
+   *                                              the desired cell expiration. Cell
+   *                                              expiration is the duration before which
+   *                                              garbage collection of a cell may occur.
+   *                                              Note: minimum granularity is second.
+   */
+  def ensureTablesWithExpiration(
+    bigtableOptions: BigtableOptions,
+    tablesAndColumnFamilies: Map[String, List[(String, Option[Duration])]]
+  ): Unit = {
+    // Convert Duration to GcRule
+    val x = tablesAndColumnFamilies.mapValues(_.map {
+      case (columnFamily, duration) => (columnFamily, duration.map(gcRuleFromDuration))
+    })
+
+    ensureTablesImpl(bigtableOptions, x).get
+  }
+
+  /**
+   * Ensure that tables and column families exist.
+   * Checks for existence of tables or creates them if they do not exist.  Also checks for
+   * existence of column families within each table and creates them if they do not exist.
+   *
+   * @param tablesAndColumnFamilies A map of tables and column families. Keys are table names.
+   *                                Values are a list of column family names along with the desired
+   *                                GcRule.
+   */
+  def ensureTablesWithGcRules(
+    bigtableOptions: BigtableOptions,
+    tablesAndColumnFamilies: Map[String, List[(String, Option[GcRule])]]
+  ): Unit =
+    ensureTablesImpl(bigtableOptions, tablesAndColumnFamilies).get
+
+  /**
+   * Ensure that tables and column families exist.
+   * Checks for existence of tables or creates them if they do not exist.  Also checks for
+   * existence of column families within each table and creates them if they do not exist.
+   *
+   * @param tablesAndColumnFamilies A map of tables and column families.  Keys are table names.
+   *                                Values are a list of column family names.
+   */
+  private def ensureTablesImpl(
+    bigtableOptions: BigtableOptions,
+    tablesAndColumnFamilies: Map[String, List[(String, Option[GcRule])]]
+  ): Try[Unit] = {
     val project = bigtableOptions.getProjectId
     val instance = bigtableOptions.getInstanceId
     val instancePath = s"projects/$project/instances/$instance"
@@ -65,35 +143,28 @@ object TableAdmin {
     log.info("Ensuring tables and column families exist in instance {}", instance)
 
     adminClient(bigtableOptions) { client =>
-      val existingTables = client
-        .listTables(
-          ListTablesRequest
-            .newBuilder()
-            .setParent(instancePath)
-            .build())
-        .getTablesList
-        .asScala
-        .map(t => t.getName)
-        .toSet
+      val existingTables = fetchTables(client, instancePath)
 
-      for ((table, columnFamilies) <- tablesAndColumnFamilies) {
-        val tablePath = s"$instancePath/tables/$table"
+      tablesAndColumnFamilies.foreach {
+        case (table, columnFamilies) =>
+          val tablePath = s"$instancePath/tables/$table"
 
-        if (!existingTables.contains(tablePath)) {
-          log.info("Creating table {}", table)
-          client.createTable(
-            CreateTableRequest
-              .newBuilder()
-              .setParent(instancePath)
-              .setTableId(table)
-              .build())
-        } else {
-          log.info("Table {} exists", table)
-        }
+          if (!existingTables.contains(tablePath)) {
+            log.info("Creating table {}", table)
+            client.createTable(
+              CreateTableRequest
+                .newBuilder()
+                .setParent(instancePath)
+                .setTableId(table)
+                .build()
+            )
+          } else {
+            log.info("Table {} exists", table)
+          }
 
-        ensureColumnFamilies(client, tablePath, columnFamilies)
+          ensureColumnFamilies(client, tablePath, columnFamilies)
       }
-    }.get
+    }
   }
 
   /**
@@ -104,33 +175,57 @@ object TableAdmin {
    *                  `projects/projectId/instances/instanceId/tables/tableId`
    * @param columnFamilies A list of column family names.
    */
-  private def ensureColumnFamilies(client: BigtableTableAdminClient,
-                                   tablePath: String,
-                                   columnFamilies: List[String]): Unit = {
-
+  private def ensureColumnFamilies(
+    client: BigtableTableAdminClient,
+    tablePath: String,
+    columnFamilies: List[(String, Option[GcRule])]
+  ): Unit = {
     val tableInfo =
       client.getTable(GetTableRequest.newBuilder().setName(tablePath).build)
 
-    val modifications: List[Modification] = columnFamilies.collect {
-      case (cf) if !tableInfo.containsColumnFamilies(cf) =>
-        Modification
-          .newBuilder()
-          .setId(cf)
-          .setCreate(ColumnFamily.newBuilder())
-          .build()
-    }
+    val cfList = columnFamilies
+      .map {
+        case (n, gcRule) =>
+          val cf = tableInfo
+            .getColumnFamiliesOrDefault(n, ColumnFamily.newBuilder().build())
+            .toBuilder
+            .setGcRule(gcRule.getOrElse(GcRule.getDefaultInstance))
+            .build()
 
-    if (modifications.isEmpty) {
-      log.info(s"Column families $columnFamilies exist in $tablePath")
-    } else {
-      log.info(s"Creating column families $columnFamilies in $tablePath")
+          (n, cf)
+      }
+
+    val modifications = cfList
+      .map {
+        case (n, cf) =>
+          val mod = Modification.newBuilder().setId(n)
+          if (tableInfo.containsColumnFamilies(n)) {
+            mod.setUpdate(cf)
+          } else {
+            mod.setCreate(cf)
+          }
+
+          mod.build()
+      }
+
+    log.info("Modifying or updating {} column families for table {}", modifications.size, tablePath)
+
+    if (modifications.nonEmpty) {
       client.modifyColumnFamily(
         ModifyColumnFamiliesRequest
           .newBuilder()
           .setName(tablePath)
           .addAllModifications(modifications.asJava)
-          .build)
+          .build
+      )
     }
+
+    ()
+  }
+
+  private def gcRuleFromDuration(duration: Duration): GcRule = {
+    val protoDuration = ProtoDuration.newBuilder.setSeconds(duration.getStandardSeconds)
+    GcRule.newBuilder.setMaxAge(protoDuration).build
   }
 
   /**
@@ -156,9 +251,11 @@ object TableAdmin {
    *                  `projects/projectId/instances/instanceId/tables/tableId`
    * @param rowPrefix row key prefix
    */
-  private def dropRowRange(tablePath: String,
-                           rowPrefix: String,
-                           client: BigtableTableAdminClient): Unit = {
+  private def dropRowRange(
+    tablePath: String,
+    rowPrefix: String,
+    client: BigtableTableAdminClient
+  ): Unit = {
     val request = DropRowRangeRequest
       .newBuilder()
       .setName(tablePath)
@@ -167,5 +264,4 @@ object TableAdmin {
 
     client.dropRowRange(request)
   }
-
 }

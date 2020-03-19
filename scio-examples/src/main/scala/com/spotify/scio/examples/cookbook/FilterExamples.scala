@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Filter Example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.cookbook.FilterExamples
+// `sbt "runMain com.spotify.scio.examples.cookbook.FilterExamples
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --output=[DATASET].filter_examples"`
 package com.spotify.scio.examples.cookbook
@@ -45,13 +45,15 @@ object FilterExamples {
         new TableFieldSchema().setName("month").setType("INTEGER"),
         new TableFieldSchema().setName("day").setType("INTEGER"),
         new TableFieldSchema().setName("mean_temp").setType("FLOAT")
-      ).asJava)
+      ).asJava
+    )
 
     val monthFilter = args.int("monthFilter", 7)
 
     // Open BigQuery table as a `SCollection[TableRow]`
+    val table = Table.Spec(args.getOrElse("input", ExampleData.WEATHER_SAMPLES_TABLE))
     val pipe = sc
-      .bigQueryTable(args.getOrElse("input", ExampleData.WEATHER_SAMPLES_TABLE))
+      .bigQueryTable(table)
       // Map `TableRow`s into `Record`s
       .map { row =>
         val year = row.getLong("year")
@@ -79,9 +81,10 @@ object FilterExamples {
         TableRow("year" -> r.year, "month" -> r.month, "day" -> r.day, "mean_temp" -> r.meanTemp)
       }
       // Save result as a BigQuery table
-      .saveAsBigQuery(args("output"), schema, WRITE_TRUNCATE, CREATE_IF_NEEDED)
+      .saveAsBigQueryTable(Table.Spec(args("output")), schema, WRITE_TRUNCATE, CREATE_IF_NEEDED)
 
-    // Close the context and execute the pipeline
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 }

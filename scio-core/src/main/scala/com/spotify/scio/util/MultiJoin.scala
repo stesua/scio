@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,17 +17,16 @@
 
 // generated with multijoin.py
 
-// scalastyle:off cyclomatic.complexity
-// scalastyle:off file.size.limit
-// scalastyle:off line.size.limit
-// scalastyle:off method.length
-// scalastyle:off number.of.methods
-// scalastyle:off parameter.number
+
+
+
+
+
+
 
 package com.spotify.scio.util
 
 import com.spotify.scio.coders.Coder
-
 
 import com.spotify.scio.values.SCollection
 import org.apache.beam.sdk.transforms.join.{CoGroupByKey, KeyedPCollectionTuple}
@@ -2719,9 +2718,9 @@ private class NamedMultiJoin(val name: String) extends MultiJoin {
   override def tfName: String = name
 }
 
-// scalastyle:on cyclomatic.complexity
-// scalastyle:on file.size.limit
-// scalastyle:on line.size.limit
-// scalastyle:on method.length
-// scalastyle:on number.of.methods
-// scalastyle:on parameter.number
+
+
+
+
+
+

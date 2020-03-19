@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ object AnnoyExamples {
 
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.AnnoyIndexSaveExample
+// `sbt "runMain com.spotify.scio.examples.extra.AnnoyIndexSaveExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 //--output=gs://[BUCKET]/[PATH]/annoy.tree"`
 object AnnoyIndexSaveExample {
@@ -59,7 +59,8 @@ object AnnoyIndexSaveExample {
     val data = (0 until 100).map(x => (x, Array.fill(40)(Random.nextFloat())))
     sc.parallelize(data).asAnnoy(args("output"), metric, dim, nTrees)
 
-    sc.close()
+    sc.run()
+    ()
   }
 }
 
@@ -67,7 +68,7 @@ object AnnoyIndexSaveExample {
 
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.AnnoySideInputExample
+// `sbt "runMain com.spotify.scio.examples.extra.AnnoySideInputExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://[BUCKET]/[PATH]/annoy.tree
 // --output=gs://[BUCKET]/[PATH]/otuput"`
@@ -97,6 +98,7 @@ object AnnoySideInputExample {
       }
       .toSCollection
       .saveAsTextFile(args("output"))
-    sc.close()
+    sc.run()
+    ()
   }
 }

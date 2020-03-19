@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ package com.spotify.scio.testing
 import java.util.UUID
 
 private[scio] object TestUtil {
-
   def newTestId(className: String = "TestClass"): String = {
     val uuid = UUID.randomUUID().toString.replaceAll("-", "")
     s"JobTest-$className-$uuid"
@@ -28,5 +27,4 @@ private[scio] object TestUtil {
 
   def isTestId(appName: String): Boolean =
     "JobTest-[^-]+-[a-z0-9]+".r.pattern.matcher(appName).matches()
-
 }

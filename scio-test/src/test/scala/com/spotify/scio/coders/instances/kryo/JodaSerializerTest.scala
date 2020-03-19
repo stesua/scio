@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,16 +20,15 @@ package com.spotify.scio.coders.instances.kryo
 import com.spotify.scio.coders.{CoderTestUtils, KryoAtomicCoder, KryoOptions}
 import org.joda.time.{DateTime, DateTimeZone, LocalDate, LocalDateTime, LocalTime}
 import org.scalacheck._
-import org.scalatest._
-import org.scalatest.prop.Checkers
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatestplus.scalacheck.Checkers
 
 import scala.collection.JavaConverters._
 import scala.util.Try
 
-class JodaSerializerTest extends FlatSpec with Checkers {
-
+class JodaSerializerTest extends AnyFlatSpec with Checkers {
   // TODO: remove this once https://github.com/scalatest/scalatest/issues/1090 is addressed
-  override implicit val generatorDrivenConfig: PropertyCheckConfiguration =
+  implicit override val generatorDrivenConfig: PropertyCheckConfiguration =
     PropertyCheckConfiguration(minSuccessful = 100)
 
   implicit val dateTimeArb = Arbitrary {
@@ -85,5 +84,4 @@ class JodaSerializerTest extends FlatSpec with Checkers {
   it should "roundtrip DateTime" in {
     check(roundTripProp[DateTime] _)
   }
-
 }

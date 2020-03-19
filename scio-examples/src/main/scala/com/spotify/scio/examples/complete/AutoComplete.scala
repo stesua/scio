@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,12 @@
 // Example: AutoComplete lines of text
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.complete.AutoComplete
+// `sbt "runMain com.spotify.scio.examples.complete.AutoComplete
 // --project=[PROJECT] --runner=DataflowPRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/shakespeare/kinglear.txt
 // --outputToBigqueryTable=true --outputToDatastore=false --output=[DATASET].auto_complete"`
 package com.spotify.scio.examples.complete
 
-import com.google.common.collect.ImmutableMap
 import com.google.datastore.v1.Entity
 import com.google.datastore.v1.client.DatastoreHelper.{makeKey, makeValue}
 import com.spotify.scio._
@@ -39,15 +38,16 @@ import org.joda.time.Duration
 import scala.collection.JavaConverters._
 
 object AutoComplete {
-
   case class Tag(tag: String, count: Long)
 
   @BigQueryType.toTable
   case class Record(pre: String, tags: List[Tag])
 
-  def computeTopCompletions(input: SCollection[String],
-                            candidatesPerPrefix: Int,
-                            recursive: Boolean): SCollection[(String, Iterable[(String, Long)])] = {
+  def computeTopCompletions(
+    input: SCollection[String],
+    candidatesPerPrefix: Int,
+    recursive: Boolean
+  ): SCollection[(String, Iterable[(String, Long)])] = {
     val candidates = input.countByValue
     if (recursive) {
       SCollection.unionAll(computeTopRecursive(candidates, candidatesPerPrefix, 1))
@@ -56,16 +56,20 @@ object AutoComplete {
     }
   }
 
-  def computeTopFlat(input: SCollection[(String, Long)],
-                     candidatesPerPrefix: Int,
-                     minPrefix: Int): SCollection[(String, Iterable[(String, Long)])] =
+  def computeTopFlat(
+    input: SCollection[(String, Long)],
+    candidatesPerPrefix: Int,
+    minPrefix: Int
+  ): SCollection[(String, Iterable[(String, Long)])] =
     input
       .flatMap(allPrefixes(minPrefix))
       .topByKey(candidatesPerPrefix, Ordering.by(_._2))
 
-  def computeTopRecursive(input: SCollection[(String, Long)],
-                          candidatesPerPrefix: Int,
-                          minPrefix: Int): Seq[SCollection[(String, Iterable[(String, Long)])]] =
+  def computeTopRecursive(
+    input: SCollection[(String, Long)],
+    candidatesPerPrefix: Int,
+    minPrefix: Int
+  ): Seq[SCollection[(String, Iterable[(String, Long)])]] =
     if (minPrefix > 10) {
       computeTopFlat(input, candidatesPerPrefix, minPrefix)
         .partition(2, t => if (t._1.length > minPrefix) 0 else 1)
@@ -81,10 +85,11 @@ object AutoComplete {
 
   def allPrefixes(
     minPrefix: Int,
-    maxPrefix: Int = Int.MaxValue): ((String, Long)) => Iterable[(String, (String, Long))] = {
+    maxPrefix: Int = Int.MaxValue
+  ): ((String, Long)) => Iterable[(String, (String, Long))] = {
     case (word, count) =>
-      (minPrefix to Math.min(word.length, maxPrefix)).map(i =>
-        (word.substring(0, i), (word, count)))
+      (minPrefix to Math.min(word.length, maxPrefix))
+        .map(i => (word.substring(0, i), (word, count)))
   }
 
   def makeEntity(kind: String, kv: (String, Iterable[(String, Long)])): Entity = {
@@ -94,13 +99,14 @@ object AutoComplete {
         Entity
           .newBuilder()
           .putAllProperties(
-            ImmutableMap.of("tag", makeValue(p._1).build(), "count", makeValue(p._2).build())))
-        .build()
+            Map("tag" -> makeValue(p._1).build(), "count" -> makeValue(p._2).build()).asJava
+          )
+      ).build()
     }
     Entity
       .newBuilder()
       .setKey(key)
-      .putAllProperties(ImmutableMap.of("candidates", makeValue(candidates.asJava).build()))
+      .putAllProperties(Map("candidates" -> makeValue(candidates.asJava).build()).asJava)
       .build()
   }
 
@@ -139,7 +145,7 @@ object AutoComplete {
     if (outputToBigqueryTable) {
       tags
         .map(kv => Record(kv._1, kv._2.map(p => Tag(p._1, p._2)).toList))
-        .saveAsTypedBigQuery(args("output"))
+        .saveAsTypedBigQueryTable(Table.Spec(args("output")))
     }
     if (outputToDatastore) {
       val kind = args.getOrElse("kind", "autocomplete-demo")
@@ -148,8 +154,7 @@ object AutoComplete {
         .saveAsDatastore(opts.as(classOf[GcpOptions]).getProject)
     }
 
-    val result = sc.close()
+    val result = sc.run()
     exampleUtils.waitToFinish(result.pipelineResult)
   }
-
 }

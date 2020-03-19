@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,9 +28,7 @@ sealed trait TapT[A] extends Serializable {
 }
 
 object TapT {
-  // scalastyle:off structural.type
   type Aux[A, T0] = TapT[A] { type T = T0 }
-  // scalastyle:on structural.type
 }
 
 final class EmptyTapOf[A] private extends TapT[A] {
@@ -70,7 +68,8 @@ trait ScioIO[T] {
   def testId: String = this.toString
 
   private[scio] def readWithContext(sc: ScioContext, params: ReadP)(
-    implicit coder: Coder[T]): SCollection[T] =
+    implicit coder: Coder[T]
+  ): SCollection[T] =
     sc.requireNotClosed {
       if (sc.isTest) {
         readTest(sc, params)
@@ -80,16 +79,15 @@ trait ScioIO[T] {
     }
 
   protected def readTest(sc: ScioContext, params: ReadP)(
-    implicit coder: Coder[T]): SCollection[T] = {
-    sc.parallelize(
-      TestDataManager.getInput(sc.testId.get)(this).asInstanceOf[Seq[T]]
-    )
-  }
+    implicit coder: Coder[T]
+  ): SCollection[T] =
+    TestDataManager.getInput(sc.testId.get)(this).toSCollection(sc)
 
   protected def read(sc: ScioContext, params: ReadP): SCollection[T]
 
   private[scio] def writeWithContext(data: SCollection[T], params: WriteP)(
-    implicit coder: Coder[T]): ClosedTap[tapT.T] = ClosedTap {
+    implicit coder: Coder[T]
+  ): ClosedTap[tapT.T] = ClosedTap {
     if (data.context.isTest) {
       writeTest(data, params)
     } else {
@@ -100,16 +98,22 @@ trait ScioIO[T] {
   protected def write(data: SCollection[T], params: WriteP): Tap[tapT.T]
 
   protected def writeTest(data: SCollection[T], params: WriteP)(
-    implicit coder: Coder[T]): Tap[tapT.T] = {
+    implicit coder: Coder[T]
+  ): Tap[tapT.T] = {
     TestDataManager.getOutput(data.context.testId.get)(this)(data)
     tapT.saveForTest(data)
   }
 
+  /**
+   * Write options also return a `ClosedTap`. Once the job completes you can open the `Tap`.
+   * Tap abstracts away the logic of reading the dataset directly as an Iterator[T] or
+   * re-opening it in another ScioContext. The Future is complete once the job finishes.
+   * This can be used to do light weight pipeline orchestration e.g. WordCountOrchestration.scala.
+   */
   def tap(read: ReadP): Tap[tapT.T]
 }
 
 object ScioIO {
-  // scalastyle:off structural.type
   type ReadOnly[T, R] =
     ScioIO[T] {
       type ReadP = R
@@ -131,16 +135,14 @@ object ScioIO {
 
       override def testId: String = io.testId
 
-      override def read(sc: ScioContext, params: ReadP): SCollection[T] =
+      override protected def read(sc: ScioContext, params: ReadP): SCollection[T] =
         io.read(sc, params)
 
-      override def write(data: SCollection[T], params: WriteP): Tap[io.tapT.T] =
-        throw new IllegalStateException("read-only IO. This code should be unreachable")
+      override protected def write(data: SCollection[T], params: WriteP): Tap[io.tapT.T] =
+        throw new UnsupportedOperationException("read-only IO. This code should be unreachable")
 
       override def tap(params: ReadP): Tap[io.tapT.T] = io.tap(params)
-
     }
-  // scalastyle:on structural.type
 }
 
 /** Base trait for [[ScioIO]] without business logic, for stubbing mock data with `JobTest`. */
@@ -148,12 +150,12 @@ trait TestIO[T] extends ScioIO[T] {
   override type ReadP = Nothing
   override type WriteP = Nothing
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[T] =
-    throw new IllegalStateException(s"$this is for testing purpose only")
-  override def write(data: SCollection[T], params: WriteP): Tap[tapT.T] =
-    throw new IllegalStateException(s"$this is for testing purpose only")
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[T] =
+    throw new UnsupportedOperationException(s"$this is for testing purpose only")
+  override protected def write(data: SCollection[T], params: WriteP): Tap[tapT.T] =
+    throw new UnsupportedOperationException(s"$this is for testing purpose only")
   override def tap(params: ReadP): Tap[tapT.T] =
-    throw new IllegalStateException(s"$this is for testing purpose only")
+    throw new UnsupportedOperationException(s"$this is for testing purpose only")
 }
 
 /**

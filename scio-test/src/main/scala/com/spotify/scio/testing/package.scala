@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,5 +34,4 @@ package object testing {
     def testStream[T](ts: TestStream[T]): SCollection[T] =
       self.wrap(self.pipeline.apply(ts.toString, ts))
   }
-
 }

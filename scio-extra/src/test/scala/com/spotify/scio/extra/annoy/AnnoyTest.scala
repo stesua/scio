@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ import com.spotify.scio.io.ClosedTap
 import com.spotify.scio.testing.PipelineSpec
 
 class AnnoyTest extends PipelineSpec {
-
   val metric = Angular
   val dim = 2
   val nTrees = 10
@@ -37,7 +36,7 @@ class AnnoyTest extends PipelineSpec {
   "SCollection" should "support .asAnnoy with temporary local file" in {
     val sc = ScioContext()
     val closedTap = sc.parallelize(sideData).asAnnoy(metric, dim, nTrees).materialize
-    val scioResult = sc.close().waitUntilFinish()
+    val scioResult = sc.run().waitUntilFinish()
 
     val path = scioResult.tap(closedTap).value.next().path
     val reader = new ANNIndex(dim, path, IndexType.ANGULAR)
@@ -56,7 +55,7 @@ class AnnoyTest extends PipelineSpec {
       .asAnnoy("test.tree", metric, dim, nTrees)
       .materialize
 
-    val scioResult = sc.close().waitUntilFinish()
+    val scioResult = sc.run().waitUntilFinish()
     val path = scioResult.tap(p).value.next().path
 
     val reader = new ANNIndex(dim, path, IndexType.ANGULAR)
@@ -72,13 +71,13 @@ class AnnoyTest extends PipelineSpec {
     val tmpDir = Files.createTempDirectory("annoy-test-")
     val path = tmpDir.resolve("annoy.tree")
     Files.createFile(path)
-    // scalastyle:off no.whitespace.before.left.bracket
+
     the[IllegalArgumentException] thrownBy {
       runWithContext {
         _.parallelize(sideData).asAnnoy(path.toString, Angular, 40, 10)
       }
     } should have message s"requirement failed: Annoy URI $path already exists"
-    // scalastyle:on no.whitespace.before.left.bracket
+
     Files.delete(path)
   }
 }

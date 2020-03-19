@@ -17,13 +17,19 @@
 
 package com.spotify.scio.io
 
-import java.io.OutputStream
+import java.io.{BufferedInputStream, InputStream, OutputStream}
 import java.nio.channels.{Channels, WritableByteChannel}
 
 import com.spotify.scio.ScioContext
 import com.spotify.scio.io.BinaryIO.BytesSink
 import com.spotify.scio.values.SCollection
 import org.apache.beam.sdk.io._
+import org.apache.beam.sdk.io.FileIO.Write.FileNaming
+import org.apache.beam.sdk.io.fs.MatchResult.Metadata
+import org.apache.commons.compress.compressors.CompressorStreamFactory
+import scala.collection.JavaConverters._
+
+import scala.util.Try
 
 /**
  * A ScioIO class for writing raw bytes to files.
@@ -33,47 +39,98 @@ import org.apache.beam.sdk.io._
 final case class BinaryIO(path: String) extends ScioIO[Array[Byte]] {
   override type ReadP = Nothing
   override type WriteP = BinaryIO.WriteParam
-  override final val tapT = EmptyTapOf[Array[Byte]]
+  final override val tapT = EmptyTapOf[Array[Byte]]
 
   override def testId: String = s"BinaryIO($path)"
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[Array[Byte]] =
-    throw new IllegalStateException("BinaryIO is write-only")
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[Array[Byte]] =
+    throw new UnsupportedOperationException("BinaryIO is write-only")
 
-  override def write(data: SCollection[Array[Byte]], params: WriteP): Tap[Nothing] = {
-    data.applyInternal(
-      FileIO
-        .write[Array[Byte]]
-        .via(new BytesSink())
-        .withCompression(params.compression)
-        .withNumShards(params.numShards)
+  override protected def write(data: SCollection[Array[Byte]], params: WriteP): Tap[Nothing] = {
+    var transform = FileIO
+      .write[Array[Byte]]
+      .via(new BytesSink(params.header, params.footer, params.framePrefix, params.frameSuffix))
+      .withCompression(params.compression)
+      .withNumShards(params.numShards)
+      .to(pathWithShards(path))
+
+    transform = params.fileNaming.fold {
+      transform
+        .withPrefix(params.prefix)
         .withSuffix(params.suffix)
-        .to(pathWithShards(path)))
+    }(transform.withNaming)
+
+    data.applyInternal(transform)
     EmptyTap
   }
 
   override def tap(params: Nothing): Tap[Nothing] = EmptyTap
 
-  private[scio] def pathWithShards(path: String) =
-    path.replaceAll("\\/+$", "") + "/part"
+  private def pathWithShards(path: String) = path.replaceAll("\\/+$", "")
 }
 
 object BinaryIO {
-  final case class WriteParam(suffix: String = ".bin",
-                              numShards: Int = 0,
-                              compression: Compression = Compression.UNCOMPRESSED)
 
-  private final class BytesSink extends FileIO.Sink[Array[Byte]] {
+  private[scio] def openInputStreamsFor(path: String): Iterator[InputStream] = {
+    val factory = new CompressorStreamFactory()
+
+    def wrapInputStream(in: InputStream) = {
+      val buffered = new BufferedInputStream(in)
+      Try(factory.createCompressorInputStream(buffered)).getOrElse(buffered)
+    }
+
+    listFiles(path).map(getObjectInputStream).map(wrapInputStream).iterator
+  }
+
+  private def listFiles(path: String): Seq[Metadata] =
+    FileSystems.`match`(path).metadata().asScala
+
+  private def getObjectInputStream(meta: Metadata): InputStream =
+    Channels.newInputStream(FileSystems.open(meta.resourceId()))
+
+  object WriteParam {
+    private[scio] val DefaultFileNaming = Option.empty[FileNaming]
+    private[scio] val DefaultPrefix = "part"
+    private[scio] val DefaultSuffix = ".bin"
+    private[scio] val DefaultNumShards = 0
+    private[scio] val DefaultCompression = Compression.UNCOMPRESSED
+    private[scio] val DefaultHeader = Array.emptyByteArray
+    private[scio] val DefaultFooter = Array.emptyByteArray
+    private[scio] val DefaultFramePrefix: Array[Byte] => Array[Byte] = _ => Array.emptyByteArray
+    private[scio] val DefaultFrameSuffix: Array[Byte] => Array[Byte] = _ => Array.emptyByteArray
+  }
+
+  final case class WriteParam(
+    prefix: String = WriteParam.DefaultPrefix,
+    suffix: String = WriteParam.DefaultSuffix,
+    numShards: Int = WriteParam.DefaultNumShards,
+    compression: Compression = WriteParam.DefaultCompression,
+    header: Array[Byte] = WriteParam.DefaultHeader,
+    footer: Array[Byte] = WriteParam.DefaultFooter,
+    framePrefix: Array[Byte] => Array[Byte] = WriteParam.DefaultFramePrefix,
+    frameSuffix: Array[Byte] => Array[Byte] = WriteParam.DefaultFrameSuffix,
+    fileNaming: Option[FileNaming] = WriteParam.DefaultFileNaming
+  )
+
+  final private class BytesSink(
+    val header: Array[Byte],
+    val footer: Array[Byte],
+    val framePrefix: Array[Byte] => Array[Byte],
+    val frameSuffix: Array[Byte] => Array[Byte]
+  ) extends FileIO.Sink[Array[Byte]] {
     @transient private var channel: OutputStream = _
 
-    override def open(channel: WritableByteChannel): Unit =
+    override def open(channel: WritableByteChannel): Unit = {
       this.channel = Channels.newOutputStream(channel)
+      this.channel.write(header)
+    }
 
     override def flush(): Unit = {
       if (this.channel == null) {
         throw new IllegalStateException("Trying to flush a BytesSink that has not been opened")
       }
 
+      this.channel.write(footer)
       this.channel.flush()
     }
 
@@ -82,7 +139,9 @@ object BinaryIO {
         throw new IllegalStateException("Trying to write to a BytesSink that has not been opened")
       }
 
+      this.channel.write(framePrefix(datum))
       this.channel.write(datum)
+      this.channel.write(frameSuffix(datum))
     }
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,10 +25,10 @@ import org.apache.beam.runners.dataflow.DataflowRunner
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions
 import org.apache.beam.sdk.io.FileSystems
 import org.apache.beam.sdk.options.{PipelineOptions, PipelineOptionsFactory}
-import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
-class ScioContextIT extends FlatSpec with Matchers {
-
+class ScioContextIT extends AnyFlatSpec with Matchers {
   "ScioContext" should "have temp location for DataflowRunner" in {
     val opts = PipelineOptionsFactory.create()
     opts.setRunner(classOf[DataflowRunner])
@@ -53,19 +53,7 @@ class ScioContextIT extends FlatSpec with Matchers {
     gcpTempLocation should not be null
     tempLocation shouldBe gcpTempLocation
     ScioUtil.isRemoteUri(new URI(gcpTempLocation)) shouldBe true
-  }
-
-  it should "#1323: generate unique SCollection names" in {
-    val options = PipelineOptionsFactory.create()
-    options.setRunner(classOf[DataflowRunner])
-    options.as(classOf[GcpOptions]).setProject(ItUtils.project)
-    val sc = ScioContext(options)
-
-    val s1 = sc.empty[(String, Int)]()
-    val s2 = sc.empty[(String, Double)]()
-    s1.join(s2)
-
-    noException shouldBe thrownBy { sc.close() }
+    ()
   }
 
   it should "register remote file systems in the test context" in {
@@ -73,7 +61,7 @@ class ScioContextIT extends FlatSpec with Matchers {
     noException shouldBe thrownBy {
       FileSystems.matchSingleFileSpec("gs://data-integration-test-eu/shakespeare.json")
     }
-    sc.close()
+    sc.run()
   }
 
   it should "#1734: generate a reasonably sized job graph" in {

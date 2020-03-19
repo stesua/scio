@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Distinct Example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.cookbook.DistinctExample
+// `sbt "runMain com.spotify.scio.examples.cookbook.DistinctExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --output=gs://[BUCKET]/output/path"`
 package com.spotify.scio.examples.cookbook
@@ -41,7 +41,8 @@ object DistinctExample {
       // Save result as text files under the output path
       .saveAsTextFile(out)
 
-    // Close the context and execute the pipeline
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 }

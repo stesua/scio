@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,20 +19,24 @@ package com.spotify.scio.bigquery.types
 
 import java.math.MathContext
 
+import cats.Eq
+import cats.instances.all._
 import com.google.protobuf.ByteString
+import magnolify.cats.semiauto.EqDerivation
+import magnolify.scalacheck.auto._
 import org.joda.time.{Instant, LocalDate, LocalDateTime, LocalTime}
-import org.scalacheck.ScalacheckShapeless._
 import org.scalacheck._
-import org.scalatest._
-import org.scalatest.prop.GeneratorDrivenPropertyChecks
-import shapeless.datatype.record._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.propspec.AnyPropSpec
+import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 import com.spotify.scio.bigquery.Numeric
 
-class ConverterProviderSpec extends PropSpec with GeneratorDrivenPropertyChecks with Matchers {
-
-  // TODO: remove this once https://github.com/scalatest/scalatest/issues/1090 is addressed
-  override implicit val generatorDrivenConfig: PropertyCheckConfiguration =
-    PropertyCheckConfiguration(minSuccessful = 100)
+final class ConverterProviderSpec
+    extends AnyPropSpec
+    with ScalaCheckDrivenPropertyChecks
+    with Matchers {
+  // Default minSuccessful is 10 instead of 100 in ScalaCheck but that should be enough
+  // https://github.com/scalatest/scalatest/issues/1090 is addressed
 
   import Schemas._
 
@@ -50,21 +54,38 @@ class ConverterProviderSpec extends PropSpec with GeneratorDrivenPropertyChecks 
       Numeric(rounded)
     }
   }
-
-  implicit def compareByteArrays(x: Array[Byte], y: Array[Byte]): Boolean =
-    ByteString.copyFrom(x) == ByteString.copyFrom(y)
+  implicit val eqByteArrays = Eq.instance[Array[Byte]](_.toList == _.toList)
+  implicit val eqByteString = Eq.instance[ByteString](_ == _)
+  implicit val eqInstant = Eq.instance[Instant](_ == _)
+  implicit val eqDate = Eq.instance[LocalDate](_ == _)
+  implicit val eqTime = Eq.instance[LocalTime](_ == _)
+  implicit val eqDateTime = Eq.instance[LocalDateTime](_ == _)
 
   property("round trip required primitive types") {
     forAll { r1: Required =>
       val r2 = BigQueryType.fromTableRow[Required](BigQueryType.toTableRow[Required](r1))
-      RecordMatcher[Required](r1, r2) shouldBe true
+      EqDerivation[Required].eqv(r1, r2) shouldBe true
+    }
+  }
+
+  property("avro round trip required primitive types") {
+    forAll { r1: Required =>
+      val r2 = BigQueryType.fromAvro[Required](BigQueryType.toAvro[Required](r1))
+      EqDerivation[Required].eqv(r1, r2) shouldBe true
     }
   }
 
   property("round trip optional primitive types") {
     forAll { r1: Optional =>
       val r2 = BigQueryType.fromTableRow[Optional](BigQueryType.toTableRow[Optional](r1))
-      RecordMatcher[Optional](r1, r2) shouldBe true
+      EqDerivation[Optional].eqv(r1, r2) shouldBe true
+    }
+  }
+
+  property("avro round trip optional primitive types") {
+    forAll { r1: Optional =>
+      val r2 = BigQueryType.fromAvro[Optional](BigQueryType.toAvro[Optional](r1))
+      EqDerivation[Optional].eqv(r1, r2) shouldBe true
     }
   }
 
@@ -84,13 +105,22 @@ class ConverterProviderSpec extends PropSpec with GeneratorDrivenPropertyChecks 
       o.dateF.isDefined shouldBe r.containsKey("dateF")
       o.timeF.isDefined shouldBe r.containsKey("timeF")
       o.datetimeF.isDefined shouldBe r.containsKey("datetimeF")
+      o.bigDecimalF.isDefined shouldBe r.containsKey("bigDecimalF")
+      o.geographyF.isDefined shouldBe r.containsKey("geographyF")
     }
   }
 
   property("round trip repeated primitive types") {
     forAll { r1: Repeated =>
       val r2 = BigQueryType.fromTableRow[Repeated](BigQueryType.toTableRow[Repeated](r1))
-      RecordMatcher[Repeated](r1, r2) shouldBe true
+      EqDerivation[Repeated].eqv(r1, r2) shouldBe true
+    }
+  }
+
+  property("avro round trip repeated primitive types") {
+    forAll { r1: Repeated =>
+      val r2 = BigQueryType.fromAvro[Repeated](BigQueryType.toAvro[Repeated](r1))
+      EqDerivation[Repeated].eqv(r1, r2) shouldBe true
     }
   }
 
@@ -98,7 +128,15 @@ class ConverterProviderSpec extends PropSpec with GeneratorDrivenPropertyChecks 
     forAll { r1: RequiredNested =>
       val r2 =
         BigQueryType.fromTableRow[RequiredNested](BigQueryType.toTableRow[RequiredNested](r1))
-      RecordMatcher[RequiredNested](r1, r2) shouldBe true
+      EqDerivation[RequiredNested].eqv(r1, r2) shouldBe true
+    }
+  }
+
+  property("avro round trip required nested types") {
+    forAll { r1: RequiredNested =>
+      val r2 =
+        BigQueryType.fromAvro[RequiredNested](BigQueryType.toAvro[RequiredNested](r1))
+      EqDerivation[RequiredNested].eqv(r1, r2) shouldBe true
     }
   }
 
@@ -106,7 +144,15 @@ class ConverterProviderSpec extends PropSpec with GeneratorDrivenPropertyChecks 
     forAll { r1: OptionalNested =>
       val r2 =
         BigQueryType.fromTableRow[OptionalNested](BigQueryType.toTableRow[OptionalNested](r1))
-      RecordMatcher[OptionalNested](r1, r2) shouldBe true
+      EqDerivation[OptionalNested].eqv(r1, r2) shouldBe true
+    }
+  }
+
+  property("avro round trip optional nested types") {
+    forAll { r1: OptionalNested =>
+      val r2 =
+        BigQueryType.fromAvro[OptionalNested](BigQueryType.toAvro[OptionalNested](r1))
+      EqDerivation[OptionalNested].eqv(r1, r2) shouldBe true
     }
   }
 
@@ -124,8 +170,15 @@ class ConverterProviderSpec extends PropSpec with GeneratorDrivenPropertyChecks 
     forAll { r1: RepeatedNested =>
       val r2 =
         BigQueryType.fromTableRow[RepeatedNested](BigQueryType.toTableRow[RepeatedNested](r1))
-      RecordMatcher[RepeatedNested](r1, r2) shouldBe true
+      EqDerivation[RepeatedNested].eqv(r1, r2) shouldBe true
     }
   }
 
+  property("avro round trip repeated nested types") {
+    forAll { r1: RepeatedNested =>
+      val r2 =
+        BigQueryType.fromAvro[RepeatedNested](BigQueryType.toAvro[RepeatedNested](r1))
+      EqDerivation[RepeatedNested].eqv(r1, r2) shouldBe true
+    }
+  }
 }

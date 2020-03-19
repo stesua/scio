@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,12 +22,16 @@ import java.io.{File, FileInputStream}
 import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.http.{HttpRequest, HttpRequestInitializer}
 import com.google.api.client.json.jackson2.JacksonFactory
+import com.google.api.gax.core.FixedCredentialsProvider
+import com.google.api.gax.rpc.FixedHeaderProvider
 import com.google.api.services.bigquery.Bigquery
 import com.google.api.services.bigquery.model._
 import com.google.auth.Credentials
 import com.google.auth.http.HttpCredentialsAdapter
 import com.google.auth.oauth2.GoogleCredentials
+import com.google.cloud.bigquery.storage.v1beta1.{BigQueryStorageClient, BigQueryStorageSettings}
 import com.google.cloud.hadoop.util.ChainingHttpRequestInitializer
+import com.spotify.scio.bigquery.{Table => STable}
 import com.spotify.scio.bigquery.client.BigQuery.Client
 import com.spotify.scio.bigquery.types.BigQueryType.HasAnnotation
 import com.spotify.scio.bigquery.{BigQuerySysProps, BigQueryType, CREATE_IF_NEEDED, WRITE_EMPTY}
@@ -41,7 +45,7 @@ import scala.reflect.runtime.universe.TypeTag
 import scala.util.Try
 
 /** A simple BigQuery client. */
-final class BigQuery private (client: Client) {
+final class BigQuery private (val client: Client) {
   private[scio] def isCacheEnabled: Boolean = BigQueryConfig.isCacheEnabled
 
   val jobs: JobOps = new JobOps(client)
@@ -82,7 +86,7 @@ final class BigQuery private (client: Client) {
     val rows = if (newSource == null) {
       // newSource is missing, T's companion object must have either table or query
       if (bqt.isTable) {
-        tables.rows(bqt.table.get)
+        tables.rows(STable.Spec(bqt.table.get))
       } else if (bqt.isQuery) {
         query.rows(bqt.query.get)
       } else {
@@ -91,6 +95,7 @@ final class BigQuery private (client: Client) {
     } else {
       // newSource can be either table or query
       Try(BigQueryHelpers.parseTableSpec(newSource)).toOption
+        .map(STable.Ref)
         .map(tables.rows)
         .getOrElse(query.rows(newSource))
     }
@@ -101,31 +106,38 @@ final class BigQuery private (client: Client) {
    * Write a List of rows to a BigQuery table. Note that element type `T` must be annotated with
    * [[BigQueryType]].
    */
-  def writeTypedRows[T <: HasAnnotation: TypeTag](table: TableReference,
-                                                  rows: List[T],
-                                                  writeDisposition: WriteDisposition,
-                                                  createDisposition: CreateDisposition): Unit = {
+  def writeTypedRows[T <: HasAnnotation: TypeTag](
+    table: TableReference,
+    rows: List[T],
+    writeDisposition: WriteDisposition,
+    createDisposition: CreateDisposition
+  ): Long = {
     val bqt = BigQueryType[T]
-    tables.writeRows(table,
-                     rows.map(bqt.toTableRow),
-                     bqt.schema,
-                     writeDisposition,
-                     createDisposition)
+    tables.writeRows(
+      table,
+      rows.map(bqt.toTableRow),
+      bqt.schema,
+      writeDisposition,
+      createDisposition
+    )
   }
 
   /**
    * Write a List of rows to a BigQuery table. Note that element type `T` must be annotated with
    * [[BigQueryType]].
    */
-  def writeTypedRows[T <: HasAnnotation: TypeTag](tableSpec: String,
-                                                  rows: List[T],
-                                                  writeDisposition: WriteDisposition = WRITE_EMPTY,
-                                                  createDisposition: CreateDisposition =
-                                                    CREATE_IF_NEEDED): Unit =
-    writeTypedRows(beam.BigQueryHelpers.parseTableSpec(tableSpec),
-                   rows,
-                   writeDisposition,
-                   createDisposition)
+  def writeTypedRows[T <: HasAnnotation: TypeTag](
+    tableSpec: String,
+    rows: List[T],
+    writeDisposition: WriteDisposition = WRITE_EMPTY,
+    createDisposition: CreateDisposition = CREATE_IF_NEEDED
+  ): Long =
+    writeTypedRows(
+      beam.BigQueryHelpers.parseTableSpec(tableSpec),
+      rows,
+      writeDisposition,
+      createDisposition
+    )
 
   def createTypedTable[T <: HasAnnotation: TypeTag](table: Table): Unit =
     tables.create(table.setSchema(BigQueryType[T].schema))
@@ -146,7 +158,6 @@ final class BigQuery private (client: Client) {
 
 /** Companion object for [[BigQuery]]. */
 object BigQuery {
-
   private lazy val instance: BigQuery =
     BigQuerySysProps.Project.valueOption.map(BigQuery(_)).getOrElse {
       Option(new DefaultProjectFactory().create(null))
@@ -178,28 +189,32 @@ object BigQuery {
   /** Create a new BigQueryClient instance with the given project. */
   def apply(project: String): BigQuery =
     BigQuerySysProps.Secret.valueOption
-      .map { secret =>
-        BigQuery(project, new File(secret))
-      }
+      .map(secret => BigQuery(project, new File(secret)))
       .getOrElse {
-        BigQuery(project,
-                 GoogleCredentials.getApplicationDefault.createScoped(BigQueryConfig.scopes.asJava))
+        BigQuery(
+          project,
+          GoogleCredentials.getApplicationDefault.createScoped(BigQueryConfig.scopes.asJava)
+        )
       }
 
   /** Create a new BigQueryClient instance with the given project and secret file. */
   def apply(project: String, secretFile: File): BigQuery =
-    BigQuery(project,
-             GoogleCredentials
-               .fromStream(new FileInputStream(secretFile))
-               .createScoped(BigQueryConfig.scopes.asJava))
+    BigQuery(
+      project,
+      GoogleCredentials
+        .fromStream(new FileInputStream(secretFile))
+        .createScoped(BigQueryConfig.scopes.asJava)
+    )
 
   /** Create a new BigQueryClient instance with the given project and credential. */
   def apply(project: String, credentials: => Credentials): BigQuery =
     new BigQuery(new Client(project, credentials))
 
-  private[client] final class Client(val project: String, _credentials: => Credentials) {
-    require(project != null && project.nonEmpty,
-            "Invalid projectId. It should be a non-empty string")
+  final private[client] class Client(val project: String, _credentials: => Credentials) {
+    require(
+      project != null && project.nonEmpty,
+      "Invalid projectId. It should be a non-empty string"
+    )
 
     def credentials: Credentials = _credentials
 
@@ -216,6 +231,20 @@ object BigQuery {
       new Bigquery.Builder(new NetHttpTransport, new JacksonFactory, requestInitializer)
         .setApplicationName("scio")
         .build()
+    }
+
+    lazy val storage: BigQueryStorageClient = {
+      val settings = BigQueryStorageSettings
+        .newBuilder()
+        .setCredentialsProvider(FixedCredentialsProvider.create(credentials))
+        .setTransportChannelProvider(
+          BigQueryStorageSettings
+            .defaultGrpcTransportProviderBuilder()
+            .setHeaderProvider(FixedHeaderProvider.create("user-agent", "scio"))
+            .build()
+        )
+        .build()
+      BigQueryStorageClient.create(settings)
     }
   }
 }

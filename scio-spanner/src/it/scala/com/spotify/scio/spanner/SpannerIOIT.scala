@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,9 @@ import com.spotify.scio.ScioContext
 import com.spotify.scio.spanner.client.Spanner
 import org.apache.beam.sdk.io.gcp.spanner.SpannerConfig
 import org.apache.beam.sdk.options.PipelineOptionsFactory
-import org.scalatest.{BeforeAndAfterAll, FlatSpec, Matchers}
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.collection.JavaConverters._
 
@@ -40,7 +42,7 @@ object SpannerIOIT {
   private val adminClient = Spanner.adminClient(projectId)
   private val dbClient = Spanner.databaseClient(config)
 
-  private final case class FakeSpannerData(asMutations: Seq[Mutation], asStructs: Seq[Struct])
+  final private case class FakeSpannerData(asMutations: Seq[Mutation], asStructs: Seq[Struct])
   private def fakeData(tableName: String) = FakeSpannerData(
     Seq(
       Mutation
@@ -58,24 +60,26 @@ object SpannerIOIT {
         .to("bar")
         .build()
     ),
-    Seq(Struct
-          .newBuilder()
-          .set("Key")
-          .to(1L)
-          .set("Value")
-          .to("foo")
-          .build(),
-        Struct
-          .newBuilder()
-          .set("Key")
-          .to(2L)
-          .set("Value")
-          .to("bar")
-          .build())
+    Seq(
+      Struct
+        .newBuilder()
+        .set("Key")
+        .to(1L)
+        .set("Value")
+        .to("foo")
+        .build(),
+      Struct
+        .newBuilder()
+        .set("Key")
+        .to(2L)
+        .set("Value")
+        .to("bar")
+        .build()
+    )
   )
 }
 
-class SpannerIOIT extends FlatSpec with Matchers with BeforeAndAfterAll {
+class SpannerIOIT extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
   import SpannerIOIT._
 
   override def beforeAll(): Unit = {
@@ -90,6 +94,7 @@ class SpannerIOIT extends FlatSpec with Matchers with BeforeAndAfterAll {
         ).asJava
       )
       .get()
+    ()
   }
 
   override def afterAll(): Unit =
@@ -118,7 +123,7 @@ class SpannerIOIT extends FlatSpec with Matchers with BeforeAndAfterAll {
     SpannerWrite(config)
       .writeWithContext(sc.parallelize(writeData.asMutations), SpannerWrite.WriteParam())
 
-    sc.close().waitUntilDone()
+    sc.run().waitUntilDone()
     readOperationResults should contain theSameElementsAs writeData.asStructs
   }
 
@@ -136,7 +141,7 @@ class SpannerIOIT extends FlatSpec with Matchers with BeforeAndAfterAll {
       )
       .materialize
 
-    val scioResult = sc.close().waitUntilDone()
+    val scioResult = sc.run().waitUntilDone()
     scioResult.tap(read).value.toList should contain theSameElementsAs spannerRows.asStructs
   }
 
@@ -154,7 +159,7 @@ class SpannerIOIT extends FlatSpec with Matchers with BeforeAndAfterAll {
       )
       .materialize
 
-    val scioResult = sc.close().waitUntilDone()
+    val scioResult = sc.run().waitUntilDone()
     scioResult.tap(read).value.toList should contain theSameElementsAs spannerRows.asStructs
   }
 }

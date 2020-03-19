@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Traffic routes based on traffic sensor data
 // Usage
 
-// `sbt runMain "com.spotify.scio.examples.complete.TrafficRoutes
+// `sbt "runMain com.spotify.scio.examples.complete.TrafficRoutes
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/traffic_sensor/Freeways-5Minaa2010-01-01_to_2010-02-15_test2.csv
 // --output=[DATASET].traffic_routes"`
@@ -34,20 +34,20 @@ import org.joda.time.{Duration, Instant}
 import scala.util.control.NonFatal
 
 object TrafficRoutes {
-
   case class StationSpeed(stationId: String, avgSpeed: Double, timestamp: Long)
   case class RouteInfo(route: String, avgSpeed: Double, slowdownEvent: Boolean)
 
   @BigQueryType.toTable
-  case class Record(route: String,
-                    avg_speed: Double,
-                    slowdown_event: Boolean,
-                    window_timestamp: Instant)
+  case class Record(
+    route: String,
+    avg_speed: Double,
+    slowdown_event: Boolean,
+    window_timestamp: Instant
+  )
 
   private val sdStations =
     Map("1108413" -> "SDRoute1", "1108699" -> "SDRoute2", "1108702" -> "SDRoute3")
 
-  // scalastyle:off method.length
   def main(cmdlineArgs: Array[String]): Unit = {
     // set up example wiring
     val (opts, args) = ScioContext.parseArguments[ExampleOptions](cmdlineArgs)
@@ -79,8 +79,10 @@ object TrafficRoutes {
         }
       }
       .timestampBy(kv => new Instant(kv._2.timestamp))
-      .withSlidingWindows(Duration.standardMinutes(windowDuration),
-                          Duration.standardMinutes(windowSlideEvery))
+      .withSlidingWindows(
+        Duration.standardMinutes(windowDuration),
+        Duration.standardMinutes(windowSlideEvery)
+      )
       .groupByKey
       .map { kv =>
         var speedSum = 0.0
@@ -110,11 +112,9 @@ object TrafficRoutes {
         case (r, ts) =>
           Record(r.route, r.avgSpeed, r.slowdownEvent, ts)
       }
-      .saveAsTypedBigQuery(args("output"))
+      .saveAsTypedBigQueryTable(Table.Spec(args("output")))
 
-    val result = sc.close()
+    val result = sc.run()
     exampleUtils.waitToFinish(result.pipelineResult)
   }
-  // scalastyle:on method.length
-
 }

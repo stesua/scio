@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,54 +27,38 @@ import io.circe.parser._
 import io.circe.syntax._
 import org.apache.beam.sdk.{io => beam}
 
-import scala.reflect.ClassTag
-import scala.util.{Left, Right}
-
-final case class JsonIO[T: ClassTag: Encoder: Decoder: Coder](path: String) extends ScioIO[T] {
-
-  override type ReadP = Unit
+final case class JsonIO[T: Encoder: Decoder: Coder](path: String) extends ScioIO[T] {
+  override type ReadP = JsonIO.ReadParam
   override type WriteP = JsonIO.WriteParam
-  override final val tapT = TapOf[T]
+  final override val tapT = TapOf[T]
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[T] =
-    sc.wrap(sc.applyInternal(beam.TextIO.read().from(path))).map(decodeJson)
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[T] =
+    sc.read(TextIO(path))(TextIO.ReadParam(params.compression)).map(decodeJson)
 
-  override def write(data: SCollection[T], params: WriteP): Tap[T] = {
+  override protected def write(data: SCollection[T], params: WriteP): Tap[T] = {
     data
       .map(x => params.printer.pretty(x.asJson))
-      .applyInternal(jsonOut(path, params))
-    tap(Unit)
+      .write(TextIO(path))(TextIO.WriteParam(params.suffix, params.numShards, params.compression))
+    tap(JsonIO.ReadParam(params.compression))
   }
 
   override def tap(params: ReadP): Tap[T] = new Tap[T] {
     override def value: Iterator[T] =
       TextIO.textFile(ScioUtil.addPartSuffix(path)).map(decodeJson)
     override def open(sc: ScioContext): SCollection[T] =
-      JsonIO(ScioUtil.addPartSuffix(path)).read(sc, Unit)
+      JsonIO(ScioUtil.addPartSuffix(path)).read(sc, params)
   }
 
-  private def decodeJson(json: String): T = decode[T](json) match {
-    case Left(e)  => throw e
-    case Right(t) => t
-  }
-
-  private def jsonOut(path: String, params: WriteP) =
-    beam.TextIO
-      .write()
-      .to(pathWithShards(path))
-      .withSuffix(params.suffix)
-      .withNumShards(params.numShards)
-      .withWritableByteChannelFactory(
-        beam.FileBasedSink.CompressionType.fromCanonical(params.compression))
-
-  private[scio] def pathWithShards(path: String) =
-    path.replaceAll("\\/+$", "") + "/part"
-
+  private def decodeJson(json: String): T =
+    decode[T](json).fold(throw _, identity)
 }
 
 object JsonIO {
-  final case class WriteParam(suffix: String = ".json",
-                              numShards: Int = 0,
-                              compression: beam.Compression = beam.Compression.UNCOMPRESSED,
-                              printer: Printer = Printer.noSpaces)
+  final case class ReadParam(compression: beam.Compression = beam.Compression.AUTO)
+  final case class WriteParam(
+    suffix: String = ".json",
+    numShards: Int = 0,
+    compression: beam.Compression = beam.Compression.UNCOMPRESSED,
+    printer: Printer = Printer.noSpaces
+  )
 }

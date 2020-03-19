@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import org.apache.commons.compress.compressors.CompressorStreamFactory
 import org.apache.commons.io.{FileUtils, IOUtils}
 
 import com.spotify.scio.coders.Coder
+import com.spotify.scio.options.ScioOptions
 
 trait TapSpec extends PipelineSpec {
   def verifyTap[T: Coder](tap: Tap[T], expected: Set[T]): Unit = {
@@ -43,7 +44,8 @@ trait TapSpec extends PipelineSpec {
     tap.value.toSet shouldBe expected
     val sc = ScioContext()
     tap.open(sc) should containInAnyOrder(expected)
-    sc.close().waitUntilFinish() // block non-test runner
+    sc.run().waitUntilFinish() // block non-test runner
+    ()
   }
 
   def runWithInMemoryFuture[T](fn: ScioContext => ClosedTap[T]): Tap[T] =
@@ -54,7 +56,7 @@ trait TapSpec extends PipelineSpec {
 
   def runWithFuture[T](sc: ScioContext)(fn: ScioContext => ClosedTap[T]): Tap[T] = {
     val f = fn(sc)
-    val scioResult = sc.close().waitUntilFinish() // block non-test runner
+    val scioResult = sc.run().waitUntilFinish() // block non-test runner
     scioResult.tap(f)
   }
 
@@ -63,7 +65,6 @@ trait TapSpec extends PipelineSpec {
 }
 
 class TapTest extends TapSpec {
-
   val schema = newGenericRecord(1).getSchema
   implicit val coder = Coder.avroGenericRecordCoder(schema)
 
@@ -75,12 +76,12 @@ class TapTest extends TapSpec {
     Set(1, 2, 3).map(i => (newSpecificRecord(i), newGenericRecord(i)))
 
   "Future" should "support saveAsInMemoryTap" in {
-    val t = runWithInMemoryFuture { makeRecords(_).saveAsInMemoryTap }
+    val t = runWithInMemoryFuture(makeRecords(_).saveAsInMemoryTap)
     verifyTap(t, expectedRecords)
   }
 
   it should "support materialize" in {
-    val t = runWithFileFuture { makeRecords(_).materialize }
+    val t = runWithFileFuture(makeRecords(_).materialize)
     verifyTap(t, expectedRecords)
   }
 
@@ -167,34 +168,75 @@ class TapTest extends TapSpec {
     FileUtils.deleteDirectory(dir)
   }
 
+  // use java protos otherwise we would have to pull in pb-scala
+  private def mkProto3(t: (String, Int)): SimplePBV3 =
+    SimplePBV3
+      .newBuilder()
+      .setPlays(t._2)
+      .setTrackId(t._1)
+      .build()
+
   it should "support saveAsProtobuf proto version 3" in {
     val dir = tmpDir
     val data = Seq(("a", 1), ("b", 2), ("c", 3))
-    // use java protos otherwise we would have to pull in pb-scala
-    def mkProto(t: (String, Int)): SimplePBV3 =
-      SimplePBV3
-        .newBuilder()
-        .setPlays(t._2)
-        .setTrackId(t._1)
-        .build()
     val t = runWithFileFuture {
       _.parallelize(data)
-        .map(mkProto)
+        .map(mkProto3)
         .saveAsProtobufFile(dir.getPath)
     }
-    val expected = data.map(mkProto).toSet
+    val expected = data.map(mkProto3).toSet
     verifyTap(t, expected)
+    FileUtils.deleteDirectory(dir)
+  }
+
+  it should "support saveAsProtobuf write with nullableCoders" in {
+    val dir = tmpDir
+    val data = Seq(("a", 1), ("b", 2), ("c", 3))
+    val actual = data.map(mkProto3)
+    val t = runWithFileFuture { sc =>
+      sc.optionsAs[ScioOptions].setNullableCoders(true)
+      sc.parallelize(actual)
+        .saveAsProtobufFile(dir.getPath)
+    }
+    val expected = actual.toSet
+    verifyTap(t, expected)
+
+    val sc = ScioContext()
+    sc.protobufFile[SimplePBV3](dir + "/*.avro") should containInAnyOrder(expected)
+    sc.run()
+
+    FileUtils.deleteDirectory(dir)
+  }
+
+  it should "support saveAsProtobuf read with nullableCoders" in {
+    val dir = tmpDir
+    val data = Seq(("a", 1), ("b", 2), ("c", 3))
+    val actual = data.map(mkProto3)
+    val t = runWithFileFuture {
+      _.parallelize(actual)
+        .saveAsProtobufFile(dir.getPath)
+    }
+    val expected = actual.toSet
+    verifyTap(t, expected)
+
+    val sc = ScioContext()
+    sc.optionsAs[ScioOptions].setNullableCoders(true)
+    sc.protobufFile[SimplePBV3](dir + "/*.avro") should containInAnyOrder(expected)
+    sc.run()
+
     FileUtils.deleteDirectory(dir)
   }
 
   it should "support saveAsTableRowJsonFile" in {
     def newTableRow(i: Int): TableRow =
-      TableRow("int_field" -> 1 * i,
-               "long_field" -> 1L * i,
-               "float_field" -> 1F * i,
-               "double_field" -> 1.0 * i,
-               "boolean_field" -> "true",
-               "string_field" -> "hello")
+      TableRow(
+        "int_field" -> 1 * i,
+        "long_field" -> 1L * i,
+        "float_field" -> 1f * i,
+        "double_field" -> 1.0 * i,
+        "boolean_field" -> "true",
+        "string_field" -> "hello"
+      )
 
     val dir = tmpDir
     // Compare .toString versions since TableRow may not round trip
@@ -222,15 +264,14 @@ class TapTest extends TapSpec {
   it should "support waitForResult" in {
     val sc = ScioContext()
     val f = sc.parallelize(1 to 10).materialize
-    val scioResult = sc.close().waitUntilDone()
+    val scioResult = sc.run().waitUntilDone()
     scioResult.tap(f).value.toSet shouldBe (1 to 10).toSet
   }
 
   it should "support nested waitForResult" in {
     val sc = ScioContext()
     val f = sc.parallelize(1 to 10).materialize
-    val scioResult = sc.close().waitUntilDone()
+    val scioResult = sc.run().waitUntilDone()
     scioResult.tap(f).value.toSet shouldBe (1 to 10).toSet
   }
-
 }

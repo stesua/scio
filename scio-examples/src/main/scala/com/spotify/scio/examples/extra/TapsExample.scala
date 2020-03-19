@@ -44,12 +44,11 @@ object TapsExample {
         .countByValue
         .map(kv => kv._1 + "\t" + kv._2)
         .materialize
-      sc.close().waitUntilDone().tap(out)
+      sc.run().waitUntilDone().tap(out)
     }
 
     val result = Await.ready(tap, Duration.Inf).value.take(10).toList
-    // scalastyle:off regex
+
     println(result)
-    // scalastyle:on regex
   }
 }

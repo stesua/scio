@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ package com.spotify.scio.transforms
 import com.spotify.scio.testing.PipelineSpec
 
 class SpecializedFlatMapSCollectionTest extends PipelineSpec {
-
   "SpecializedFlatMapSCollectionTest" should "support safeFlatMap()" in {
     val errorMsg = "String contains 'a'"
     runWithContext { sc =>

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ package com.spotify.scio.jmh
 import java.util
 import java.util.concurrent.TimeUnit
 
+import com.spotify.scio.ScioContext
 import com.spotify.scio.util.Functions
 import com.twitter.algebird.{Monoid, Semigroup}
 import org.apache.beam.sdk.testing.CombineFnTester
@@ -32,17 +33,18 @@ import scala.collection.JavaConverters._
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Thread)
 class FunctionsBenchmark {
-
   type T = Set[Int]
 
   val input = new util.ArrayList((1 to 100).map(Set(_)).asJava)
   val output = (1 to 100).toSet
 
-  val aggregateFn = Functions.aggregateFn[T, T](Set.empty[Int])(_ ++ _, _ ++ _)
-  val combineFn = Functions.combineFn[T, T](identity, _ ++ _, _ ++ _)
-  val reduceFn = Functions.reduceFn((x: T, y: T) => x ++ y)
-  val sgFn = Functions.reduceFn(Semigroup.setSemigroup[Int])
-  val monFn = Functions.reduceFn(Monoid.setMonoid[Int])
+  val aggregateFn =
+    Functions.aggregateFn[T, T](ScioContext(), Set.empty[Int])(_ ++ _, _ ++ _)
+  val combineFn =
+    Functions.combineFn[T, T](ScioContext(), identity, _ ++ _, _ ++ _)
+  val reduceFn = Functions.reduceFn(ScioContext(), (x: T, y: T) => x ++ y)
+  val sgFn = Functions.reduceFn(ScioContext(), Semigroup.setSemigroup[Int])
+  val monFn = Functions.reduceFn(ScioContext(), Monoid.setMonoid[Int])
 
   def test(fn: CombineFn[T, _, T], input: java.util.List[T], output: T): T = {
     CombineFnTester.testCombineFn(fn, input, output)
@@ -54,5 +56,4 @@ class FunctionsBenchmark {
   @Benchmark def benchReduce: T = test(reduceFn, input, output)
   @Benchmark def benchSemigroup: T = test(sgFn, input, output)
   @Benchmark def benchMonoid: T = test(monFn, input, output)
-
 }

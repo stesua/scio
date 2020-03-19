@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@ package com.spotify.scio.util
 import org.apache.beam.sdk.transforms.DoFn
 import com.spotify.scio.values.SideOutputContext
 import org.apache.beam.sdk.transforms.DoFn.ProcessElement
+import com.twitter.chill.ClosureCleaner
 
 private[scio] object FunctionsWithSideOutput {
-
   trait SideOutputFn[T, U] extends NamedDoFn[T, U] {
     private var ctx: SideOutputContext[T] = _
     def sideOutputContext(c: DoFn[T, U]#ProcessContext): SideOutputContext[T] = {
@@ -36,7 +36,7 @@ private[scio] object FunctionsWithSideOutput {
 
   def mapFn[T, U](f: (T, SideOutputContext[T]) => U): DoFn[T, U] =
     new SideOutputFn[T, U] {
-      val g = ClosureCleaner(f) // defeat closure
+      val g = ClosureCleaner.clean(f) // defeat closure
       @ProcessElement
       private[scio] def processElement(c: DoFn[T, U]#ProcessContext): Unit =
         c.output(g(c.element(), sideOutputContext(c)))
@@ -44,12 +44,11 @@ private[scio] object FunctionsWithSideOutput {
 
   def flatMapFn[T, U](f: (T, SideOutputContext[T]) => TraversableOnce[U]): DoFn[T, U] =
     new SideOutputFn[T, U] {
-      val g = ClosureCleaner(f) // defeat closure
+      val g = ClosureCleaner.clean(f) // defeat closure
       @ProcessElement
       private[scio] def processElement(c: DoFn[T, U]#ProcessContext): Unit = {
         val i = g(c.element(), sideOutputContext(c)).toIterator
         while (i.hasNext) c.output(i.next())
       }
     }
-
 }

@@ -17,10 +17,20 @@ If there is already a GitHub issue for the task you are working on, leave a comm
 
 # Contributing documentation
 
-You can contribute to Scio documentation by editing the wiki pages. You can also help us improve the API documentation. Run `sbt make-site` in the project root. The generated site is under `target/site/index.html`.
+You can contribute to Scio documentation, and the API documentation.
+
+Run `SOCCO=true sbt clean scio-examples/compile site/makeSite` in the project root. The generated site is under `site/target/site/index.html`.
+
+The examples in the markdown documentation are built using [mdoc](https://scalameta.org/mdoc/).
+While you're writing documentation, you can check that everything compiles by running `mdoc` in the sbt shell.
+You can also run `~mdoc` to automatically build the documentation on save.
+
+# Building locally
+
+See [this page](https://spotify.github.io/scio/dev/build.html) for building Scio locally.
 
 # Code of Conduct
 
-This project adheres to the [Open Code of Conduct][code-of-conduct]. By participating, you are expected to honor this code.
+This project adheres to the [Spotify FOSS Code of Conduct][code-of-conduct]. By participating, you are expected to honor this code.
 
-[code-of-conduct]: https://github.com/spotify/code-of-conduct/blob/master/code-of-conduct.md
+[code-of-conduct]: https://github.com/spotify/scio/blob/master/CODE_OF_CONDUCT.md

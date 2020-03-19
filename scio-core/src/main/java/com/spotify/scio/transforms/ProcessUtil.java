@@ -17,8 +17,8 @@
 
 package com.spotify.scio.transforms;
 
-import com.google.common.base.Charsets;
-import com.google.common.base.Joiner;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Charsets;
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Joiner;
 import org.apache.commons.io.IOUtils;
 
 import java.io.IOException;
@@ -37,8 +37,7 @@ class ProcessUtil {
   static String[] tokenizeCommand(String command) {
     StringTokenizer st = new StringTokenizer(command);
     String[] cmdArray = new String[st.countTokens()];
-    for (int i = 0; st.hasMoreTokens(); i++)
-      cmdArray[i] = st.nextToken();
+    for (int i = 0; st.hasMoreTokens(); i++) cmdArray[i] = st.nextToken();
     return cmdArray;
   }
 
@@ -55,7 +54,7 @@ class ProcessUtil {
     }
     String[] envp = new String[environment.size()];
     int i = 0;
-    for (Map.Entry<String, String> e: environment.entrySet()) {
+    for (Map.Entry<String, String> e : environment.entrySet()) {
       envp[i] = e.getKey() + "=" + e.getValue();
       i++;
     }
@@ -73,5 +72,4 @@ class ProcessUtil {
   static String getStream(InputStream is) throws IOException {
     return Joiner.on('\n').join(IOUtils.readLines(is, Charsets.UTF_8));
   }
-
 }

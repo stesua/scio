@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
 
 class DistCacheIT extends PipelineSpec {
-
   "GCS DistCache" should "work" in {
     runWithDistCache(Seq("name1", "name2")) { (sc, dc) =>
       val p = sc.parallelize(Seq(0, 1)).map(i => (i, dc()(i)))
@@ -37,13 +36,12 @@ class DistCacheIT extends PipelineSpec {
     }
   }
 
-  def runWithDistCache[T: ClassTag](data: Iterable[String])(
-    fn: (ScioContext, DistCache[List[String]]) => T): ScioResult = {
+  def runWithDistCache[T: ClassTag](
+    data: Iterable[String]
+  )(fn: (ScioContext, DistCache[List[String]]) => T): ScioResult = {
     val sc = ScioContext()
     val uri = ItUtils.gcpTempLocation("dist-cache-it")
-    val cache = sc.distCache(uri) { f =>
-      scala.io.Source.fromFile(f).getLines().toList
-    }
+    val cache = sc.distCache(uri)(f => scala.io.Source.fromFile(f).getLines().toList)
     FileSystems.setDefaultPipelineOptions(sc.options)
     val resourceId = FileSystems.matchNewResource(uri, false)
     try {
@@ -51,10 +49,9 @@ class DistCacheIT extends PipelineSpec {
       ch.write(ByteBuffer.wrap(data.mkString("\n").getBytes))
       ch.close()
       fn(sc, cache)
-      sc.close().waitUntilDone()
+      sc.run().waitUntilDone()
     } finally {
       FileSystems.delete(Seq(resourceId).asJava)
     }
   }
-
 }

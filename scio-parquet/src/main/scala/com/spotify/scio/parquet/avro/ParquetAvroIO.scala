@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,14 @@
 package com.spotify.scio.parquet.avro
 
 import java.lang.{Boolean => JBoolean}
-import java.nio.channels.{Channels, SeekableByteChannel}
 
 import com.spotify.scio.ScioContext
-import com.spotify.scio.io.{ScioIO, Tap, TapOf}
-import com.spotify.scio.util.{ClosureCleaner, ScioUtil}
-import com.spotify.scio.values.SCollection
 import com.spotify.scio.coders.{Coder, CoderMaterializer}
+import com.spotify.scio.io.{ScioIO, Tap, TapOf}
+import com.spotify.scio.parquet.{BeamInputFile, GcsConnectorUtil}
+import com.spotify.scio.util.ScioUtil
+import com.spotify.scio.values.SCollection
+import com.twitter.chill.ClosureCleaner
 import org.apache.avro.Schema
 import org.apache.avro.reflect.ReflectData
 import org.apache.avro.specific.SpecificRecordBase
@@ -34,27 +35,24 @@ import org.apache.beam.sdk.options.ValueProvider.StaticValueProvider
 import org.apache.beam.sdk.transforms.SimpleFunction
 import org.apache.beam.sdk.values.TypeDescriptor
 import org.apache.hadoop.mapreduce.Job
-import org.apache.hadoop.mapreduce.lib.input.FileInputFormat
 import org.apache.parquet.avro.{AvroParquetInputFormat, AvroParquetReader}
 import org.apache.parquet.filter2.predicate.FilterPredicate
 import org.apache.parquet.hadoop.ParquetInputFormat
 import org.apache.parquet.hadoop.metadata.CompressionCodecName
-import org.apache.parquet.io.{DelegatingSeekableInputStream, InputFile, SeekableInputStream}
 
 import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
 
 final case class ParquetAvroIO[T: ClassTag: Coder](path: String) extends ScioIO[T] {
-
   override type ReadP = ParquetAvroIO.ReadParam[_, T]
   override type WriteP = ParquetAvroIO.WriteParam
   override val tapT = TapOf[T]
 
   private val cls = ScioUtil.classOf[T]
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[T] = {
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[T] = {
     val job = Job.getInstance()
-    setInputPaths(sc, job, path)
+    GcsConnectorUtil.setInputPaths(sc, job, path)
     job.setInputFormatClass(classOf[AvroParquetInputFormat[T]])
     job.getConfiguration.setClass("key.class", classOf[Void], classOf[Void])
     job.getConfiguration.setClass("value.class", params.avroClass, params.avroClass)
@@ -74,7 +72,7 @@ final case class ParquetAvroIO[T: ClassTag: Coder](path: String) extends ScioIO[
     sc.wrap(sc.applyInternal(source)).map(_.getValue)
   }
 
-  override def write(data: SCollection[T], params: WriteP): Tap[T] = {
+  override protected def write(data: SCollection[T], params: WriteP): Tap[T] = {
     val job = Job.getInstance()
     if (ScioUtil.isLocalRunner(data.context.options.getRunner)) {
       GcsConnectorUtil.setCredentials(job)
@@ -89,13 +87,15 @@ final case class ParquetAvroIO[T: ClassTag: Coder](path: String) extends ScioIO[
       FileBasedSink.convertToFileResourceIfPossible(ScioUtil.pathWithShards(path))
     val prefix = StaticValueProvider.of(resource)
     val usedFilenamePolicy =
-      DefaultFilenamePolicy.fromStandardParameters(prefix, null, ".parquet", false)
+      DefaultFilenamePolicy.fromStandardParameters(prefix, null, params.suffix, false)
     val destinations = DynamicFileDestinations.constant[T](usedFilenamePolicy)
-    val sink = new ParquetAvroSink[T](prefix,
-                                      destinations,
-                                      writerSchema,
-                                      job.getConfiguration,
-                                      params.compression)
+    val sink = new ParquetAvroSink[T](
+      prefix,
+      destinations,
+      writerSchema,
+      job.getConfiguration,
+      params.compression
+    )
     val t = WriteFiles.to(sink).withNumShards(params.numShards)
     data.applyInternal(t)
     tap(ParquetAvroIO.ReadParam[T, T](writerSchema, null, identity))
@@ -103,25 +103,14 @@ final case class ParquetAvroIO[T: ClassTag: Coder](path: String) extends ScioIO[
 
   override def tap(params: ReadP): Tap[T] =
     ParquetAvroTap(ScioUtil.addPartSuffix(path), params)
-
-  private def setInputPaths(sc: ScioContext, job: Job, path: String): Unit = {
-    // This is needed since `FileInputFormat.setInputPaths` validates paths locally and requires
-    // the user's GCP credentials.
-    GcsConnectorUtil.setCredentials(job)
-
-    FileInputFormat.setInputPaths(job, path)
-
-    // It will interfere with credentials in Dataflow workers
-    if (!ScioUtil.isLocalRunner(sc.options.getRunner)) {
-      GcsConnectorUtil.unsetCredentials(job)
-    }
-  }
 }
 
 object ParquetAvroIO {
-  final case class ReadParam[A: ClassTag, T: ClassTag] private (projection: Schema,
-                                                                predicate: FilterPredicate,
-                                                                projectionFn: A => T) {
+  final case class ReadParam[A: ClassTag, T: ClassTag] private (
+    projection: Schema,
+    predicate: FilterPredicate,
+    projectionFn: A => T
+  ) {
     val avroClass: Class[A] = ScioUtil.classOf[A]
     val readSchema: Schema = {
       if (classOf[SpecificRecordBase] isAssignableFrom avroClass) {
@@ -132,13 +121,14 @@ object ParquetAvroIO {
     }
 
     val read: HadoopFormatIO.Read[JBoolean, T] = {
-      val g = ClosureCleaner(projectionFn) // defeat closure
+      val g = ClosureCleaner.clean(projectionFn) // defeat closure
       val aCls = avroClass
       val oCls = ScioUtil.classOf[T]
       HadoopFormatIO
         .read[JBoolean, T]()
+        // Hadoop input always emit key-value, and `Void` causes NPE in Beam coder
         .withKeyTranslation(new SimpleFunction[Void, JBoolean]() {
-          override def apply(input: Void): JBoolean = true // workaround for NPE
+          override def apply(input: Void): JBoolean = true
         })
         .withValueTranslation(new SimpleFunction[A, T]() {
           // Workaround for incomplete Avro objects
@@ -154,28 +144,26 @@ object ParquetAvroIO {
   object WriteParam {
     private[avro] val DefaultSchema = null
     private[avro] val DefaultNumShards = 0
-    private[avro] val DefaultSuffix = ""
+    private[avro] val DefaultSuffix = ".parquet"
     private[avro] val DefaultCompression = CompressionCodecName.SNAPPY
   }
 
-  final case class WriteParam private (schema: Schema = WriteParam.DefaultSchema,
-                                       numShards: Int = WriteParam.DefaultNumShards,
-                                       suffix: String = WriteParam.DefaultSuffix,
-                                       compression: CompressionCodecName =
-                                         WriteParam.DefaultCompression)
+  final case class WriteParam private (
+    schema: Schema = WriteParam.DefaultSchema,
+    numShards: Int = WriteParam.DefaultNumShards,
+    suffix: String = WriteParam.DefaultSuffix,
+    compression: CompressionCodecName = WriteParam.DefaultCompression
+  )
 }
 
-case class ParquetAvroTap[A, T: ClassTag: Coder](path: String,
-                                                 params: ParquetAvroIO.ReadParam[A, T])
-    extends Tap[T] {
+case class ParquetAvroTap[A, T: ClassTag: Coder](
+  path: String,
+  params: ParquetAvroIO.ReadParam[A, T]
+) extends Tap[T] {
   override def value: Iterator[T] = {
     val xs = FileSystems.`match`(path).metadata().asScala.toList
     xs.iterator.flatMap { metadata =>
-      val channel = FileSystems
-        .open(metadata.resourceId())
-        .asInstanceOf[SeekableByteChannel]
-      val reader =
-        AvroParquetReader.builder[A](new BeamParquetInputFile(channel)).build()
+      val reader = AvroParquetReader.builder[A](BeamInputFile.of(metadata.resourceId())).build()
       new Iterator[T] {
         private var current: A = reader.read()
         override def hasNext: Boolean = current != null
@@ -189,13 +177,4 @@ case class ParquetAvroTap[A, T: ClassTag: Coder](path: String,
   }
   override def open(sc: ScioContext): SCollection[T] =
     sc.read(ParquetAvroIO[T](path))(params)
-}
-
-private class BeamParquetInputFile(var channel: SeekableByteChannel) extends InputFile {
-  override def getLength: Long = channel.size
-  override def newStream: SeekableInputStream =
-    new DelegatingSeekableInputStream(Channels.newInputStream(channel)) {
-      override def getPos: Long = channel.position
-      override def seek(newPos: Long): Unit = channel.position(newPos)
-    }
 }

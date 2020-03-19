@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Combine Per Key Example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.cookbook.CombinePerKeyExamples
+// `sbt "runMain com.spotify.scio.examples.cookbook.CombinePerKeyExamples
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --output=[DATASET].combine_per_key_examples"`
 package com.spotify.scio.examples.cookbook
@@ -43,10 +43,12 @@ object CombinePerKeyExamples {
       List(
         new TableFieldSchema().setName("word").setType("STRING"),
         new TableFieldSchema().setName("all_plays").setType("STRING")
-      ).asJava)
+      ).asJava
+    )
 
     // Open a BigQuery table as a `SCollection[TableRow]`
-    sc.bigQueryTable(args.getOrElse("input", ExampleData.SHAKESPEARE_TABLE))
+    val table = Table.Spec(args.getOrElse("input", ExampleData.SHAKESPEARE_TABLE))
+    sc.bigQueryTable(table)
       // Extract words and corresponding play names
       .flatMap { row =>
         val playName = row.getString("corpus")
@@ -62,9 +64,10 @@ object CombinePerKeyExamples {
       // Map `(String, String)` tuples into result `TableRow`s
       .map(kv => TableRow("word" -> kv._1, "all_plays" -> kv._2))
       // Save result as a BigQuery table
-      .saveAsBigQuery(args("output"), schema, WRITE_TRUNCATE, CREATE_IF_NEEDED)
+      .saveAsBigQueryTable(Table.Spec(args("output")), schema, WRITE_TRUNCATE, CREATE_IF_NEEDED)
 
-    // Close the context and execute the pipeline
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 }

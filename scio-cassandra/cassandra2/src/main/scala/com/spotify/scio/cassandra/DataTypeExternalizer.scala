@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@
 package com.spotify.scio.cassandra
 
 import java.lang.{Iterable => JIterable}
-import java.util.{Collection => JCollection}
+import java.util.{ArrayList => JArrayList, Collection => JCollection}
 
 import com.datastax.driver.core.DataType
-import com.google.common.collect.{ImmutableList, ImmutableSet, Lists}
+import com.google.common.collect.{ImmutableList, ImmutableSet}
 import com.twitter.chill._
 
 import scala.collection.JavaConverters._
@@ -39,7 +39,7 @@ private[cassandra] class DataTypeExternalizer extends Externalizer[DataType] {
     new (DataTypeKryoInstantiator).setReferences(true)
 }
 
-private final class DataTypeKryoInstantiator extends EmptyScalaKryoInstantiator {
+final private class DataTypeKryoInstantiator extends EmptyScalaKryoInstantiator {
   override def newKryo: KryoBase = {
     val k = super.newKryo
     k.forSubclass[ImmutableList[Any]](new ImmutableListSerializer[Any])
@@ -51,7 +51,7 @@ private final class DataTypeKryoInstantiator extends EmptyScalaKryoInstantiator 
 private trait ImmutableCollectionSerializer[M] extends KSerializer[M] {
   def readList[T](kser: Kryo, in: Input): JCollection[T] = {
     val size = in.readInt(true)
-    val list = Lists.newArrayList[T]()
+    val list = new JArrayList[T]()
     (1 to size).foreach(_ => list.add(kser.readClassAndObject(in).asInstanceOf[T]))
     list
   }
@@ -61,7 +61,7 @@ private trait ImmutableCollectionSerializer[M] extends KSerializer[M] {
   }
 }
 
-private final class ImmutableListSerializer[T]
+final private class ImmutableListSerializer[T]
     extends ImmutableCollectionSerializer[ImmutableList[T]] {
   override def read(kser: Kryo, in: Input, cls: Class[ImmutableList[T]]): ImmutableList[T] =
     ImmutableList.copyOf(readList(kser, in): JIterable[T])
@@ -69,7 +69,7 @@ private final class ImmutableListSerializer[T]
     writeList(kser, out, obj)
 }
 
-private final class ImmutableSetSerializer[T]
+final private class ImmutableSetSerializer[T]
     extends ImmutableCollectionSerializer[ImmutableSet[T]] {
   override def read(kser: Kryo, in: Input, cls: Class[ImmutableSet[T]]): ImmutableSet[T] =
     ImmutableSet.copyOf(readList(kser, in): JIterable[T])

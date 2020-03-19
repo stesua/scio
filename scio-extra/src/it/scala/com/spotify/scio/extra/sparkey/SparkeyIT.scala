@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ import org.apache.beam.sdk.util.MimeTypes
 import scala.collection.JavaConverters._
 
 class SparkeyIT extends PipelineSpec {
-
   import com.spotify.scio.extra.sparkey._
 
   val sideData = Seq(("a", "1"), ("b", "2"), ("c", "3"))
@@ -61,19 +60,13 @@ class SparkeyIT extends PipelineSpec {
       // Create a sparkey KV file
       val uri = SparkeyUri(basePath, sc.options)
       val writer = new SparkeyWriter(uri, -1)
-      (1 to 100000000).foreach { x =>
-        writer.put(x.toString, x.toString)
-      }
+      (1 to 100000000).foreach(x => writer.put(x.toString, x.toString))
       writer.close()
 
       try {
         val p1 = sc.parallelize(1 to 10)
         val p2 = new SparkeyScioContext(sc).sparkeySideInput(basePath)
-        p1.withSideInputs(p2)
-          .map { (x, si) =>
-            si(p2).get(x.toString)
-          }
-          .toSCollection
+        p1.withSideInputs(p2).map((x, si) => si(p2).get(x.toString)).toSCollection
       } finally {
         FileSystems.delete(Seq(resourceId).asJava)
       }
@@ -90,15 +83,35 @@ class SparkeyIT extends PipelineSpec {
         val f = FileSystems.create(resourceId, MimeTypes.BINARY)
         f.write(ByteBuffer.wrap("test-data".getBytes))
         f.close()
-        // scalastyle:off no.whitespace.before.left.bracket
+
         the[IllegalArgumentException] thrownBy {
           sc.parallelize(sideData).asSparkey(basePath)
         } should have message s"requirement failed: Sparkey URI $basePath already exists"
-        // scalastyle:on no.whitespace.before.left.bracket
       } finally {
         FileSystems.delete(Seq(resourceId).asJava)
       }
     }
   }
 
+  it should "create files for empty data" in {
+    runWithContext { sc =>
+      FileSystems.setDefaultPipelineOptions(sc.options)
+      val tempLocation = ItUtils.gcpTempLocation("sparkey-it")
+      val basePath = tempLocation + "/sparkey-empty"
+      try {
+        val sparkeyExists = sc
+          .parallelize(Seq[(String, String)]())
+          .asSparkey(basePath)
+          .map(_.exists)
+        sparkeyExists should containSingleValue(true)
+      } finally {
+        val files = FileSystems
+          .`match`(tempLocation + "/sparkey-empty*")
+          .metadata()
+          .asScala
+          .map(_.resourceId())
+        FileSystems.delete(files.asJava)
+      }
+    }
+  }
 }

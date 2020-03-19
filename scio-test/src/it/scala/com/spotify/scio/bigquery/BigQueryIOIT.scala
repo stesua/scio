@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,14 +22,14 @@ import com.spotify.scio.testing._
 import com.spotify.scio.testing.util.ItUtils
 
 object BigQueryIOIT {
-
   @BigQueryType.fromTable("bigquery-public-data:samples.shakespeare")
   class ShakespeareFromTable
 
   @BigQueryType.fromQuery(
     """
     SELECT word, word_count FROM `bigquery-public-data.samples.shakespeare` LIMIT 10
-  """)
+  """
+  )
   class ShakespeareFromQuery
 
   val tempLocation = ItUtils.gcpTempLocation("bigquery-it")
@@ -45,7 +45,7 @@ class BigQueryIOIT extends PipelineSpec {
 
   "Select" should "read typed values from a SQL query" in
     runWithRealContext(options) { sc =>
-      val scoll = BigQueryTyped[ShakespeareFromQuery].read(sc, Unit)
+      val scoll = sc.read(BigQueryTyped[ShakespeareFromQuery])
       scoll should haveSize(10)
       scoll should satisfy[ShakespeareFromQuery] {
         _.forall(_.getClass == classOf[ShakespeareFromQuery])
@@ -54,7 +54,7 @@ class BigQueryIOIT extends PipelineSpec {
 
   "TableRef" should "read typed values from table" in
     runWithRealContext(options) { sc =>
-      val scoll = BigQueryTyped[ShakespeareFromTable].read(sc, Unit)
+      val scoll = sc.read(BigQueryTyped[ShakespeareFromTable])
       scoll.take(10) should haveSize(10)
       scoll should satisfy[ShakespeareFromTable] {
         _.forall(_.getClass == classOf[ShakespeareFromTable])

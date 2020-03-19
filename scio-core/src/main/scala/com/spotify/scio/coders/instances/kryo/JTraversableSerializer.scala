@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,9 +30,9 @@ import scala.collection.mutable
  * [[org.apache.beam.sdk.util.BufferedElementCountingOutputStream]].
  */
 private[coders] class JTraversableSerializer[T, C <: Traversable[T]](
-  val bufferSize: Int = 64 * 1024)(implicit cbf: CanBuildFrom[C, T, C])
+  val bufferSize: Int = 64 * 1024
+)(implicit cbf: CanBuildFrom[C, T, C])
     extends KSerializer[C] {
-
   override def write(kser: Kryo, out: Output, obj: C): Unit = {
     val i = obj.toIterator
     val chunked = new OutputChunked(out, bufferSize)
@@ -53,11 +53,10 @@ private[coders] class JTraversableSerializer[T, C <: Traversable[T]](
     }
     b.result()
   }
-
 }
 
 // workaround for Java Iterable/Collection missing proper equality check
-private[coders] abstract class JWrapperCBF[T] extends CanBuildFrom[Iterable[T], T, Iterable[T]] {
+abstract private[coders] class JWrapperCBF[T] extends CanBuildFrom[Iterable[T], T, Iterable[T]] {
   override def apply(from: Iterable[T]): mutable.Builder[T, Iterable[T]] = {
     val b = new JIterableWrapperBuilder
     from.foreach(b += _)
@@ -69,12 +68,12 @@ private[coders] abstract class JWrapperCBF[T] extends CanBuildFrom[Iterable[T], 
 
   class JIterableWrapperBuilder extends mutable.Builder[T, Iterable[T]] {
     private val xs = new java.util.ArrayList[T]()
-    // scalastyle:off method.name
+
     override def +=(elem: T): this.type = {
       xs.add(elem)
       this
     }
-    // scalastyle:on method.name
+
     override def clear(): Unit = xs.clear()
     override def result(): Iterable[T] = asScala(xs)
   }

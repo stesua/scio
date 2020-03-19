@@ -21,7 +21,9 @@ import com.google.api.services.bigquery.model.Table;
 import com.google.api.services.bigquery.model.TableReference;
 import com.google.api.services.bigquery.model.TableRow;
 import com.google.api.services.bigquery.model.TableSchema;
+
 import java.util.ArrayList;
+
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
 import org.apache.beam.sdk.transforms.windowing.PaneInfo;
@@ -31,9 +33,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Wrap {@link BigQueryServices} and expose package private methods.
- */
+/** Wrap {@link BigQueryServices} and expose package private methods. */
 public class BigQueryServicesWrapper {
 
   private final BigQueryServices bqServices;
@@ -55,23 +55,36 @@ public class BigQueryServicesWrapper {
 
   public long insertAll(TableReference ref, List<TableRow> rowList)
       throws IOException, InterruptedException {
-    List<ValueInSingleWindow<TableRow>> rows = rowList.stream()
-        .map(r ->
-            ValueInSingleWindow.of(
-                r,
-                BoundedWindow.TIMESTAMP_MIN_VALUE,
-                GlobalWindow.INSTANCE,
-                PaneInfo.NO_FIRING))
-        .collect(Collectors.toList());
-    return bqServices.getDatasetService(bqOptions)
-        .insertAll(ref,
-          rows,
-          null,
-          InsertRetryPolicy.alwaysRetry(),
-          new ArrayList<>(),
-          ErrorContainer.TABLE_ROW_ERROR_CONTAINER,
-          false,
-          false);
+    List<ValueInSingleWindow<TableRow>> rows =
+        rowList.stream()
+            .map(
+                r ->
+                    ValueInSingleWindow.of(
+                        r,
+                        BoundedWindow.TIMESTAMP_MIN_VALUE,
+                        GlobalWindow.INSTANCE,
+                        PaneInfo.NO_FIRING))
+            .collect(Collectors.toList());
+    return bqServices
+        .getDatasetService(bqOptions)
+        .insertAll(
+            ref,
+            rows,
+            null,
+            InsertRetryPolicy.alwaysRetry(),
+            new ArrayList<>(),
+            ErrorContainer.TABLE_ROW_ERROR_CONTAINER,
+            false,
+            false,
+            false);
   }
 
+  public Table getTable(TableReference tableReference) throws IOException, InterruptedException {
+    return bqServices.getDatasetService(bqOptions).getTable(tableReference);
+  }
+
+  public Table getTable(TableReference tableReference, List<String> selectedFields)
+      throws IOException, InterruptedException {
+    return bqServices.getDatasetService(bqOptions).getTable(tableReference, selectedFields);
+  }
 }

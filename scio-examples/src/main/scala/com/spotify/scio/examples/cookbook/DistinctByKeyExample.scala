@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Distinct With RepresentativeValue Example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.cookbook.DistinctWithRepresentativeValueFnExample
+// `sbt "runMain com.spotify.scio.examples.cookbook.DistinctWithRepresentativeValueFnExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --output=[DATASET].distinct_by_key_example"`
 package com.spotify.scio.examples.cookbook
@@ -31,7 +31,6 @@ import com.spotify.scio.examples.common.ExampleData
 import scala.collection.JavaConverters._
 
 object DistinctByKeyExample {
-
   def main(cmdlineArgs: Array[String]): Unit = {
     // Create `ScioContext` and `Args`
     val (sc, args) = ContextAndArgs(cmdlineArgs)
@@ -43,10 +42,12 @@ object DistinctByKeyExample {
       List(
         new TableFieldSchema().setName("word").setType("STRING"),
         new TableFieldSchema().setName("reference_play").setType("STRING")
-      ).asJava)
+      ).asJava
+    )
 
     // Open a BigQuery table as a `SCollection[TableRow]`
-    sc.bigQueryTable(args.getOrElse("input", ExampleData.SHAKESPEARE_TABLE))
+    val table = Table.Spec(args.getOrElse("input", ExampleData.SHAKESPEARE_TABLE))
+    sc.bigQueryTable(table)
       // Extract words and corresponding play names
       .flatMap { row =>
         val playName = row.getString("corpus")
@@ -58,9 +59,10 @@ object DistinctByKeyExample {
       // Map `(String, String)` tuples into result `TableRow`s
       .map(kv => TableRow("word" -> kv._1, "reference_play" -> kv._2))
       // Save result as a BigQuery table
-      .saveAsBigQuery(args("output"), schema, WRITE_TRUNCATE, CREATE_IF_NEEDED)
+      .saveAsBigQueryTable(Table.Spec(args("output")), schema, WRITE_TRUNCATE, CREATE_IF_NEEDED)
 
-    // Close the context and execute the pipeline
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 }

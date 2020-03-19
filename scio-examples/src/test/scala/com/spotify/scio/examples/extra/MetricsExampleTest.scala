@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,13 +21,12 @@ import com.spotify.scio._
 import com.spotify.scio.testing._
 
 class MetricsExampleTest extends PipelineSpec {
-
   "MetricsExample" should "work" in {
     JobTest[com.spotify.scio.examples.extra.MetricsExample.type]
     // static metrics
-      .counter(MetricsExample.sum)(_ shouldBe (1 to 100).sum)
-      .counter(MetricsExample.sum2)(_ shouldBe (1 to 100).sum + (1 to 50).sum)
-      .counter(MetricsExample.count)(_ shouldBe 100)
+      .counter(MetricsExample.sum)(x => x shouldBe (1 to 100).sum)
+      .counter(MetricsExample.sum2)(x => x shouldBe (1 to 100).sum + (1 to 50).sum)
+      .counter(MetricsExample.count)(x => x shouldBe 100)
       .distribution(MetricsExample.dist) { d =>
         d.getCount shouldBe 100
         d.getMin shouldBe 1
@@ -40,14 +39,13 @@ class MetricsExampleTest extends PipelineSpec {
         g.getValue should be <= 100L
       }
       // dynamic metrics
-      .counter(ScioMetrics.counter("even_2"))(_ shouldBe 1)
-      .counter(ScioMetrics.counter("even_4"))(_ shouldBe 1)
-      .counter(ScioMetrics.counter("even_6"))(_ shouldBe 1)
-      .counter(ScioMetrics.counter("even_8"))(_ shouldBe 1)
+      .counter(ScioMetrics.counter("even_2"))(x => x shouldBe 1)
+      .counter(ScioMetrics.counter("even_4"))(x => x shouldBe 1)
+      .counter(ScioMetrics.counter("even_6"))(x => x shouldBe 1)
+      .counter(ScioMetrics.counter("even_8"))(x => x shouldBe 1)
       // context-initialized metrics
-      .counter(ScioMetrics.counter("ctxcount"))(_ shouldBe 0)
-      .counter(ScioMetrics.counter("namespace", "ctxcount"))(_ shouldBe 0)
+      .counter(ScioMetrics.counter("ctxcount"))(x => x shouldBe 0)
+      .counter(ScioMetrics.counter("namespace", "ctxcount"))(x => x shouldBe 0)
       .run()
   }
-
 }

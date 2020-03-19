@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,12 +19,12 @@ package com.spotify.scio
 
 import com.spotify.scio.values.SideOutput
 import org.apache.beam.sdk.util.SerializableUtils
-import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.io.Source
 
-class SerializationTest extends FlatSpec with Matchers {
-
+class SerializationTest extends AnyFlatSpec with Matchers {
   "Args" should "be serializable" in {
     SerializableUtils.ensureSerializable(Args(Array("--key=value")))
   }
@@ -44,13 +44,15 @@ class SerializationTest extends FlatSpec with Matchers {
     SerializableUtils.ensureSerializable(p1.asSingletonSideInput)
     SerializableUtils.ensureSerializable(p1.asListSideInput)
     SerializableUtils.ensureSerializable(p1.asIterableSideInput)
+    SerializableUtils.ensureSerializable(p1.asSetSingletonSideInput)
     val p2 = sc.parallelize(1 to 10).map(i => (s"k$i", s"v$i"))
     SerializableUtils.ensureSerializable(p2.asMapSideInput)
     SerializableUtils.ensureSerializable(p2.asMultiMapSideInput)
+    SerializableUtils.ensureSerializable(p2.asMapSingletonSideInput)
+    SerializableUtils.ensureSerializable(p2.asMultiMapSingletonSideInput)
   }
 
   "SideOutput" should "be serializable" in {
     SerializableUtils.ensureSerializable(SideOutput[Int]())
   }
-
 }

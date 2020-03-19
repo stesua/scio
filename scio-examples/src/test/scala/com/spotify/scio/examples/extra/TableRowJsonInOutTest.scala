@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.spotify.scio.bigquery._
 import com.spotify.scio.testing._
 
 class TableRowJsonInOutTest extends PipelineSpec {
-
   val input = Seq(
     TableRow("field1" -> "str1", "field2" -> 100),
     TableRow("field1" -> "str2", "field2" -> 200)
@@ -31,8 +30,7 @@ class TableRowJsonInOutTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.extra.TableRowJsonInOut.type]
       .args("--input=in.json", "--output=out.json")
       .input(TableRowJsonIO("in.json"), input)
-      .output(TableRowJsonIO("out.json"))(_ should containInAnyOrder(input))
+      .output(TableRowJsonIO("out.json"))(coll => coll should containInAnyOrder(input))
       .run()
   }
-
 }

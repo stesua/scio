@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Minimal Word Count Example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.MinimalWordCount
+// `sbt "runMain com.spotify.scio.examples.MinimalWordCount
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/shakespeare/kinglear.txt
 // --output=gs://[BUCKET]/[PATH]/minimal_wordcount"`
@@ -29,16 +29,17 @@ import com.spotify.scio.examples.common.ExampleData
 import caseapp._
 
 object MinimalWordCountTypedArguments {
-
   @AppName("Scio Examples")
   @AppVersion(BuildInfo.version)
   @ProgName("com.spotify.scio.examples.MinimalWordCount")
-  case class Arguments(@HelpMessage("Path of the file to read from")
-                       @ExtraName("i")
-                       input: String = ExampleData.KING_LEAR,
-                       @HelpMessage("Path of the file to write to")
-                       @ExtraName("o")
-                       output: String)
+  case class Arguments(
+    @HelpMessage("Path of the file to read from")
+    @ExtraName("i")
+    input: String = ExampleData.KING_LEAR,
+    @HelpMessage("Path of the file to write to")
+    @ExtraName("o")
+    output: String
+  )
 
   def main(cmdlineArgs: Array[String]): Unit = {
     // Parse command line arguments, create `ScioContext` and `Args`.
@@ -57,11 +58,11 @@ object MinimalWordCountTypedArguments {
       }
       // Map `(String, Long)` tuples into strings
       .map(t => t._1 + ": " + t._2)
-
       // Save result as text files under the output path
       .saveAsTextFile(args.output)
 
-    // Close the context and execute the pipeline
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 }

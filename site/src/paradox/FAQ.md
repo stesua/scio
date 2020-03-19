@@ -51,13 +51,13 @@ At Spotify we pack jars with sbt-pack, build docker images with [sbt-docker](htt
 
 Commits to Scio master are automatically published to Sonatype via continuous integration. To use the latest SNAPSHOT artifact, add the following line to your `build.sbt`.
 
-```scala
+```sbt
 resolvers += Resolver.sonatypeRepo("snapshots")
 ```
 
 Or you can configure SBT globally by adding the following to `~/.sbt/1.0/global.sbt`.
 
-```scala
+```sbt
 resolvers ++= Seq(
   Resolver.sonatypeRepo("snapshots")
   // other resolvers
@@ -84,24 +84,38 @@ For more examples see:
 How do I combine multiple input sources, e.g. different BigQuery tables, files located in different GCS buckets?
 You can combine `SCollection`s from different sources into one using the companion method `SCollection.unionAll`, for example:
 
-```scala
-val (sc, args) = ContextAndArgs(cmdlineArgs)
+```scala mdoc:reset:silent
+import com.spotify.scio._
+import com.spotify.scio.avro._
+import com.spotify.scio.values._
+import com.spotify.scio.avro.TestRecord
 
-val collections = Seq("gs://bucket1/data/*.avro", "gs://bucket2/data/*.avro")
-    .map(sc.avroFile[SchemaType](_))
-val all = SCollection.unionAll(collections)
+object MyJob {
+  def main(cmdlineArgs: Array[String]): Unit = {
+    val (sc, args) = ContextAndArgs(cmdlineArgs)
+
+    val collections =
+      Seq("gs://bucket1/data/*.avro", "gs://bucket2/data/*.avro")
+        .map(sc.avroFile[TestRecord](_))
+
+    val all = SCollection.unionAll(collections)
+  }
+}
 ```
 
 #### How do I log in a job?
 
 You can log in a Scio job with most common logging libraries but `slf4j` is included as a dependency. Define the logger instance as a member of the job `object` and use it inside a lambda.
 
-```scala
+```scala mdoc:reset:silent
+import com.spotify.scio._
 import org.slf4j.LoggerFactory
+
 object MyJob {
   private val logger = LoggerFactory.getLogger(this.getClass)
   def main(cmdlineArgs: Array[String]): Unit = {
-    // ...
+    val (sc, args) = ContextAndArgs(cmdlineArgs)
+
     sc.parallelize(1 to 100)
       .map { i =>
         logger.info(s"Element $i")
@@ -118,7 +132,7 @@ Scio exposes a few things to allow easy integration with native Beam Java API, n
 
 - `ScioContext#customInput` to apply a `PTransform[_ >: PBegin, PCollection[T]]` (source) and get a `SCollection[T]`.
 - `SCollection#applyTransform` to apply a `PTransform[_ >: PCollection[T], PCollection[U]]` and get a `SCollection[U]`
-- `SCollection#saveAsCustomOutput` to apply a `PTransform[_ >: PCollection[T], PDone]` (sink) and get a `Future[Tap[T]]`.
+- `SCollection#saveAsCustomOutput` to apply a `PTransform[_ >: PCollection[T], PDone]` (sink) and get a `ClosedTap[T]`.
 
 See @extref[BeamExample.scala](example:BeamExample) for more details. Custom I/O can also be tested via the @scaladoc[`JobTest`](com.spotify.scio.testing.JobTest$) harness.
 
@@ -142,17 +156,26 @@ For Apache Beam based Scio (version >= `0.3.0`) use `DataflowRunner` and specify
 
 You can wait on the `ScioResult` and call the internal `PipelineResult#cancel()` method if a timeout exception happens.
 
-```scala
-val r = sc.close()
+
+```scala mdoc:reset:silent
+import com.spotify.scio._
 import scala.concurrent.duration._
-if (Try(r.waitUntilFinish(1.minute)).isFailure) {
-  r.internal.cancel()
+
+object MyJob {
+  def main(cmdlineArgs: Array[String]): Unit = {
+    val (sc, args) = ContextAndArgs(cmdlineArgs)
+
+    // ...
+    val closedSc: ScioExecutionContext = sc.run()
+    val result: ScioResult = closedSc.waitUntilFinish(1.minute, cancelJob = true)
+  }
 }
+
 ```
 
 #### Why can't I have an SCollection inside another SCollection?
 
-You cannot have an SCollection inside another SCollection, i.e. anything with type `SCollection[SCollection[T]]`. To explain this we have to go back to the relationship between `ScioContext` and `SCollection`. Every `ScioContext` represents a unique pipeline and every `SCollection` represents a stage in the pipeline execution, i.e. the state of the pipeline after some transforms has be applied. We start a pipeline code with `val sc = ...`, create new `SCollection`s with methods on `sc`, e.g. `sc.textFile`, and transform them with methods like `.map`, `.filter`, `.join`. Therefore each `SCollection` can trace its root to one single `sc`. The pipeline is submitted for execution when we call `sc.close()`. Hence we cannot have an `SCollection` inside another `SCollection` just as we cannot have a pipeline inside another pipeline.
+You cannot have an SCollection inside another SCollection, i.e. anything with type `SCollection[SCollection[T]]`. To explain this we have to go back to the relationship between `ScioContext` and `SCollection`. Every `ScioContext` represents a unique pipeline and every `SCollection` represents a stage in the pipeline execution, i.e. the state of the pipeline after some transforms has be applied. We start a pipeline code with `val sc = ...`, create new `SCollection`s with methods on `sc`, e.g. `sc.textFile`, and transform them with methods like `.map`, `.filter`, `.join`. Therefore each `SCollection` can trace its root to one single `sc`. The pipeline is submitted for execution when we call `sc.run()`. Hence we cannot have an `SCollection` inside another `SCollection` just as we cannot have a pipeline inside another pipeline.
 
 ### BigQuery questions
 
@@ -164,31 +187,56 @@ Because of these limitations and performance reasons, make sure `--zone`, `--sta
 
 #### How stable is the type safe BigQuery API?
 
-@ref[Type Safe BigQuery](io/Type-Safe-BigQuery.md) API is considered stable and widely used at Spotify. There are several caveats however:
+@ref:[Type Safe BigQuery](io/Type-Safe-BigQuery.md) API is considered stable and widely used at Spotify. There are several caveats however:
 
 - Both [legacy](https://cloud.google.com/bigquery/query-reference) and [SQL](https://cloud.google.com/bigquery/sql-reference/) syntax are supported although the SQL syntax is **highly recommended**
 - The system will detect legacy or SQL syntax and choose the correct one
 - To override auto-detection, start the query with either `#legacysql` or `#standardsql` comment line
 - Legacy syntax is less predictable, especially for complex queries and may be disabled in the future
-- Case classes generated by `@BigQueryType.fromTable` or `@BigQueryType.fromQuery` are not recognized in IntelliJ IDEA, but see @ref[this section](#how-to-make-intellij-idea-work-with-type-safe-bigquery-classes-) for a workaround
+- Case classes generated by `@BigQueryType.fromTable` or `@BigQueryType.fromQuery` are not recognized in IntelliJ IDEA, but see @ref:[this section](#how-to-make-intellij-idea-work-with-type-safe-bigquery-classes-) for a workaround
 
 #### How do I work with nested Options in type safe BigQuery?
 
 Any nullable field in BigQuery is translated to `Option[T]` by the type safe BigQuery API and it can be clunky to work with rows with multiple or nested fields. For example:
 
-```scala
-if (row.getUser.isDefined) {  // Option[User]
-  val email = row.getUser.get.getEmail  // Option[String]
-  if (email.isDefined) {
-    doSomething(email.get)
+```scala mdoc:reset:invisible
+def doSomething(s: String): Unit = ()
+```
+
+```scala mdoc:silent
+import com.spotify.scio.bigquery.types.BigQueryType
+
+@BigQueryType.fromSchema("""{
+    |"fields": [{
+    | "type":"RECORD",
+    | "mode": "NULLABLE",
+    | "name":"user",
+    | "fields":[
+    |   {"mode": "NULLABLE", "name":"email", "type": "STRING"},
+    |   {"mode": "REQUIRED","name":"name","type":"STRING"}]
+    |}]}""".stripMargin)
+class Row
+
+def doSomethingWithRow(row: Row) = {
+  if (row.user.isDefined) {  // Option[User]
+    val email = row.user.get.email  // Option[String]
+    if (email.isDefined) {
+      doSomething(email.get)
+    }
   }
 }
 ```
 
 For comprehension is a nicer alternative in these cases:
-```scala
-val e = for (u <- row.getUser; e <- u.getUser) yield e  // Option[String]
-e.foreach(doSomething)
+```scala mdoc:silent
+def doSomethingWithRowUsingFor(row: Row) = {
+  val e: Option[String] =
+    for {
+      u <- row.user
+      e <- u.email
+    } yield e
+  e.foreach(doSomething)
+}
 ```
 
 Also see these [slides](http://www.lyh.me/slides/for-yield.html) and this [blog article](https://dzone.com/articles/scala-comprehensions-options).
@@ -202,7 +250,18 @@ BigQuery doesn't provide a way to unit test query logic locally, but we can quer
 Currently there is no way to create a [partitioned](https://cloud.google.com/bigquery/docs/partitioned-tables) BigQuery table via Scio/Beam when streaming, however it is possible to stream to a partitioned table if it is already created.
 
 This can be done by using fixed windows and using the window bounds to infer date. As of Scio 0.4.0-beta2 this looks as follows:
-```scala
+
+```scala mdoc:reset:silent
+import com.spotify.scio._
+import org.apache.beam.sdk.values.ValueInSingleWindow
+import org.apache.beam.sdk.transforms.SerializableFunction
+import org.apache.beam.sdk.transforms.windowing.IntervalWindow
+import com.google.api.services.bigquery.model.TableRow
+import org.apache.beam.sdk.io.gcp.bigquery.{BigQueryIO, TableDestination}
+import BigQueryIO.Write.{CreateDisposition, WriteDisposition}
+import org.joda.time.format.DateTimeFormat
+import org.joda.time.{DateTimeZone, Duration}
+
 class DayPartitionFunction() extends SerializableFunction[ValueInSingleWindow[TableRow], TableDestination] {
   override def apply(input: ValueInSingleWindow[TableRow]): TableDestination = {
     val partition = DateTimeFormat.forPattern("yyyyMMdd").withZone(DateTimeZone.UTC)
@@ -211,17 +270,28 @@ class DayPartitionFunction() extends SerializableFunction[ValueInSingleWindow[Ta
   }
 }
 
-sc.pubsubSubscription("projects/data-university/topics/data-university")
-  .withFixedWindows(30L)
-// Convert to `TableRow`
-  .map(myStringToTableRowConversion: String => TableRow)
-  .saveAsCustomOutput(
-    "SaveAsDayPartitionedBigQuery",
-    BigQueryIO.writeTableRows().to(
-      new DayPartitionFunction())
-      .withWriteDisposition(WriteDisposition.WRITE_APPEND)
-      .withCreateDisposition(CreateDisposition.CREATE_NEVER)
-  )
+object BQPartitionedJob {
+
+  def myStringToTableRowConversion: String => TableRow = ???
+
+  def main(cmdlineArgs: Array[String]): Unit = {
+    val (sc, args) = ContextAndArgs(cmdlineArgs)
+
+    sc.pubsubSubscription[String]("projects/data-university/topics/data-university")
+      .withFixedWindows(Duration.standardSeconds(30))
+      // Convert to `TableRow`
+      .map(myStringToTableRowConversion)
+      .saveAsCustomOutput(
+        "SaveAsDayPartitionedBigQuery",
+        BigQueryIO.writeTableRows().to(
+          new DayPartitionFunction())
+          .withWriteDisposition(WriteDisposition.WRITE_APPEND)
+          .withCreateDisposition(CreateDisposition.CREATE_NEVER)
+      )
+
+    sc.run()
+  }
+}
 ```
 
 In Scio 0.3.X it is possible to achieve the same behaviour using `SerializableFunction[BoundedWindow, String]` and `BigQueryIO.Write.to`. It is also possible to stream to separate tables with a Date suffix by modifying `DayPartitionFunction`, specifying the Schema, and changing the CreateDisposition to `CreateDisposition.CREATE_IF_NEEDED`.
@@ -240,28 +310,19 @@ By default Scio runs BigQuery jobs with `BATCH` priority except when in the REPL
 
 Dataflow allows streaming jobs to be updated on the fly by specifying `--update`, along with `--jobName=[your_job]` on the command line. See https://cloud.google.com/dataflow/pipelines/updating-a-pipeline for detailed docs. Note that for this to work, Dataflow needs to be able to identify which transformations from the original job map to those in the replacement job. The easiest way to do so is to give unique names to transforms in the code itself. In Scio, this can be achieved by calling `.withName()` before applying the transform. For example:
 
-```
-sc.textFile(...)
-   .withName("MakeUpper").map(_.toUpperCase)
-   .withName("BigWords").filter(_.length > 6)
+
+```scala mdoc:reset
+import com.spotify.scio._
+
+def main(cmdlineArgs: Array[String]): Unit = {
+  val (sc, args) = ContextAndArgs(cmdlineArgs)
+  sc.textFile(args("input"))
+    .withName("MakeUpper").map(_.toUpperCase)
+    .withName("BigWords").filter(_.length > 6)
+}
 ```
 
 In this example, the `map`'s transform name is "MakeUpper" and the `filter`'s is "BigWords". If we later decided that we want to count 6 letter words as "big" too, then we can change it to `_.length > 5`, and because the transform name is the same the job can be updated on the fly.
-
-#### How do I read Pubsub input in a local pipeline?
-
-You can use a custom @javadoc[`PubsubIO`](org.apache.beam.sdk.io.gcp.pubsub.PubsubIO) transform and specify `maxNumRecord` & `maxReadTime` in order not to blow up local JVM.
-
-```scala
-sc.customInput("ReadFromPubsub",
-  PubsubIO.read()
-    .topic("projects/data-university/topics/data-university")
-    .idLabel("id")
-    .timestampLabel("ts")
-    .withCoder(StringUtf8Coder.of())
-    .maxNumRecords(50)
-    .maxReadTime(Duration.standardMinutes(10))
-```
 
 ### Other IO components
 
@@ -271,10 +332,11 @@ sc.customInput("ReadFromPubsub",
 
 Starting from Scio `0.4.0` you can use Apache Beam's @javadoc[Filesystems](org.apache.beam.sdk.io.FileSystems) abstraction:
 
-```scala
+```scala mdoc:reset:silent
+import org.apache.beam.sdk.io.FileSystems
 // the path can be any of the supported Filesystems, e.g. local, GCS, HDFS
-val readmeResource = FileSystems.matchNewResource("gs://<bucket>/README.md")
-val readme = FileSystems.open(readmeResource)
+def readmeResource = FileSystems.matchNewResource("gs://<bucket>/README.md", false)
+def readme = FileSystems.open(readmeResource)
 ```
 
 - For Scio version &lt; `0.4.0`
@@ -285,38 +347,86 @@ This part is GCS specific.
 
 You can get a @javadoc[`GcsUtil`](org.apache.beam.sdk.extensions.gcp.options.GcsOptions#getGcsUtil--) instance from `ScioContext`, which can be used to open GCS files in read or write mode.
 
-```scala
-val gcsUtil = sc.optionsAs[GcsOptions].getGcsUtil
+```scala mdoc:reset:silent
+import com.spotify.scio.ContextAndArgs
+import org.apache.beam.sdk.extensions.gcp.options.GcsOptions
+
+def main(cmdlineArgs: Array[String]): Unit = {
+  val (sc, args) = ContextAndArgs(cmdlineArgs)
+  val gcsUtil = sc.optionsAs[GcsOptions].getGcsUtil
+  // ...
+}
 ```
 
 #### How do I reduce Datastore boilerplate?
 
-Datastore `Entity` class is actually generated from @github[Protobuf](/scio-examples/src/test/scala/com/spotify/scio/examples/extra/ShapelessDatastoreExampleTest.scala) which uses the builder pattern and very boilerplate heavy. You can use the [shapeless-datatype](https://github.com/nevillelyh/shapeless-datatype#datastoretype) library to seamlessly convert bewteen case classes and `Entity`s. See @extref[ShapelessDatastoreExample.scala](example:ShapelessDatastoreExample) for an example job and @github[ShapelessDatastoreExampleTest.scala](/scio-examples/src/test/scala/com/spotify/scio/examples/extra/ShapelessDatastoreExampleTest.scala) for tests.
+Datastore `Entity` class is actually generated from @github[Protobuf](/scio-examples/src/test/scala/com/spotify/scio/examples/extra/MagnolifyDatastoreExampleTest.scala) which uses the builder pattern and very boilerplate heavy. You can use the [Magnolify](https://github.com/spotify/magnolify) library to seamlessly convert bewteen case classes and `Entity`s. See @extref[MagnolifyDatastoreExample.scala](example:MagnolifyDatastoreExample) for an example job and @github[MagnolifyDatastoreExampleTest.scala](/scio-examples/src/test/scala/com/spotify/scio/examples/extra/MagnolifyDatastoreExampleTest.scala) for tests.
 
 #### How do I throttle Bigtable writes?
 
 Currently Dataflow autoscaling may not work well with large writes BigtableIO. Specifically It does not take into account Bigtable IO rate limits and may scale up more workers and end up hitting the limit and eventually fail the job. As a workaround, you can enable throttling for Bigtable writes in Scio 0.4.0-alpha2 or later.
 
-```scala
-val btOptions = new BigtableOptions.Builder()
-  .setProjectId(btProjectId)
-  .setInstanceId(btInstanceId)
-  .setBulkOptions(new BulkOptions.Builder()
-    .enableBulkMutationThrottling()
-    .setBulkMutationRpcTargetMs(10) // lower latency threshold, default is 100
-    .build())
-  .build()
-data.saveAsBigtable(btOptions, btTableId)
+```scala mdoc:reset:invisible
+val btProjectId = ""
+val btInstanceId = ""
+val btTableId = ""
+```
+
+```scala mdoc:silent
+import com.spotify.scio.values._
+import com.spotify.scio.bigtable._
+import com.google.cloud.bigtable.config.{BigtableOptions, BulkOptions}
+import com.google.bigtable.v2.Mutation
+import com.google.protobuf.ByteString
+
+def main(cmdlineArgs: Array[String]): Unit = {
+  // ...
+
+  val data: SCollection[(ByteString, Iterable[Mutation])] = ???
+
+  val btOptions =
+    BigtableOptions.builder()
+      .setProjectId(btProjectId)
+      .setInstanceId(btInstanceId)
+      .setBulkOptions(BulkOptions.builder()
+        .enableBulkMutationThrottling()
+        .setBulkMutationRpcTargetMs(10) // lower latency threshold, default is 100
+        .build())
+      .build()
+  data.saveAsBigtable(btOptions, btTableId)
+
+  // ...
+}
 ```
 
 #### How do I use custom Kryo serializers?
 
-See @ref[Kryo](internals/Kryo.md) for more.
+See @ref:[Kryo](internals/Kryo.md) for more.
 
 Define a registrar class that extends `IKryoRegistrar` and annotate it with `@KryoRegistrar`. Note that the class name must ends with `KryoRegistrar`, i.e. `MyKryoRegistrar` for Scio to find it.
 
-```scala
+```scala mdoc:reset:invisible
+trait UserRecord
+trait AccountRecord
+import com.twitter.chill.KSerializer
+import com.esotericsoftware.kryo.Kryo
+import com.esotericsoftware.kryo.io.{Input, Output}
+
+class UserRecordSerializer extends KSerializer[UserRecord] {
+  def read(x$1: Kryo, x$2: Input, x$3: Class[UserRecord]): UserRecord = ???
+  def write(x$1: Kryo, x$2: Output, x$3: UserRecord): Unit = ???
+}
+class AccountRecordSerializer extends KSerializer[AccountRecord] {
+  def read(x$1: Kryo, x$2: Input, x$3: Class[AccountRecord]): AccountRecord = ???
+  def write(x$1: Kryo, x$2: Output, x$3: AccountRecord): Unit = ???
+}
+```
+
+```scala mdoc:silent
 import com.twitter.chill._
+import com.esotericsoftware.kryo.Kryo
+import com.spotify.scio.coders.KryoRegistrar
+import com.twitter.chill.IKryoRegistrar
 
 @KryoRegistrar
 class MyKryoRegistrar extends IKryoRegistrar {
@@ -324,15 +434,24 @@ class MyKryoRegistrar extends IKryoRegistrar {
     // register serializers for additional classes here
     k.forClass(new UserRecordSerializer)
     k.forClass(new AccountRecordSerializer)
-    ...
+    //...
   }
 }
 ```
 
 Registering just the classes can also improve Kryo performance. By registering, classes will be serialized as numeric IDs instead of fully qualified class names, hence saving space and network IO while shuffling.
+make
 
-```scala
+```scala mdoc:reset:invisible
+trait MyRecord1
+trait MyRecord2
+```
+
+```scala mdoc:silent
 import com.twitter.chill._
+import com.esotericsoftware.kryo.Kryo
+import com.spotify.scio.coders.KryoRegistrar
+import com.twitter.chill.IKryoRegistrar
 
 @KryoRegistrar
 class MyKryoRegistrar extends IKryoRegistrar {
@@ -379,30 +498,30 @@ Inside IntelliJ, `Preferences` -> `Plugins` -> `Browse repositories ...` and sea
 
 First start Scio REPL and generate case classes from your query or table.
 
-```
-scio> @BigQueryType.fromQuery("SELECT tornado, month FROM [publicdata:samples.gsod]") class Tornado
-defined class Tornado
-defined object Tornado
+```scala mdoc:reset
+import com.spotify.scio.bigquery.types.BigQueryType
+
+@BigQueryType.fromQuery("SELECT tornado, month FROM [publicdata:samples.gsod]")
+class Tornado
 ```
 
 Next print Scala code of the generated classes.
 
-```
-scio> Tornado.toPrettyString()
-res1: String =
-@BigQueryType.toTable
-case class Tornado(tornado: Option[Boolean], month: Long)
+```scala mdoc
+Tornado.toPrettyString()
 ```
 
-You can then paste the `@BigQueryType.toTable` code into your pipeline and use it with `sc.typedBigQuery`.
+You can then paste the `@BigQueryType.fromQuery` code into your pipeline and use it with `sc.typedBigQuery`.
 
-```scala
-@BigQueryType.toTable
-case class Tornado(tornado: Option[Boolean], month: Long)
+```scala mdoc:silent
+import com.spotify.scio._
+import com.spotify.scio.values._
+import com.spotify.scio.bigquery._
 
 def main(cmdlineArgs: Array[String]): Unit = {
-  // ...
-  sc.typedBigQuery[Tornado]("SELECT tornado, month FROM [publicdata:samples.gsod]")
+  val (sc, args) = ContextAndArgs(cmdlineArgs)
+
+  val data: SCollection[Tornado] = sc.typedBigQuery[Tornado]
   // ...
 }
 ```
@@ -419,11 +538,22 @@ def saveAsBigQuery(tableSpec: String)(implicit ev: T <:< TableRow)
 
 In the case of `saveAsTypedBigQuery` you might get an `Cannot prove that T <:< com.spotify.scio.bigquery.types.BigQueryType.HasAnnotation.` error message. This API requires an `SCollection[T]` where `T` is a case class annotated with `@BigQueryType.toTable`. For example:
 
-```scala
+```scala mdoc:reset:silent
+import com.spotify.scio._
+import com.spotify.scio.values._
+import com.spotify.scio.bigquery._
+import com.spotify.scio.bigquery.types.BigQueryType
+
 @BigQueryType.toTable
 case class Result(user: String, score: Int)
 
-p.map(kv => Result(kv._1, kv._2)).saveAsTypedBigQuery(args("output"))
+def main(cmdlineArgs: Array[String]): Unit = {
+  val (sc, args) = ContextAndArgs(cmdlineArgs)
+  val p: SCollection[(String, Int)] = ???
+
+  p.map(kv => Result(kv._1, kv._2))
+   .saveAsTypedBigQuery(args("output"))
+}
 ```
 
 @@@ note
@@ -478,17 +608,24 @@ Your Scio applications should define a `main` method instead of extending `scala
 #### How to inspect the content of an `SCollection`?
 
 There is multiple options here:
-- Use `debug()` method on an `SCollection` to print its content as the data flows through the DAG during the execution (after the `close` or `closeAndCollect`)
+- Use `debug()` method on an `SCollection` to print its content as the data flows through the DAG during the execution (after the `run` or `runAndCollect`)
 - Use a debugger and setup break points - make sure to break inside of your functions to stop control at the execution not the pipeline construction time
-- In [[Scio-REPL]], use `closeAndCollect()` to close the context and materialize the content of an `SCollection`
+- In [[Scio-REPL]], use `runAndCollect()` to execute the pipeline and materialize the contents of an `SCollection`
 
 #### How do I improve side input performance?
 
 By default Dataflow workers allocate 100MB (see @javadoc[DataflowWorkerHarnessOptions#getWorkerCacheMb](org.apache.beam.runners.dataflow.options.DataflowWorkerHarnessOptions#getWorkerCacheMb--)) of memory for caching side inputs, and falls back to disk or network. Therefore jobs with large side inputs may be slow. To override this default, register `DataflowWorkerHarnessOptions` before parsing command line arguments and then pass `--workerCacheMb=N` when submitting the job.
 
-```scala
-PipelineOptionsFactory.register(classOf[DataflowWorkerHarnessOptions])
-val (sc, args) = ContextAndArgs(cmdlineArgs)
+```scala mdoc:reset:silent
+import com.spotify.scio._
+import org.apache.beam.sdk.options.PipelineOptionsFactory
+import org.apache.beam.runners.dataflow.options.DataflowWorkerHarnessOptions
+
+def main(cmdlineArgs: Array[String]): Unit = {
+  PipelineOptionsFactory.register(classOf[DataflowWorkerHarnessOptions])
+  val (sc, args) = ContextAndArgs(cmdlineArgs)
+  // ...
+}
 ```
 
 #### How do I control concurrency (number of DoFn threads) in Dataflow workers

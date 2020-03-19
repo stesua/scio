@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import com.google.protobuf.ByteString
 import com.spotify.scio.testing._
 
 class BigtableIOTest extends ScioIOSpec {
-
   val projectId = "project"
   val instanceId = "instance"
 
@@ -44,7 +43,7 @@ class BigtableIOTest extends ScioIOSpec {
       (k, Iterable(m))
     }
     testJobTestOutput(xs)(BigtableIO(projectId, instanceId, _))(
-      _.saveAsBigtable(projectId, instanceId, _))
+      _.saveAsBigtable(projectId, instanceId, _)
+    )
   }
-
 }

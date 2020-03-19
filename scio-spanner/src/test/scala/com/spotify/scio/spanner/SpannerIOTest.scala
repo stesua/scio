@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ package com.spotify.scio.spanner
 import com.google.cloud.spanner.{Mutation, Struct}
 import com.spotify.scio.testing.ScioIOSpec
 import org.apache.beam.sdk.io.gcp.spanner.{MutationGroup, ReadOperation, SpannerConfig}
-import org.scalatest.Matchers
+import org.scalatest.matchers.should.Matchers
 import com.spotify.scio.testing.CoderAssertions._
 
 class SpannerIOTest extends ScioIOSpec with Matchers {
@@ -37,7 +37,8 @@ class SpannerIOTest extends ScioIOSpec with Matchers {
 
   "SpannerScioContext" should "support table input" in {
     testJobTestInput(readData)(_ => SpannerRead(config))(
-      _.spannerTable(config, _, Seq("someColumn")))
+      _.spannerTable(config, _, Seq("someColumn"))
+    )
   }
 
   it should "support query input" in {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ import org.apache.beam.sdk.transforms.{DoFn, ParDo}
 import scala.concurrent.{ExecutionContext, Future}
 
 class AsyncDoFnTest extends PipelineSpec {
-
   private val inputs = Seq(1, 10, 100).map(n => 1 to n)
 
   private def testDoFn(doFn: DoFn[Int, String], inputs: Seq[Seq[Int]]): Unit =
@@ -41,13 +40,11 @@ class AsyncDoFnTest extends PipelineSpec {
     }
 
   private def testFailure(doFn: DoFn[Int, String]): Unit = {
-    // scalastyle:off no.whitespace.before.left.bracket
     val e = the[PipelineExecutionException] thrownBy {
       runWithContext {
         _.parallelize(Seq(1, 2, -1, -2)).applyTransform(ParDo.of(doFn))
       }
     }
-    // scalastyle:on no.whitespace.before.left.bracket
 
     def errorMessages(t: Throwable): List[String] =
       if (t == null) {
@@ -58,6 +55,7 @@ class AsyncDoFnTest extends PipelineSpec {
 
     errorMessages(e) should contain("Failed to process futures")
     errorMessages(e) should contain("requirement failed: input must be >= 0")
+    ()
   }
 
   "GuavaAsyncDoFn" should "work" in {
@@ -83,7 +81,6 @@ class AsyncDoFnTest extends PipelineSpec {
   it should "handle failures" in {
     testFailure(new ScalaDoFn(10))
   }
-
 }
 
 private object Client {
@@ -99,7 +96,9 @@ private class GuavaClient(val numThreads: Int) {
     MoreExecutors.getExitingExecutorService(
       Executors
         .newFixedThreadPool(numThreads)
-        .asInstanceOf[ThreadPoolExecutor]))
+        .asInstanceOf[ThreadPoolExecutor]
+    )
+  )
   def request(input: Int): ListenableFuture[String] =
     es.submit(new Callable[String] {
       override def call(): String = Client.process(input)
@@ -108,7 +107,8 @@ private class GuavaClient(val numThreads: Int) {
 
 private class JavaClient(val numThreads: Int) {
   private val es = MoreExecutors.getExitingExecutorService(
-    Executors.newFixedThreadPool(numThreads).asInstanceOf[ThreadPoolExecutor])
+    Executors.newFixedThreadPool(numThreads).asInstanceOf[ThreadPoolExecutor]
+  )
   def request(input: Int): CompletableFuture[String] =
     CompletableFuture.supplyAsync(new Supplier[String] {
       override def get(): String = Client.process(input)

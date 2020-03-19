@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,15 @@
  * under the License.
  */
 
-// scalastyle:off line.size.limit
 package com.spotify.scio.bigquery.types
 
 import com.google.api.services.bigquery.model.{TableFieldSchema, TableSchema}
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
 
 import scala.collection.JavaConverters._
 
-class SchemaUtilTest extends FlatSpec with Matchers {
-
+class SchemaUtilTest extends AnyFlatSpec with Matchers {
   def newSchema(mode: String): TableSchema =
     new TableSchema().setFields(
       List(
@@ -49,34 +48,34 @@ class SchemaUtilTest extends FlatSpec with Matchers {
           .setName("datetimeF")
           .setType("DATETIME")
           .setMode(mode)
-      ).asJava)
+      ).asJava
+    )
 
   "toPrettyString()" should "support required primitive types" in {
     SchemaUtil.toPrettyString(newSchema("REQUIRED"), "Row", 0) should equal(
       """
         |@BigQueryType.toTable
         |case class Row(boolF: Boolean, intF: Long, floatF: Double, stringF: String, bytesF: ByteString, timestampF: Instant, dateF: LocalDate, timeF: LocalTime, datetimeF: LocalDateTime)
-      """.stripMargin.trim)
+      """.stripMargin.trim
+    )
   }
 
   it should "support nullable primitive types" in {
-    // scalastyle:off line.size.limit
     SchemaUtil.toPrettyString(newSchema("NULLABLE"), "Row", 0) should equal(
       """
         |@BigQueryType.toTable
         |case class Row(boolF: Option[Boolean], intF: Option[Long], floatF: Option[Double], stringF: Option[String], bytesF: Option[ByteString], timestampF: Option[Instant], dateF: Option[LocalDate], timeF: Option[LocalTime], datetimeF: Option[LocalDateTime])
-      """.stripMargin.trim)
-    // scalastyle:on line.size.limit
+      """.stripMargin.trim
+    )
   }
 
   it should "support repeated primitive types" in {
-    // scalastyle:off line.size.limit
     SchemaUtil.toPrettyString(newSchema("REPEATED"), "Row", 0) should equal(
       """
         |@BigQueryType.toTable
         |case class Row(boolF: List[Boolean], intF: List[Long], floatF: List[Double], stringF: List[String], bytesF: List[ByteString], timestampF: List[Instant], dateF: List[LocalDate], timeF: List[LocalTime], datetimeF: List[LocalDateTime])
-      """.stripMargin.trim)
-    // scalastyle:on line.size.limit
+      """.stripMargin.trim
+    )
   }
 
   it should "support records" in {
@@ -104,7 +103,8 @@ class SchemaUtilTest extends FlatSpec with Matchers {
           .setType("RECORD")
           .setFields(fields)
           .setMode("REPEATED")
-      ).asJava)
+      ).asJava
+    )
     SchemaUtil.toPrettyString(schema, "Row", 0) should equal(
       """
         |@BigQueryType.toTable
@@ -112,7 +112,8 @@ class SchemaUtilTest extends FlatSpec with Matchers {
         |case class R1$1(f1: Long, f2: Double)
         |case class R2$1(f1: Long, f2: Double)
         |case class R3$1(f1: Long, f2: Double)
-      """.stripMargin.trim)
+      """.stripMargin.trim
+    )
   }
 
   it should "support indent" in {
@@ -129,7 +130,8 @@ class SchemaUtilTest extends FlatSpec with Matchers {
         |  dateF: LocalDate,
         |  timeF: LocalTime,
         |  datetimeF: LocalDateTime)
-      """.stripMargin.trim)
+      """.stripMargin.trim
+    )
   }
 
   it should "support reserved words" in {
@@ -147,6 +149,4 @@ class SchemaUtilTest extends FlatSpec with Matchers {
           |case class Row($expectedFields)""".stripMargin
     )
   }
-
 }
-// scalastyle:on line.size.limit

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,14 +28,13 @@ object SimpleJob {
   def main(cmdlineArgs: Array[String]): Unit = {
     val (sc, args) = ContextAndArgs(cmdlineArgs)
     val output = args("output")
-    sc.parallelize(1 to 5)
-      .saveAsTextFile(output)
-    sc.close()
+    sc.parallelize(1 to 5).saveAsTextFile(output)
+    sc.run()
+    ()
   }
 }
 
 class NamedTransformTest extends PipelineSpec {
-
   "ScioContext" should "support custom transform name" in {
     runWithContext { sc =>
       val p = sc.withName("ReadInput").parallelize(Seq("a", "b", "c"))
@@ -115,9 +114,7 @@ class NamedTransformTest extends PipelineSpec {
       val (main, side) = p1
         .withSideOutputs(p2)
         .withName("MakeSideOutput")
-        .map { (x, s) =>
-          s.output(p2, x + "2"); x + "1"
-        }
+        .map { (x, s) => s.output(p2, x + "2"); x + "1" }
       val sideOut = side(p2)
       assertTransformNameStartsWith(main, "MakeSideOutput")
       assertTransformNameStartsWith(sideOut, "MakeSideOutput")
@@ -178,7 +175,6 @@ class NamedTransformTest extends PipelineSpec {
   }
 
   "TransformNameable" should "prevent repeated calls to .withName" in {
-    // scalastyle:off no.whitespace.before.left.bracket
     val e = the[IllegalArgumentException] thrownBy {
       runWithContext { sc =>
         sc.parallelize(1 to 5)
@@ -187,7 +183,7 @@ class NamedTransformTest extends PipelineSpec {
           .map(_ * 2)
       }
     }
-    // scalastyle:on no.whitespace.before.left.bracket
+
     val msg = "requirement failed: withName() has already been used to set 'Double' as " +
       "the name for the next transform."
     e should have message msg
@@ -197,30 +193,40 @@ class NamedTransformTest extends PipelineSpec {
     import com.spotify.scio.io.TextIO
     JobTest[SimpleJob.type]
       .args("--output=top.txt", "--stableUniqueNames=ERROR")
-      .output(TextIO("top.txt"))(_ => true)
+      .output(TextIO("top.txt"))(_ => ())
       .run()
+  }
+
+  it should "contain file:line only on outer transform" in {
+    runWithContext { sc =>
+      val p = sc.parallelize(1 to 5).transform(_.transform(_.map(_ + 1)))
+      assertTransformNameStartsWith(
+        p,
+        """transform\@\{NamedTransformTest\.scala:\d*\}:\d*/transform:\d*/map:\d*"""
+      )
+    }
   }
 
   private def assertTransformNameStartsWith(p: PCollectionWrapper[_], tfName: String) = {
     val visitor = new AssertTransformNameVisitor(p.internal, tfName)
     p.context.pipeline.traverseTopologically(visitor)
-    visitor.success shouldBe true
+    visitor.nodeFullName should startWith regex tfName
   }
 
   private class AssertTransformNameVisitor(pcoll: PCollection[_], tfName: String)
       extends Pipeline.PipelineVisitor.Defaults {
-    val prefix = tfName.split("[\\(/]").toList
+    val prefix = tfName.split("[(/]").toList
     var success = false
+    var nodeFullName = "<unknown>"
 
-    override def visitPrimitiveTransform(node: TransformHierarchy#Node): Unit = {
+    override def visitPrimitiveTransform(node: TransformHierarchy#Node): Unit =
       if (node.getOutputs.containsValue(pcoll)) {
+        nodeFullName = node.getFullName
         success = node.getFullName
-          .split("[\\(/]")
+          .split("[(/]")
           .toList
           .take(prefix.length)
           .equals(prefix)
       }
-    }
   }
-
 }

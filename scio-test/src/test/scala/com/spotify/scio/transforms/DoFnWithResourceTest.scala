@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ import org.apache.beam.sdk.transforms.DoFn.ProcessElement
 import org.apache.beam.sdk.util.SerializableUtils
 
 class DoFnWithResourceTest extends PipelineSpec {
-
   private def cloneAndProcess(doFn: DoFnWithResource[String, String, TestResource]) = {
     val clone = SerializableUtils.ensureSerializable(doFn)
     clone.setup()
@@ -97,7 +96,6 @@ class DoFnWithResourceTest extends PipelineSpec {
 
     runWithData(Seq("a", "b", "c"))(_.parDo(c1)) should contain theSameElementsAs Seq("A", "B", "C")
   }
-
 }
 
 private case class TestResource(id: String) {

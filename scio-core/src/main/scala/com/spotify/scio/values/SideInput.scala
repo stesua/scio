@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,6 +47,11 @@ trait SideInput[T] extends Serializable {
     cache
   }
 
+  /**
+   * Create a new [[SideInput]] by applying a function on the elements wrapped in this SideInput.
+   */
+  def map[B](f: T => B): SideInput[B] = new DelegatingSideInput[T, B](this, f)
+
   private[values] val view: PCollectionView[_]
 }
 
@@ -86,7 +91,8 @@ object SideInput {
    * [[PairSCollectionFunctions.asMultiMapSideInput]].
    */
   def wrapMultiMap[K, V](
-    view: PCollectionView[JMap[K, JIterable[V]]]): SideInput[Map[K, Iterable[V]]] =
+    view: PCollectionView[JMap[K, JIterable[V]]]
+  ): SideInput[Map[K, Iterable[V]]] =
     new MultiMapSideInput[K, V](view)
 }
 
@@ -119,9 +125,18 @@ private[values] class MultiMapSideInput[K, V](val view: PCollectionView[JMap[K, 
     JMapWrapper.ofMultiMap(context.sideInput(view))
 }
 
+private[values] class DelegatingSideInput[A, B](val si: SideInput[A], val mapper: A => B)
+    extends SideInput[B] {
+  override def get[I, O](context: DoFn[I, O]#ProcessContext): B = mapper(si.get(context))
+
+  private[values] val view: PCollectionView[_] = si.view
+}
+
 /** Encapsulate context of one or more [[SideInput]]s in an [[SCollectionWithSideInput]]. */
-class SideInputContext[T] private[scio] (val context: DoFn[T, AnyRef]#ProcessContext,
-                                         val window: BoundedWindow) {
+class SideInputContext[T] private[scio] (
+  val context: DoFn[T, AnyRef]#ProcessContext,
+  val window: BoundedWindow
+) {
 
   /** Extract the value of a given [[SideInput]]. */
   def apply[S](side: SideInput[S]): S = side.getCache(context, window)

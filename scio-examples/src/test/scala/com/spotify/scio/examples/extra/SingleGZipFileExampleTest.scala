@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import com.spotify.scio.io._
 import com.spotify.scio.testing._
 
 class SingleGZipFileExampleTest extends PipelineSpec {
-
   private val inData = Seq("a b c d e", "a b a b", "")
   private val expected = Seq("a: 3", "b: 3", "c: 1", "d: 1", "e: 1")
 
@@ -32,7 +31,7 @@ class SingleGZipFileExampleTest extends PipelineSpec {
     JobTest[SingleGZipFileExample.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), inData)
-      .output(TextIO("out.txt"))(_ should containInAnyOrder(expected))
+      .output(TextIO("out.txt"))(coll => coll should containInAnyOrder(expected))
       .run()
   }
 
@@ -44,7 +43,8 @@ class SingleGZipFileExampleTest extends PipelineSpec {
     inFOS.close()
     val out = tempDir.resolve("output")
     SingleGZipFileExample.main(
-      Array(s"--input=${in.getAbsolutePath}", s"--output=${out.toFile.getAbsolutePath}"))
+      Array(s"--input=${in.getAbsolutePath}", s"--output=${out.toFile.getAbsolutePath}")
+    )
 
     val outPartFile = out.resolve("part-00000-of-00001.txt.deflate").toFile
     outPartFile.exists() shouldBe true
@@ -52,5 +52,4 @@ class SingleGZipFileExampleTest extends PipelineSpec {
     Files.deleteIfExists(outPartFile.toPath)
     Files.deleteIfExists(out)
   }
-
 }

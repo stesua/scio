@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.spotify.scio.bigquery._
 import com.spotify.scio.testing._
 
 class DistinctByKeyExampleTest extends PipelineSpec {
-
   val input = Seq(
     ("c1", "verylongword1"),
     ("c1", "verylongword1"),
@@ -43,8 +42,9 @@ class DistinctByKeyExampleTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.cookbook.DistinctByKeyExample.type]
       .args("--input=input.table", "--output=dataset.table")
       .input(BigQueryIO("input.table"), input)
-      .output(BigQueryIO[TableRow]("dataset.table"))(_ should containInAnyOrder(expected))
+      .output(BigQueryIO[TableRow]("dataset.table")) { coll =>
+        coll should containInAnyOrder(expected)
+      }
       .run()
   }
-
 }

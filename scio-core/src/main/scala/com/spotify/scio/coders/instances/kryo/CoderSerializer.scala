@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import org.apache.beam.sdk.coders.{Coder => BCoder}
 import org.apache.beam.sdk.util.CoderUtils
 
 private[coders] class CoderSerializer[T](private val coder: BCoder[T]) extends KSerializer[T] {
-
   override def write(kser: Kryo, out: Output, obj: T): Unit = {
     val bytes = CoderUtils.encodeToByteArray(coder, obj)
     out.writeInt(bytes.length)
@@ -33,5 +32,4 @@ private[coders] class CoderSerializer[T](private val coder: BCoder[T]) extends K
 
   override def read(kser: Kryo, in: Input, cls: Class[T]): T =
     CoderUtils.decodeFromByteArray(coder, in.readBytes(in.readInt()))
-
 }

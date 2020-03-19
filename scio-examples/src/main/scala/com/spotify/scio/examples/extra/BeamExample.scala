@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Mix Beam Java SDK and Scio Code
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.BeamExample
+// `sbt "runMain com.spotify.scio.examples.extra.BeamExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --inputTopic=[TOPIC] --outputTopic=[TOPIC]"`
 package com.spotify.scio.examples.extra
@@ -37,7 +37,6 @@ import org.apache.beam.sdk.{Pipeline, PipelineResult}
 import org.joda.time.Duration
 
 object BeamExample {
-
   // A Beam native source `PTransform` where the input type is `PBegin`
   def pubsubIn(topic: String): PTransform[PBegin, PCollection[Account]] =
     PubsubIO.readAvros(classOf[Account]).fromTopic(topic)
@@ -49,12 +48,17 @@ object BeamExample {
       .triggering(
         AfterWatermark
           .pastEndOfWindow()
-          .withEarlyFirings(AfterProcessingTime
-            .pastFirstElementInPane()
-            .plusDelayOf(Duration.standardMinutes(5)))
-          .withLateFirings(AfterProcessingTime
-            .pastFirstElementInPane()
-            .plusDelayOf(Duration.standardMinutes(10))))
+          .withEarlyFirings(
+            AfterProcessingTime
+              .pastFirstElementInPane()
+              .plusDelayOf(Duration.standardMinutes(5))
+          )
+          .withLateFirings(
+            AfterProcessingTime
+              .pastFirstElementInPane()
+              .plusDelayOf(Duration.standardMinutes(10))
+          )
+      )
       .accumulatingFiredPanes()
 
   // A Beam native aggregation `PTransform`
@@ -102,10 +106,9 @@ object BeamExample {
       .saveAsCustomOutput("Output", pubsubOut(args("outputTopic")))
 
     // This calls sc.pipeline.run() under the hood
-    val closedContext = sc.close()
+    val executedContext = sc.run()
 
     // Underlying Beam pipeline result
-    val pipelineResult: PipelineResult = closedContext.pipelineResult
+    val pipelineResult: PipelineResult = executedContext.pipelineResult
   }
-
 }

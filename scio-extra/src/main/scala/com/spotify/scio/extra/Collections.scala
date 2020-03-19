@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 
 package com.spotify.scio.extra
 
-import com.google.common.collect.MinMaxPriorityQueue
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.MinMaxPriorityQueue
 
 import scala.collection.JavaConverters._
 
@@ -36,7 +36,6 @@ import scala.collection.JavaConverters._
  * }}}
  */
 object Collections {
-
   private def topImpl[T](xs: Iterable[T], num: Int, ord: Ordering[T]): Iterable[T] = {
     require(num > 0, "num must be > 0")
     if (xs.isEmpty) {
@@ -52,9 +51,11 @@ object Collections {
     }
   }
 
-  private def topByKeyImpl[K, V](xs: Iterable[(K, V)],
-                                 num: Int,
-                                 ord: Ordering[V]): Map[K, Iterable[V]] = {
+  private def topByKeyImpl[K, V](
+    xs: Iterable[(K, V)],
+    num: Int,
+    ord: Ordering[V]
+  ): Map[K, Iterable[V]] = {
     require(num > 0, "num must be > 0")
     val size = math.min(num, xs.size)
 
@@ -100,5 +101,4 @@ object Collections {
     def topByKey(num: Int)(implicit ord: Ordering[V]): Map[K, Iterable[V]] =
       topByKeyImpl(self, num, ord)
   }
-
 }

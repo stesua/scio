@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,12 +21,11 @@ import com.spotify.scio.io._
 import com.spotify.scio.testing._
 
 class SafeFlatMapExampleTest extends PipelineSpec {
-
   "SafeFlatMapExample" should "work" in {
     JobTest[SafeFlatMapExample.type]
       .args("--input=in", "--num-sum=num-sum")
       .input(TextIO("in"), Seq("1 foo 3 bar bar"))
-      .output(TextIO("num-sum"))(_ should containSingleValue("13"))
+      .output(TextIO("num-sum"))(coll => coll should containSingleValue("13"))
       .run()
   }
 }

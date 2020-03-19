@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,22 +32,24 @@ import org.apache.commons.io.IOUtils
 
 import scala.collection.JavaConverters._
 import scala.util.Try
+import org.apache.beam.sdk.io.ShardNameTemplate
 
 final case class TextIO(path: String) extends ScioIO[String] {
-
   override type ReadP = TextIO.ReadParam
   override type WriteP = TextIO.WriteParam
-  override final val tapT = TapOf[String]
+  final override val tapT = TapOf[String]
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[String] =
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[String] =
     sc.wrap(
       sc.applyInternal(
         BTextIO
           .read()
           .from(path)
-          .withCompression(params.compression)))
+          .withCompression(params.compression)
+      )
+    )
 
-  override def write(data: SCollection[String], params: WriteP): Tap[String] = {
+  override protected def write(data: SCollection[String], params: WriteP): Tap[String] = {
     data.applyInternal(textOut(path, params))
     tap(TextIO.ReadParam())
   }
@@ -55,26 +57,44 @@ final case class TextIO(path: String) extends ScioIO[String] {
   override def tap(params: ReadP): Tap[String] =
     TextTap(ScioUtil.addPartSuffix(path))
 
-  private def textOut(path: String, params: WriteP) =
-    BTextIO
+  private def textOut(path: String, params: WriteP) = {
+    var transform = BTextIO
       .write()
-      .to(pathWithShards(path))
+      .to(path.replaceAll("\\/+$", ""))
       .withSuffix(params.suffix)
+      .withShardNameTemplate(params.shardNameTemplate)
       .withNumShards(params.numShards)
       .withWritableByteChannelFactory(
-        FileBasedSink.CompressionType.fromCanonical(params.compression))
+        FileBasedSink.CompressionType.fromCanonical(params.compression)
+      )
 
-  private[scio] def pathWithShards(path: String) =
-    path.replaceAll("\\/+$", "") + "/part"
+    transform = params.header.fold(transform)(transform.withHeader)
+    transform = params.header.fold(transform)(transform.withFooter)
+
+    transform
+  }
+
 }
 
 object TextIO {
-
   final case class ReadParam(compression: Compression = Compression.AUTO)
 
-  final case class WriteParam(suffix: String = ".txt",
-                              numShards: Int = 0,
-                              compression: Compression = Compression.UNCOMPRESSED)
+  object WriteParam {
+    private[scio] val DefaultHeader = Option.empty[String]
+    private[scio] val DefaultFooter = Option.empty[String]
+    private[scio] val DefaultSuffix = ".txt"
+    private[scio] val DefaultNumShards = 0
+    private[scio] val DefaultCompression = Compression.UNCOMPRESSED
+    private[scio] val DefaultShardNameTemplate = "/part" + ShardNameTemplate.INDEX_OF_MAX
+  }
+  final case class WriteParam(
+    suffix: String = WriteParam.DefaultSuffix,
+    numShards: Int = WriteParam.DefaultNumShards,
+    compression: Compression = WriteParam.DefaultCompression,
+    header: Option[String] = WriteParam.DefaultHeader,
+    footer: Option[String] = WriteParam.DefaultFooter,
+    shardNameTemplate: String = WriteParam.DefaultShardNameTemplate
+  )
 
   private[scio] def textFile(path: String): Iterator[String] = {
     val factory = new CompressorStreamFactory()
@@ -88,8 +108,10 @@ object TextIO {
     IOUtils.lineIterator(input, Charsets.UTF_8).asScala
   }
 
-  private def getDirectoryInputStream(path: String,
-                                      wrapperFn: InputStream => InputStream): InputStream = {
+  private def getDirectoryInputStream(
+    path: String,
+    wrapperFn: InputStream => InputStream
+  ): InputStream = {
     val inputs = listFiles(path).map(getObjectInputStream).map(wrapperFn).asJava
     new SequenceInputStream(Collections.enumeration(inputs))
   }

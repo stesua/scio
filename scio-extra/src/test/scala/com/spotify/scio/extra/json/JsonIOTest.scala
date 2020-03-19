@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@ object JsonIOTest {
 }
 
 class JsonIOTest extends ScioIOSpec with TapSpec {
-
   import JsonIOTest._
 
   private val xs = (1 to 100).map(x => Record(x, x.toString, if (x % 2 == 0) Some(x) else None))
@@ -66,11 +65,13 @@ class JsonIOTest extends ScioIOSpec with TapSpec {
   }
 
   it should "handle invalid JSON" in {
-    val badData = Seq("""{"i":1, "s":hello}""",
-                      """{"i":1}""",
-                      """{"s":"hello"}""",
-                      """{"i":1, "s":1}""",
-                      """{"i":"hello", "s":1}""")
+    val badData = Seq(
+      """{"i":1, "s":hello}""",
+      """{"i":1}""",
+      """{"s":"hello"}""",
+      """{"i":1, "s":1}""",
+      """{"i":"hello", "s":1}"""
+    )
     val dir = tmpDir
     runWithFileFuture {
       _.parallelize(badData).saveAsTextFile(dir.getPath)
@@ -78,10 +79,9 @@ class JsonIOTest extends ScioIOSpec with TapSpec {
 
     val sc = ScioContext()
     sc.jsonFile[Record](ScioUtil.addPartSuffix(dir.getPath))
-    // scalastyle:off no.whitespace.before.left.bracket
-    a[PipelineExecutionException] should be thrownBy { sc.close() }
-    // scalastyle:on no.whitespace.before.left.bracket
+
+    a[PipelineExecutionException] should be thrownBy { sc.run() }
+
     FileUtils.deleteDirectory(dir)
   }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Use Checkpoints to debug a long workflow
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.CheckpointExample
+// `sbt "runMain com.spotify.scio.examples.extra.CheckpointExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --checkpoint=gs://[CHECKPOINT_FILE] --output=[OUTPUT]"`
 package com.spotify.scio.examples.extra
@@ -46,6 +46,7 @@ object CheckpointExample {
     words.saveAsTextFile(args("output") + "-words")
     count.max(Ordering.by(_._2)).saveAsTextFile(args("output") + "-max")
     count.map(t => t._1 + ": " + t._2).saveAsTextFile(args("output"))
-    sc.close()
+    sc.run()
+    ()
   }
 }

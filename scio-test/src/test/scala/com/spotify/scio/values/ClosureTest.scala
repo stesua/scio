@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ package com.spotify.scio.values
 import com.spotify.scio.testing.PipelineSpec
 
 class ClosureTest extends PipelineSpec {
-
   "SCollection" should "support lambda" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3))
@@ -137,9 +136,7 @@ class NestedClosuresNotSerializable {
   def getMapFn: Int => Int = closure("one") {
     def x = irrelevantInt
     def y = 2
-    val fn = { a: Int =>
-      (a + y)
-    }
+    val fn = { a: Int => a + y }
     fn
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,10 +30,10 @@ final case class TFRecordIO(path: String) extends ScioIO[Array[Byte]] {
   override type WriteP = TFRecordIO.WriteParam
   override val tapT = TapOf[Array[Byte]]
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[Array[Byte]] =
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[Array[Byte]] =
     TFRecordMethods.read(sc, path, params)
 
-  override def write(data: SCollection[Array[Byte]], params: WriteP): Tap[Array[Byte]] = {
+  override protected def write(data: SCollection[Array[Byte]], params: WriteP): Tap[Array[Byte]] = {
     TFRecordMethods.write(data, path, params)
     tap(TFRecordIO.ReadParam(params.compression))
   }
@@ -55,9 +55,11 @@ object TFRecordIO {
     private[tensorflow] val DefaultNumShards = 0
   }
 
-  final case class WriteParam private (suffix: String = WriteParam.DefaultSuffix,
-                                       compression: Compression = WriteParam.DefaultCompression,
-                                       numShards: Int = WriteParam.DefaultNumShards)
+  final case class WriteParam private (
+    suffix: String = WriteParam.DefaultSuffix,
+    compression: Compression = WriteParam.DefaultCompression,
+    numShards: Int = WriteParam.DefaultNumShards
+  )
 }
 
 final case class TFExampleIO(path: String) extends ScioIO[Example] {
@@ -67,10 +69,10 @@ final case class TFExampleIO(path: String) extends ScioIO[Example] {
 
   override def testId: String = s"TFExampleIO($path)"
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[Example] =
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[Example] =
     TFRecordMethods.read(sc, path, params).map(Example.parseFrom)
 
-  override def write(data: SCollection[Example], params: WriteP): Tap[Example] = {
+  override protected def write(data: SCollection[Example], params: WriteP): Tap[Example] = {
     TFRecordMethods.write(data.map(_.toByteArray), path, params)
     tap(TFExampleIO.ReadParam(params.compression))
   }
@@ -93,10 +95,13 @@ final case class TFSequenceExampleIO(path: String) extends ScioIO[SequenceExampl
 
   override def testId: String = s"TFSequenceExampleIO($path)"
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[SequenceExample] =
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[SequenceExample] =
     TFRecordMethods.read(sc, path, params).map(SequenceExample.parseFrom)
 
-  override def write(data: SCollection[SequenceExample], params: WriteP): Tap[SequenceExample] = {
+  override protected def write(
+    data: SCollection[SequenceExample],
+    params: WriteP
+  ): Tap[SequenceExample] = {
     TFRecordMethods.write(data.map(_.toByteArray), path, params)
     tap(TFExampleIO.ReadParam(params.compression))
   }
@@ -106,25 +111,29 @@ final case class TFSequenceExampleIO(path: String) extends ScioIO[SequenceExampl
 }
 
 private object TFRecordMethods {
-
   def read(sc: ScioContext, path: String, params: TFRecordIO.ReadParam): SCollection[Array[Byte]] =
     sc.wrap(
       sc.applyInternal(
         beam.TFRecordIO
           .read()
           .from(path)
-          .withCompression(params.compression)))
+          .withCompression(params.compression)
+      )
+    )
 
-  def write(data: SCollection[Array[Byte]], path: String, params: TFRecordIO.WriteParam): Unit =
+  def write(data: SCollection[Array[Byte]], path: String, params: TFRecordIO.WriteParam): Unit = {
     data.applyInternal(
       beam.TFRecordIO
         .write()
         .to(ScioUtil.pathWithShards(path))
         .withSuffix(params.suffix)
         .withCompression(params.compression)
-        .withNumShards(params.numShards))
+        .withNumShards(params.numShards)
+    )
+
+    ()
+  }
 
   def tap(read: TFRecordIO.ReadParam, path: String): Tap[Array[Byte]] =
     TFRecordFileTap(ScioUtil.addPartSuffix(path))
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ object IteratorsSpec {
 }
 
 class IteratorsSpec extends PropertySpec {
-
   import IteratorsSpec._
 
   val maxInterval = 10L
@@ -90,5 +89,4 @@ class IteratorsSpec extends PropertySpec {
         uppers.forall(p => p._2 - p._1 >= period)
     }
   }
-
 }

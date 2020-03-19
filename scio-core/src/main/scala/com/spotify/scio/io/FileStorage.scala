@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,8 +28,9 @@ import com.spotify.scio.util.ScioUtil
 import org.apache.avro.Schema
 import org.apache.avro.file.{DataFileReader, SeekableInput}
 import org.apache.avro.generic.GenericDatumReader
-import org.apache.avro.specific.{SpecificDatumReader, SpecificRecordBase}
+import org.apache.avro.specific.SpecificDatumReader
 import org.apache.beam.sdk.io.FileSystems
+import org.apache.beam.sdk.io.fs.EmptyMatchTreatment
 import org.apache.beam.sdk.io.fs.MatchResult.Metadata
 import org.apache.commons.compress.compressors.CompressorStreamFactory
 import org.apache.commons.io.IOUtils
@@ -41,10 +42,9 @@ private[scio] object FileStorage {
   @inline final def apply(path: String): FileStorage = new FileStorage(path)
 }
 
-private[scio] final class FileStorage(protected[scio] val path: String) {
-
+final private[scio] class FileStorage(protected[scio] val path: String) {
   private def listFiles: Seq[Metadata] =
-    FileSystems.`match`(path).metadata().asScala
+    FileSystems.`match`(path, EmptyMatchTreatment.DISALLOW).metadata().asScala
 
   private def getObjectInputStream(meta: Metadata): InputStream =
     Channels.newInputStream(FileSystems.open(meta.resourceId()))
@@ -63,23 +63,24 @@ private[scio] final class FileStorage(protected[scio] val path: String) {
         in.read(ByteBuffer.wrap(b, off, len))
       override def tell(): Long = in.position()
       override def length(): Long = in.size()
-      override def seek(p: Long): Unit = in.position(p)
+      override def seek(p: Long): Unit = {
+        in.position(p)
+        ()
+      }
       override def close(): Unit = in.close()
     }
 
-  def avroFile[T: ClassTag](schema: Schema = null): Iterator[T] = {
-    val cls = ScioUtil.classOf[T]
-    val reader = if (classOf[SpecificRecordBase] isAssignableFrom cls) {
-      new SpecificDatumReader[T](cls)
-    } else {
-      new GenericDatumReader[T](schema)
-    }
+  def avroFile[T](schema: Schema): Iterator[T] =
+    avroFile(new GenericDatumReader[T](schema))
 
+  def avroFile[T: ClassTag](): Iterator[T] =
+    avroFile(new SpecificDatumReader[T](ScioUtil.classOf[T]))
+
+  def avroFile[T](reader: GenericDatumReader[T]): Iterator[T] =
     listFiles
       .map(m => DataFileReader.openReader(getAvroSeekableInput(m), reader))
       .map(_.iterator().asScala)
       .reduce(_ ++ _)
-  }
 
   def textFile: Iterator[String] = {
     val factory = new CompressorStreamFactory()
@@ -100,11 +101,12 @@ private[scio] final class FileStorage(protected[scio] val path: String) {
 
   def isDone: Boolean = {
     val partPattern = "([0-9]{5})-of-([0-9]{5})".r
-    val metadata = try {
-      listFiles
-    } catch {
-      case _: FileNotFoundException => Seq.empty
-    }
+    val metadata =
+      try {
+        listFiles
+      } catch {
+        case _: FileNotFoundException => Seq.empty
+      }
     val nums = metadata.flatMap { meta =>
       val m = partPattern.findAllIn(meta.resourceId().toString)
       if (m.hasNext) {
@@ -131,9 +133,9 @@ private[scio] final class FileStorage(protected[scio] val path: String) {
 
   private[scio] def getDirectoryInputStream(
     path: String,
-    wrapperFn: InputStream => InputStream = identity): InputStream = {
+    wrapperFn: InputStream => InputStream = identity
+  ): InputStream = {
     val inputs = listFiles.map(getObjectInputStream).map(wrapperFn).asJava
     new SequenceInputStream(Collections.enumeration(inputs))
   }
-
 }

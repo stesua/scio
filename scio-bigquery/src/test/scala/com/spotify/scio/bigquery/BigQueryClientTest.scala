@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,11 @@ package com.spotify.scio.bigquery
 
 import com.spotify.scio.bigquery.client.BigQuery
 import org.scalacheck.Gen
-import org.scalatest.prop.GeneratorDrivenPropertyChecks
-import org.scalatest._
+import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
 
-class BigQueryClientTest extends FlatSpec with Matchers with GeneratorDrivenPropertyChecks {
-
+class BigQueryClientTest extends AnyFlatSpec with Matchers with ScalaCheckDrivenPropertyChecks {
   "BigQueryClient" should "throw an exception when an empty or null ProjectId is provided" in {
     assertThrows[IllegalArgumentException] {
       BigQuery("")
@@ -37,9 +37,6 @@ class BigQueryClientTest extends FlatSpec with Matchers with GeneratorDrivenProp
   it should "work with non-empty ProjectId" in {
     val projectIdGen = Gen.alphaNumStr.suchThat(_.nonEmpty)
 
-    forAll(projectIdGen) { projectId =>
-      BigQuery(projectId)
-    }
+    forAll(projectIdGen)(projectId => BigQuery(projectId))
   }
-
 }

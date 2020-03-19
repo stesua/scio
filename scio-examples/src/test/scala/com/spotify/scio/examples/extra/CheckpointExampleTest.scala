@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.spotify.scio.io._
 import com.spotify.scio.testing._
 
 class CheckpointExampleTest extends PipelineSpec {
-
   private val input = Seq("foo bar foo", "var")
   private val words = Seq("foo", "foo", "bar", "var")
   private val max = "(foo,2)"
@@ -33,9 +32,9 @@ class CheckpointExampleTest extends PipelineSpec {
     JobTest[CheckpointExample.type]
       .args("--output=output", "--input=input", "--checkpoint=checkpoint")
       .input(TextIO("input"), input)
-      .output(TextIO("output-max"))(_ should containSingleValue(max))
-      .output(TextIO("output-words"))(_ should containInAnyOrder(words))
-      .output(TextIO("output"))(_ should containInAnyOrder(prettyCount))
+      .output(TextIO("output-max"))(coll => coll should containSingleValue(max))
+      .output(TextIO("output-words"))(coll => coll should containInAnyOrder(words))
+      .output(TextIO("output"))(coll => coll should containInAnyOrder(prettyCount))
       .run()
   }
 
@@ -43,9 +42,9 @@ class CheckpointExampleTest extends PipelineSpec {
     JobTest[CheckpointExample.type]
       .args("--output=output", "--input=input", "--checkpoint=checkpoint")
       .input(CheckpointIO[String]("checkpoint-src"), words)
-      .output(TextIO("output-max"))(_ should containSingleValue(max))
-      .output(TextIO("output-words"))(_ should containInAnyOrder(words))
-      .output(TextIO("output"))(_ should containInAnyOrder(prettyCount))
+      .output(TextIO("output-max"))(coll => coll should containSingleValue(max))
+      .output(TextIO("output-words"))(coll => coll should containInAnyOrder(words))
+      .output(TextIO("output"))(coll => coll should containInAnyOrder(prettyCount))
       .run()
   }
 
@@ -54,10 +53,9 @@ class CheckpointExampleTest extends PipelineSpec {
       .args("--output=output", "--input=input", "--checkpoint=checkpoint")
       .input(CheckpointIO[String]("checkpoint-src"), words)
       .input(CheckpointIO[(String, Long)]("checkpoint-count"), count)
-      .output(TextIO("output-max"))(_ should containSingleValue(max))
-      .output(TextIO("output-words"))(_ should containInAnyOrder(words))
-      .output(TextIO("output"))(_ should containInAnyOrder(prettyCount))
+      .output(TextIO("output-max"))(coll => coll should containSingleValue(max))
+      .output(TextIO("output-words"))(coll => coll should containInAnyOrder(words))
+      .output(TextIO("output"))(coll => coll should containInAnyOrder(prettyCount))
       .run()
   }
-
 }

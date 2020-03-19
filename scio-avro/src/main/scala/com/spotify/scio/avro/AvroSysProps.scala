@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,9 @@ import com.spotify.scio.{registerSysProps, SysProp}
 
 @registerSysProps
 object AvroSysProps {
-
   val Debug = SysProp("avro.types.debug", "debug")
 
   val DisableDump = SysProp("avro.plugin.disable.dump", "disable class dump")
 
   val ClassCacheDirectory = SysProp("generated.class.cache.directory", "class cache directory")
-
 }

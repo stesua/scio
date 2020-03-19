@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,23 +19,20 @@ package com.spotify.scio.transforms
 
 import java.nio.file.{Files, Path}
 
-import com.google.common.base.Charsets
-import com.google.common.io.{Files => GFiles}
 import com.spotify.scio.testing._
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Charsets
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.io.{Files => GFiles}
 
 import scala.collection.JavaConverters._
 
 class FileDownloadDoFnTest extends PipelineSpec {
-
   "FileDownloadDoFn" should "work" in {
     val tmpDir = Files.createTempDirectory("filedofn-")
     val files = createFiles(tmpDir, 100)
     runWithContext { sc =>
       val p = sc.parallelize(files.map(_.toUri)).flatMapFile(fn)
       p.keys should containInAnyOrder((1 to 100).map(_.toString))
-      p.values.distinct should forAll { f: Path =>
-        !Files.exists(f)
-      }
+      p.values.distinct should forAll { f: Path => !Files.exists(f) }
     }
     files.foreach(Files.delete)
     Files.delete(tmpDir)
@@ -47,9 +44,7 @@ class FileDownloadDoFnTest extends PipelineSpec {
     runWithContext { sc =>
       val p = sc.parallelize(files.map(_.toUri)).flatMapFile(fn, 10, false)
       p.keys should containInAnyOrder((1 to 100).map(_.toString))
-      p.values.distinct should forAll { f: Path =>
-        !Files.exists(f)
-      }
+      p.values.distinct should forAll { f: Path => !Files.exists(f) }
     }
     files.foreach(Files.delete)
     Files.delete(tmpDir)
@@ -82,5 +77,4 @@ class FileDownloadDoFnTest extends PipelineSpec {
 
   private def fn(input: Path) =
     Files.readAllLines(input).asScala.map((_, input))
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Avro Input and Output
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.AvroInOut
+// `sbt "runMain com.spotify.scio.examples.extra.AvroInOut
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=[INPUT].avro --output=[OUTPUT].avro --method=[METHOD]"`
 package com.spotify.scio.examples.extra
@@ -48,7 +48,8 @@ object AvroInOut {
       // Save result as Avro files
       .saveAsAvroFile(args("output"))
 
-    // Close the context and execute the pipeline
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 }

@@ -22,12 +22,14 @@ import org.apache.avro.Schema.Parser
 import org.apache.avro.generic.GenericRecord
 import org.apache.beam.sdk.io.FileSystems
 import org.apache.beam.sdk.options.PipelineOptionsFactory
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 
-final class AvroTapIT extends FlatSpec with Matchers {
+// scio-test/it:runMain PopulateTestData to re-populate data for integration tests
+final class AvroTapIT extends AnyFlatSpec with Matchers {
   private val schema = new Parser().parse("""{
                                                     |  "type" : "record",
                                                     |  "name" : "Root",
@@ -51,10 +53,10 @@ final class AvroTapIT extends FlatSpec with Matchers {
 
     val asd = AvroTaps(Taps()).avroFile[GenericRecord](
       "gs://data-integration-test-eu/avro-integration-test/folder-a/folder-b/shakespeare.avro",
-      schema = schema)
+      schema = schema
+    )
     val result = Await.result(asd, Duration.Inf)
 
     result.value.hasNext shouldBe true
   }
-
 }

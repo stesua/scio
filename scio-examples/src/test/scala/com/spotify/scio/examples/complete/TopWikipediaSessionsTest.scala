@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.spotify.scio.bigquery.TableRow
 import com.spotify.scio.testing._
 
 class TopWikipediaSessionsTest extends PipelineSpec {
-
   "TopWikipediaSessions.computeTopSessions" should "work" in {
     val data = Seq(
       TableRow("timestamp" -> 0, "contributor_username" -> "user1"),

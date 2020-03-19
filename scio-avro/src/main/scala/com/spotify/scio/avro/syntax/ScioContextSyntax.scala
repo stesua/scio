@@ -19,16 +19,41 @@ package com.spotify.scio.avro.syntax
 
 import com.google.protobuf.Message
 import com.spotify.scio.ScioContext
+import com.spotify.scio.annotations.experimental
 import com.spotify.scio.avro._
 import com.spotify.scio.avro.types.AvroType.HasAvroAnnotation
 import com.spotify.scio.coders.Coder
 import com.spotify.scio.values._
 import org.apache.avro.Schema
+import org.apache.avro.generic.GenericRecord
 import org.apache.avro.specific.SpecificRecord
 
-import scala.language.implicitConversions
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe._
+
+sealed trait AvroFileImpl[T] {
+  def apply(self: ScioContext)(path: String, schema: Schema): SCollection[T]
+}
+
+sealed trait LowPriorityAvroFileImpl {
+  @deprecated(
+    "The use of reflective records is discouraged. Consider reading GenericRecord explicitly",
+    "0.8.0"
+  )
+  implicit def avroFile[T: Coder]: AvroFileImpl[T] = new AvroFileImpl[T] {
+    def apply(self: ScioContext)(path: String, schema: Schema): SCollection[T] =
+      self.read(ReflectiveRecordIO[T](path, schema))
+  }
+}
+object AvroFileImpl extends LowPriorityAvroFileImpl {
+  implicit def genericRecordRead: AvroFileImpl[GenericRecord] =
+    new AvroFileImpl[GenericRecord] {
+      def apply(self: ScioContext)(path: String, schema: Schema): SCollection[GenericRecord] = {
+        val coder = Coder.avroGenericRecordCoder(schema)
+        self.read(GenericRecordIO(path, schema))(coder)
+      }
+    }
+}
 
 /** Enhanced version of [[ScioContext]] with Avro methods. */
 final class ScioContextOps(private val self: ScioContext) extends AnyVal {
@@ -42,12 +67,39 @@ final class ScioContextOps(private val self: ScioContext) extends AnyVal {
   def objectFile[T: Coder](path: String): SCollection[T] =
     self.read(ObjectFileIO[T](path))
 
+  def avroFile[T: Coder](path: String, schema: Schema)(
+    implicit impl: AvroFileImpl[T]
+  ): SCollection[T] =
+    impl(self)(path, schema)
+
   /**
-   * Get an SCollection of type [[org.apache.avro.generic.GenericRecord GenericRecord]] for an Avro
-   * file.
+   * Get an SCollection of type [[T]] for data stored in Avro format after applying
+   * parseFn to map a serialized [[org.apache.avro.generic.GenericRecord GenericRecord]]
+   * to type [[T]].
+   *
+   * This API should be used with caution as the `parseFn` reads from a `GenericRecord` and hence
+   * is not type checked.
+   *
+   * This is intended to be used when attempting to read `GenericRecord`s without specifying a
+   * schema (hence the writer schema is used to deserialize) and then directly converting
+   * to a type [[T]] using a `parseFn`. This avoids creation of an intermediate
+   * `SCollection[GenericRecord]` which can be in efficient because `Coder[GenericRecord]` is
+   * inefficient without a known Avro schema.
+   *
+   * Example usage:
+   * This code reads Avro fields "id" and "name" and de-serializes only those two into CaseClass
+   *
+   * {{{
+   *   val sColl: SCollection[CaseClass] =
+   *     sc.parseAvroFile("gs://.....") { g =>
+   *       CaseClass(g.get("id").asInstanceOf[Int], g.get("name").asInstanceOf[String])
+   *     }
+   * }}}
+   *
    */
-  def avroFile[T: ClassTag: Coder](path: String, schema: Schema): SCollection[T] =
-    self.read(GenericRecordIO[T](path, schema))
+  @experimental
+  def parseAvroFile[T: Coder](path: String)(parseFn: GenericRecord => T): SCollection[T] =
+    self.read(GenericRecordParseIO[T](path, parseFn))
 
   /**
    * Get an SCollection of type [[org.apache.avro.specific.SpecificRecord SpecificRecord]]
@@ -65,7 +117,8 @@ final class ScioContextOps(private val self: ScioContext) extends AnyVal {
    * [[com.spotify.scio.avro.types.AvroType AvroType.toSchema]].
    */
   def typedAvroFile[T <: HasAvroAnnotation: ClassTag: TypeTag: Coder](
-    path: String): SCollection[T] =
+    path: String
+  ): SCollection[T] =
     self.read(AvroTyped.AvroIO[T](path))
 
   /**

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,12 +20,12 @@ package com.spotify.scio.bigquery
 import java.util.regex.Pattern
 
 import com.google.api.services.bigquery.model.TableReference
-import com.google.common.primitives.Longs
 import com.spotify.scio.bigquery.client.BigQuery
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers
 
-private[bigquery] object BigQueryPartitionUtil {
+import scala.util.Try
 
+private[bigquery] object BigQueryPartitionUtil {
   // Ported from com.google.cloud.dataflow.sdk.io.BigQueryHelpers
 
   private[this] val PROJECT_ID_REGEXP = "[a-z][-a-z0-9:.]{4,61}[a-z0-9]"
@@ -64,7 +64,7 @@ private[bigquery] object BigQueryPartitionUtil {
       .toSet
       // get all table with prefix and filter only the day/date partitioned tables. Current
       // format for date partition is YYYYMMDD, thus all numeric.
-      .filter(e => Longs.tryParse(e) != null)
+      .filter(e => Try(e.toLong).isSuccess)
   }
 
   def latestQuery(bq: BigQuery, sqlQuery: String): String = {
@@ -76,8 +76,10 @@ private[bigquery] object BigQueryPartitionUtil {
       val overlaps = tables
         .map(t => getPartitions(bq, t._2))
         .reduce(_ intersect _)
-      require(overlaps.nonEmpty,
-              "Cannot find latest common partition for " + tables.keys.mkString(", "))
+      require(
+        overlaps.nonEmpty,
+        "Cannot find latest common partition for " + tables.keys.mkString(", ")
+      )
       val latest = overlaps.max
       tables.foldLeft(sqlQuery) {
         case (q, (spec, _)) =>
@@ -96,5 +98,4 @@ private[bigquery] object BigQueryPartitionUtil {
       tableSpec
     }
   }
-
 }

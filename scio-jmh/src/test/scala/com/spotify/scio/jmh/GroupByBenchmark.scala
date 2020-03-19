@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 
 package com.spotify.scio.jmh
 
-import com.spotify.scio.{ClosedScioContext, ScioContext}
+import com.spotify.scio.{ScioContext, ScioExecutionContext}
 import com.spotify.scio.avro._
 import com.spotify.scio.coders._
 import org.apache.beam.sdk.coders.{KvCoder, Coder => BCoder}
@@ -31,13 +31,10 @@ import org.apache.avro.generic.GenericRecord
 import org.openjdk.jmh.annotations._
 
 import scala.collection.JavaConverters._
-
-// scalastyle:off number.of.methods
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Thread)
 class GroupByBenchmark {
-
   val schema =
     """
       {
@@ -60,11 +57,11 @@ class GroupByBenchmark {
   val avroSchema =
     new Schema.Parser().parse(schema)
 
-  private def runWithContext[T](fn: ScioContext => T): ClosedScioContext = {
+  private def runWithContext[T](fn: ScioContext => T): ScioExecutionContext = {
     val opts = PipelineOptionsFactory.as(classOf[PipelineOptions])
     val sc = ScioContext(opts)
     fn(sc)
-    sc.close()
+    sc.run()
   }
 
   val source = "src/test/resources/events-10000-0.avro"
@@ -76,17 +73,15 @@ class GroupByBenchmark {
   val kvCoder: BCoder[KV[Char, Double]] = KvCoder.of(charCoder, doubleCoder)
 
   @Benchmark
-  def testScioGroupByKey: ClosedScioContext =
+  def testScioGroupByKey: ScioExecutionContext =
     runWithContext { sc =>
       sc.avroFile[GenericRecord](source, schema = avroSchema)
-        .map { rec =>
-          (rec.get("id").toString.head, rec.get("value").asInstanceOf[Double])
-        }
+        .map(rec => (rec.get("id").toString.head, rec.get("value").asInstanceOf[Double]))
         .groupByKey
     }
 
   @Benchmark
-  def testBeamGroupByKey: ClosedScioContext =
+  def testBeamGroupByKey: ScioExecutionContext =
     runWithContext { sc =>
       sc.wrap {
           sc.avroFile[GenericRecord](source, schema = avroSchema)
@@ -97,8 +92,6 @@ class GroupByBenchmark {
             .setCoder(kvCoder)
             .apply(GroupByKey.create[Char, Double])
         }
-        .map { kv =>
-          (kv.getKey, kv.getValue.asScala)
-        }
+        .map(kv => (kv.getKey, kv.getValue.asScala))
     }
 }

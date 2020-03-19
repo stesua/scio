@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ import org.apache.beam.sdk.metrics.MetricResults
 import org.joda.time
 
 class ScioResultTest extends PipelineSpec {
-
   "ScioContextResult" should "reflect pipeline state" in {
     val r = runWithContext(_.parallelize(Seq(1, 2, 3)))
     r.isCompleted shouldBe true
@@ -34,7 +33,7 @@ class ScioResultTest extends PipelineSpec {
   }
 
   it should "expose Beam metrics" in {
-    val r: ClosedScioContext = runWithContext { sc =>
+    val r: ScioExecutionContext = runWithContext { sc =>
       val c = ScioMetrics.counter("c")
       val d = ScioMetrics.distribution("d")
       val g = ScioMetrics.gauge("g")
@@ -72,7 +71,6 @@ class ScioResultTest extends PipelineSpec {
 }
 
 object ScioResultTest {
-
   private val mockPipeline: PipelineResult = new PipelineResult {
     private var state = State.RUNNING
     override def cancel(): State = {
@@ -89,5 +87,4 @@ object ScioResultTest {
   private val mockScioResult = new ScioResult(mockPipeline) {
     override def getMetrics: metrics.Metrics = null
   }
-
 }

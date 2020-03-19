@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import org.apache.beam.sdk.values.TimestampedValue
 import org.joda.time.{Duration, Instant}
 
 class LeaderBoardTest extends PipelineSpec {
-
   private val allowedLateness = Duration.standardHours(1)
   private val teamWindowDuration = Duration.standardMinutes(20)
   private val baseTime = new Instant(0)
@@ -35,14 +34,17 @@ class LeaderBoardTest extends PipelineSpec {
   private val blueOne = TestUser("navy", "blue")
   private val blueTwo = TestUser("sky", "blue")
 
-  private def event(user: TestUser,
-                    score: Int,
-                    baseTimeOffset: Duration): TimestampedValue[GameActionInfo] = {
+  private def event(
+    user: TestUser,
+    score: Int,
+    baseTimeOffset: Duration
+  ): TimestampedValue[GameActionInfo] = {
     val t = baseTime.plus(baseTimeOffset)
     TimestampedValue.of(GameActionInfo(user.user, user.team, score, t.getMillis), t)
   }
 
   "LeaderBoard.calculateTeamScores" should "work with on time elements" in {
+    // #LeaderBoardTest_example_1
     val stream = testStreamOf[GameActionInfo]
     // Start at the epoch
       .advanceWatermarkTo(baseTime)
@@ -53,13 +55,19 @@ class LeaderBoardTest extends PipelineSpec {
         event(redTwo, 3, Duration.standardSeconds(22)),
         event(blueTwo, 5, Duration.standardSeconds(3))
       )
+      // #LeaderBoardTest_example_1
+      // #LeaderBoardTest_example_2
       // The watermark advances slightly, but not past the end of the window
       .advanceWatermarkTo(baseTime.plus(Duration.standardMinutes(3)))
-      .addElements(event(redOne, 1, Duration.standardMinutes(4)),
-                   event(blueOne, 2, Duration.standardSeconds(270)))
+      .addElements(
+        event(redOne, 1, Duration.standardMinutes(4)),
+        event(blueOne, 2, Duration.standardSeconds(270))
+      )
       // The window should close and emit an ON_TIME pane
       .advanceWatermarkToInfinity
+    // #LeaderBoardTest_example_2
 
+    // #LeaderBoardTest_example_3
     runWithContext { sc =>
       val teamScores =
         LeaderBoard.calculateTeamScores(sc.testStream(stream), teamWindowDuration, allowedLateness)
@@ -69,6 +77,6 @@ class LeaderBoardTest extends PipelineSpec {
         containInAnyOrder(Seq((blueOne.team, 12), (redOne.team, 4)))
       }
     }
+    // #LeaderBoardTest_example_3
   }
-
 }

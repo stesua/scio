@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.spotify.scio.testing.PipelineSpec
 import org.joda.time.Instant
 
 class WindowedSCollectionTest extends PipelineSpec {
-
   "WindowedSCollection" should "support filter()" in {
     runWithContext { sc =>
       val p =
@@ -68,5 +67,4 @@ class WindowedSCollectionTest extends PipelineSpec {
       r should containInAnyOrder(Seq("a1", "b2"))
     }
   }
-
 }

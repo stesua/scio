@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,10 @@ import com.spotify.scio.options.ScioOptions
 import com.spotify.scio.options.ScioOptions.CheckEnabled
 import com.spotify.scio.util.MultiJoin
 import org.apache.beam.sdk.options.PipelineOptionsFactory
-import org.scalatest._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
 
-class StateTest extends FlatSpec with Matchers {
-
+class StateTest extends AnyFlatSpec with Matchers {
   type KV[V] = SCollection[(String, V)]
 
   private def testCogroup[T](f: (KV[Int], KV[Long], KV[String]) => T): Unit = {
@@ -36,28 +36,28 @@ class StateTest extends FlatSpec with Matchers {
     val b = sc.parallelize(Seq.empty[(String, Long)])
     val c = sc.parallelize(Seq.empty[(String, String)])
     f(a, b, c)
-    sc.close()
+    sc.run()
+    ()
   }
 
   "SCollection.State" should "pass MultiJoin" in {
     testCogroup {
       case (a, b, c) =>
-        noException shouldBe thrownBy { MultiJoin(a, b, c) }
+        noException shouldBe thrownBy(MultiJoin(a, b, c))
     }
   }
 
-  // scalastyle:off no.whitespace.before.left.bracket
   it should "fail chained cogroups" in {
     testCogroup {
       case (a, b, c) =>
-        an[RuntimeException] shouldBe thrownBy { a.cogroup(b).cogroup(c) }
+        an[RuntimeException] shouldBe thrownBy(a.cogroup(b).cogroup(c))
     }
   }
 
   it should "fail chained joins" in {
     testCogroup {
       case (a, b, c) =>
-        an[RuntimeException] shouldBe thrownBy { a.join(b).join(c) }
+        an[RuntimeException] shouldBe thrownBy(a.join(b).join(c))
     }
   }
 
@@ -87,6 +87,4 @@ class StateTest extends FlatSpec with Matchers {
         }
     }
   }
-  // scalastyle:on no.whitespace.before.left.bracket
-
 }

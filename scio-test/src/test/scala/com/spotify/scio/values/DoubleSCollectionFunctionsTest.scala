@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import com.spotify.scio.testing.PipelineSpec
 import com.spotify.scio.util.StatCounter
 
 class DoubleSCollectionFunctionsTest extends PipelineSpec {
-
   val ints = 1 to 100
   val longs = ints.map(_.toLong)
   val floats = ints.map(_.toFloat)
@@ -31,6 +30,7 @@ class DoubleSCollectionFunctionsTest extends PipelineSpec {
   def test(s: Seq[Double], e: Double): Unit = {
     s.size shouldBe 1L
     s.head shouldBe e +- 1e-10
+    ()
   }
 
   "DoubleSCollection" should "support sampleStdev()" in {
@@ -64,5 +64,4 @@ class DoubleSCollectionFunctionsTest extends PipelineSpec {
     test(runWithData(floats)(_.variance), e)
     test(runWithData(doubles)(_.variance), e)
   }
-
 }

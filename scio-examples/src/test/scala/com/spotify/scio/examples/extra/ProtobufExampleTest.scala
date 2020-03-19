@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import com.spotify.scio.proto.Track.TrackPB
 import com.spotify.scio.testing._
 
 class ProtobufExampleTest extends PipelineSpec {
-
   val input = Seq(
     SimplePB.newBuilder().setPlays(1).setTrackId("track1").build(),
     SimplePB.newBuilder().setPlays(2).setTrackId("track2").build()
@@ -38,8 +37,7 @@ class ProtobufExampleTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.extra.ProtobufExample.type]
       .args("--input=in.proto", "--output=out.proto")
       .input(ProtobufIO[SimplePB]("in.proto"), input)
-      .output(ProtobufIO[TrackPB]("out.proto"))(_ should containInAnyOrder(expected))
+      .output(ProtobufIO[TrackPB]("out.proto"))(coll => coll should containInAnyOrder(expected))
       .run()
   }
-
 }

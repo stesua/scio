@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ package com.spotify.scio.examples.complete.game
 import com.spotify.scio.testing._
 
 class GameStatsTest extends PipelineSpec {
-
   "GameStats.calculateSpammyUsers" should "work" in {
     val userScores = Seq(
       ("Robot-2", 66),
@@ -45,5 +44,4 @@ class GameStatsTest extends PipelineSpec {
       p should containInAnyOrder(spammers)
     }
   }
-
 }

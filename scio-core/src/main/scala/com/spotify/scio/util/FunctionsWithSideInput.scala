@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,9 +21,9 @@ import com.spotify.scio.values.SideInputContext
 import org.apache.beam.sdk.transforms.DoFn
 import org.apache.beam.sdk.transforms.DoFn.ProcessElement
 import org.apache.beam.sdk.transforms.windowing.BoundedWindow
+import com.twitter.chill.ClosureCleaner
 
 private[scio] object FunctionsWithSideInput {
-
   trait SideInputDoFn[T, U] extends NamedDoFn[T, U] {
     def sideInputContext(c: DoFn[T, U]#ProcessContext, w: BoundedWindow): SideInputContext[T] =
       // Workaround for type inference limit
@@ -32,7 +32,7 @@ private[scio] object FunctionsWithSideInput {
 
   def filterFn[T](f: (T, SideInputContext[T]) => Boolean): DoFn[T, T] =
     new SideInputDoFn[T, T] {
-      val g = ClosureCleaner(f) // defeat closure
+      val g = ClosureCleaner.clean(f) // defeat closure
       @ProcessElement
       private[scio] def processElement(c: DoFn[T, T]#ProcessContext, w: BoundedWindow): Unit =
         if (g(c.element(), sideInputContext(c, w))) {
@@ -42,7 +42,7 @@ private[scio] object FunctionsWithSideInput {
 
   def flatMapFn[T, U](f: (T, SideInputContext[T]) => TraversableOnce[U]): DoFn[T, U] =
     new SideInputDoFn[T, U] {
-      val g = ClosureCleaner(f) // defeat closure
+      val g = ClosureCleaner.clean(f) // defeat closure
       @ProcessElement
       private[scio] def processElement(c: DoFn[T, U]#ProcessContext, w: BoundedWindow): Unit = {
         val i = g(c.element(), sideInputContext(c, w)).toIterator
@@ -52,10 +52,9 @@ private[scio] object FunctionsWithSideInput {
 
   def mapFn[T, U](f: (T, SideInputContext[T]) => U): DoFn[T, U] =
     new SideInputDoFn[T, U] {
-      val g = ClosureCleaner(f) // defeat closure
+      val g = ClosureCleaner.clean(f) // defeat closure
       @ProcessElement
       private[scio] def processElement(c: DoFn[T, U]#ProcessContext, w: BoundedWindow): Unit =
         c.output(g(c.element(), sideInputContext(c, w)))
     }
-
 }

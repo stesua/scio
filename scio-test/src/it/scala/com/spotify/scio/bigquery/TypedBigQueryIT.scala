@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,29 +19,33 @@ package com.spotify.scio.bigquery
 
 import com.google.protobuf.ByteString
 import com.spotify.scio._
+import com.spotify.scio.bigquery.client.BigQuery
 import com.spotify.scio.testing._
+import magnolify.scalacheck.auto._
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers
 import org.apache.beam.sdk.options.PipelineOptionsFactory
 import org.joda.time.format.DateTimeFormat
 import org.joda.time.{Instant, LocalDate, LocalDateTime, LocalTime}
 import org.scalacheck._
-import org.scalacheck.ScalacheckShapeless._
-import org.scalatest._
+import org.scalatest.BeforeAndAfterAll
 
 import scala.util.Random
 
 object TypedBigQueryIT {
   @BigQueryType.toTable
-  case class Record(bool: Boolean,
-                    int: Int,
-                    long: Long,
-                    float: Float,
-                    double: Double,
-                    string: String,
-                    byteString: ByteString,
-                    timestamp: Instant,
-                    date: LocalDate,
-                    time: LocalTime,
-                    datetime: LocalDateTime)
+  case class Record(
+    bool: Boolean,
+    int: Int,
+    long: Long,
+    float: Float,
+    double: Double,
+    string: String,
+    byteString: ByteString,
+    timestamp: Instant,
+    date: LocalDate,
+    time: LocalTime,
+    datetime: LocalDateTime
+  )
 
   // Workaround for millis rounding error
   val epochGen = Gen.chooseNum[Long](0L, 1000000000000L).map(x => x / 1000 * 1000)
@@ -62,26 +66,30 @@ object TypedBigQueryIT {
   }
   private val records = Gen.listOfN(1000, recordGen).sample.get
   private val options = PipelineOptionsFactory
-    .fromArgs("--project=data-integration-test",
-              "--tempLocation=gs://data-integration-test-eu/temp")
+    .fromArgs(
+      "--project=data-integration-test",
+      "--tempLocation=gs://data-integration-test-eu/temp"
+    )
     .create()
 }
 
 class TypedBigQueryIT extends PipelineSpec with BeforeAndAfterAll {
-
   import TypedBigQueryIT._
 
   override protected def beforeAll(): Unit = {
     val sc = ScioContext(options)
     sc.parallelize(records).saveAsTypedBigQuery(table)
 
-    sc.close()
+    sc.run()
+    ()
   }
+
+  override protected def afterAll(): Unit =
+    BigQuery.defaultInstance().tables.delete(BigQueryHelpers.parseTableSpec(table))
 
   "TypedBigQuery" should "read records" in {
     val sc = ScioContext(options)
     sc.typedBigQuery[Record](table) should containInAnyOrder(records)
-    sc.close()
+    sc.run()
   }
-
 }

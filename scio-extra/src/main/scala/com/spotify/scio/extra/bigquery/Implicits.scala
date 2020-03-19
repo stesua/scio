@@ -18,6 +18,7 @@
 package com.spotify.scio.extra.bigquery
 
 import com.google.api.services.bigquery.model.TableReference
+import com.spotify.scio.annotations.experimental
 import com.spotify.scio.bigquery.BigQueryTable.WriteParam
 import com.spotify.scio.bigquery._
 import com.spotify.scio.io.ClosedTap
@@ -31,7 +32,6 @@ import scala.reflect.ClassTag
 
 /** Provides implicit helpers for SCollections interacting with BigQuery. */
 object Implicits extends ToTableRow with ToTableSchema {
-
   final case class AvroConversionException(
     private val message: String,
     private val cause: Throwable = null
@@ -46,12 +46,14 @@ object Implicits extends ToTableRow with ToTableSchema {
      * [[org.apache.avro.generic.IndexedRecord IndexedRecord]] into a
      * [[com.spotify.scio.bigquery.TableRow TableRow]].
      */
-    def saveAvroAsBigQuery(table: TableReference,
-                           avroSchema: Schema = null,
-                           writeDisposition: WriteDisposition = null,
-                           createDisposition: CreateDisposition = null,
-                           tableDescription: String = null)(implicit ev: T <:< IndexedRecord,
-                                                            c: ClassTag[T]): ClosedTap[TableRow] = {
+    @experimental
+    def saveAvroAsBigQuery(
+      table: TableReference,
+      avroSchema: Schema = null,
+      writeDisposition: WriteDisposition = null,
+      createDisposition: CreateDisposition = null,
+      tableDescription: String = null
+    )(implicit ev: T <:< IndexedRecord, c: ClassTag[T]): ClosedTap[TableRow] = {
       val schema: Schema = Option(avroSchema)
         .getOrElse {
           val cls = ScioUtil.classOf[T]
@@ -66,8 +68,7 @@ object Implicits extends ToTableRow with ToTableSchema {
         WriteParam(toTableSchema(schema), writeDisposition, createDisposition, tableDescription)
       self
         .map(toTableRow(_))
-        .write(BigQueryTable(table))(params)
+        .write(BigQueryTable(Table.Ref(table)))(params)
     }
   }
-
 }

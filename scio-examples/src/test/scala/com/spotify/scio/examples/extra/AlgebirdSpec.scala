@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,14 +19,15 @@ package com.spotify.scio.examples.extra
 
 import com.twitter.algebird._
 import org.scalacheck._
-import org.scalatest._
-import org.scalatest.prop.GeneratorDrivenPropertyChecks
+import org.scalatest.Ignore
+import org.scalatest.propspec.AnyPropSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 
-class AlgebirdSpec extends PropSpec with GeneratorDrivenPropertyChecks with Matchers {
-
-  // TODO: remove this once https://github.com/scalatest/scalatest/issues/1090 is addressed
-  override implicit val generatorDrivenConfig: PropertyCheckConfiguration =
-    PropertyCheckConfiguration(minSuccessful = 100)
+@Ignore
+class AlgebirdSpec extends AnyPropSpec with ScalaCheckDrivenPropertyChecks with Matchers {
+  // Default minSuccessful is 10 instead of 100 in ScalaCheck but that should be enough
+  // https://github.com/scalatest/scalatest/issues/1090 is addressed
 
   // =======================================================================
   // Utilities
@@ -59,7 +60,6 @@ class AlgebirdSpec extends PropSpec with GeneratorDrivenPropertyChecks with Matc
     def map[U](f: T => U): SColl[U] = new SColl(internal.map(f))
 
     override def toString: String = internal.mkString("[", ", ", "]")
-
   }
 
   // Generator for non-empty SColl[T]
@@ -79,33 +79,23 @@ class AlgebirdSpec extends PropSpec with GeneratorDrivenPropertyChecks with Matc
   // =======================================================================
 
   property("sum of Int") {
-    forAll { xs: SColl[Int] =>
-      xs.sum shouldBe xs.internal.sum
-    }
+    forAll { xs: SColl[Int] => xs.sum shouldBe xs.internal.sum }
   }
 
   property("sum of Long") {
-    forAll { xs: SColl[Long] =>
-      xs.sum shouldBe xs.internal.sum
-    }
+    forAll { xs: SColl[Long] => xs.sum shouldBe xs.internal.sum }
   }
 
   property("sum of Float") {
-    forAll { xs: SColl[Float] =>
-      xs.sum shouldBe xs.internal.sum
-    }
+    forAll { xs: SColl[Float] => xs.sum shouldBe xs.internal.sum }
   }
 
   property("sum of Double") {
-    forAll { xs: SColl[Double] =>
-      xs.sum shouldBe xs.internal.sum
-    }
+    forAll { xs: SColl[Double] => xs.sum shouldBe xs.internal.sum }
   }
 
   property("sum of Set") {
-    forAll { xs: SColl[Set[String]] =>
-      xs.sum shouldBe xs.internal.reduce(_ ++ _)
-    }
+    forAll { xs: SColl[Set[String]] => xs.sum shouldBe xs.internal.reduce(_ ++ _) }
   }
 
   // Sum fields of tuples individually
@@ -160,10 +150,12 @@ class AlgebirdSpec extends PropSpec with GeneratorDrivenPropertyChecks with Matc
       // Combine 4 Aggregator[C, Double, Double] into 1 Aggregator[C, C, C]
       val colAgg = MultiAggregator((sumOp, maxOp, minOp, avgOp))
 
-      val expected = (xs.internal.map(_._1).sum,
-                      xs.internal.map(_._2).max,
-                      xs.internal.map(_._3).min,
-                      mean(xs.internal.map(_._4)))
+      val expected = (
+        xs.internal.map(_._1).sum,
+        xs.internal.map(_._2).max,
+        xs.internal.map(_._3).min,
+        mean(xs.internal.map(_._4))
+      )
       val actual = xs.aggregate(colAgg)
       actual._1 shouldBe expected._1
       actual._2 shouldBe expected._2
@@ -211,9 +203,11 @@ class AlgebirdSpec extends PropSpec with GeneratorDrivenPropertyChecks with Matc
     implicit val recordSemigroup: Semigroup[Record] = caseclass.semigroup
 
     forAll(sCollOf(recordGen)) { xs =>
-      val expected = Record(xs.internal.map(_.i).sum,
-                            xs.internal.map(_.d).sum,
-                            xs.internal.map(_.s).reduce(_ ++ _))
+      val expected = Record(
+        xs.internal.map(_.i).sum,
+        xs.internal.map(_.d).sum,
+        xs.internal.map(_.s).reduce(_ ++ _)
+      )
       xs.sum shouldBe expected
     }
   }
@@ -384,11 +378,11 @@ class AlgebirdSpec extends PropSpec with GeneratorDrivenPropertyChecks with Matc
         .aggregate(
           Aggregator
             .fromMonoid(DecayedValue.monoidWithEpsilon(1e-3))
-            .composePrepare { case (v, t) => DecayedValue.build(v, t, halfLife) })
+            .composePrepare { case (v, t) => DecayedValue.build(v, t, halfLife) }
+        )
         .average(halfLife)
       // approximate decayed value should be close to exact value
       actual shouldBe expected +- 1e-3
     }
   }
-
 }

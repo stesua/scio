@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import org.apache.beam.sdk.{io => beam}
 // ## Writing TSV data example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.TsvExampleWrite
+// `sbt "runMain com.spotify.scio.examples.extra.TsvExampleWrite
 //   --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 //   --input=gs://apache-beam-samples/shakespeare/kinglear.txt
 //   --output=gs://[BUCKET]/[PATH]/wordcount"`
@@ -57,8 +57,9 @@ object TsvExampleWrite {
       // Save result as a text files under the output path
       .saveAsCustomOutput(output, transform)
 
-    // Close the context
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 
   // Shard output filename generator function. See `TypedWrite.to`.
@@ -69,7 +70,7 @@ object TsvExampleWrite {
 // ## Reading TSV data example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.TsvExampleRead
+// `sbt "runMain com.spotify.scio.examples.extra.TsvExampleRead
 //   --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 //   --input=gs://[BUCKET]/word_count_data.tsv
 //   --output=gs://[BUCKET]/[PATH]/word_count_sum"`
@@ -94,7 +95,8 @@ object TsvExampleRead {
       .sum
       // Save result as a text files under the output path
       .saveAsTextFile(args("output"))
-    // Close the context
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 }

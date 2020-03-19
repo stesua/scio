@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,10 @@
 package com.spotify.scio.bigquery.types
 
 import com.google.api.services.bigquery.model.{TableRow, TableSchema}
+import org.apache.avro.Schema
 import org.apache.avro.generic.GenericRecord
 
-import scala.annotation.StaticAnnotation
+import scala.annotation.{compileTimeOnly, StaticAnnotation}
 import scala.language.experimental.macros
 import scala.reflect.runtime.universe._
 import scala.util.Try
@@ -35,6 +36,7 @@ import scala.util.Try
  * | INTEGER    | INT64        | `Long`, `Int`                                   |
  * | FLOAT      | FLOAT64      | `Double`, `Float`                               |
  * | STRING     | STRING       | `String`                                        |
+ * | NUMERIC    | NUMERIC      | `BigDecimal`                                    |
  * | BYTES      | BYTES        | `com.google.protobuf.ByteString`, `Array[Byte]` |
  * | RECORD     | STRUCT       | Nested case class                               |
  * | REPEATED   | ARRAY        | `List[T]`                                       |
@@ -77,8 +79,14 @@ object BigQueryType {
     /** Case class schema. */
     def schema: TableSchema
 
+    /** Case class avro schema. */
+    def avroSchema: Schema
+
     /** Avro [[GenericRecord]] to `T` converter. */
     def fromAvro: GenericRecord => T
+
+    /** `T` to GenericRecord converter. */
+    def toAvro: T => GenericRecord
 
     /** TableRow to `T` converter. */
     def fromTableRow: TableRow => T
@@ -89,6 +97,30 @@ object BigQueryType {
     /** Get a pretty string representation of the schema. */
     def toPrettyString(indent: Int = 0): String
   }
+
+  /**
+   * Trait for companion objects of case classes generated with storage API.
+   * @group trait
+   */
+  trait HasStorageOptions {
+
+    /** Table for case class schema. */
+    def table: String
+
+    /** Selected fields for case class schema. */
+    def selectedFields: List[String]
+
+    /** Row restriction for case class schema. */
+    def rowRestriction: Option[String]
+  }
+
+  /**
+   * Trait for companion objects of case classes generated with storage API.
+   * Instance of this trait are provided as implicits allowing static discovery.
+   * That trait provide evidence that a BQ table is statically known for a given type T.
+   * @group trait
+   */
+  trait StorageOptions[T] extends HasStorageOptions
 
   /**
    * Trait for companion objects of case classes generated with SELECT query.
@@ -151,6 +183,7 @@ object BigQueryType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
+  @compileTimeOnly("enable macro paradise to expand macro annotations")
   class fromTable(tableSpec: String, args: String*) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.tableImpl
   }
@@ -178,8 +211,59 @@ object BigQueryType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
+  @compileTimeOnly("enable macro paradise to expand macro annotations")
   class fromSchema(schema: String) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.schemaImpl
+  }
+
+  /**
+   * Macro annotation for a BigQuery table using the storage API.
+   *
+   * Generate case classes for BigQuery storage API, including column projection and filtering.
+   * Note that `tableSpec` must be a string literal in the form of `project:dataset.table` with
+   * optional `.stripMargin` at the end. For example:
+   *
+   * {{{
+   * @BigQueryType.fromStorage("project:dataset.table") class MyRecord
+   * }}}
+   *
+   * @param selectedFields names of the fields in the table that should be read. If empty, all
+   *                       fields will be read. If the specified field is a nested field, all the
+   *                       sub-fields in the field will be selected.
+   * @param rowRestriction SQL text filtering statement, similar ti a WHERE clause in a query.
+   *                       Currently, we support combinations of predicates that are a comparison
+   *                       between a column and a constant value in SQL statement. Aggregates are
+   *                       not supported. For example:
+   *
+   * {{{
+   * "a > DATE '2014-09-27' AND (b > 5 AND c LIKE 'date')"
+   * }}}
+   *
+   * String formatting syntax can be used in `tableSpec` when additional `args` are supplied. For
+   * example:
+   *
+   * {{{
+   * @BigQueryType.fromStorage("project:dataset.%s", "table")
+   * }}}
+   *
+   * "\$LATEST" can be used as a placeholder for table partitions. The latest partition available
+   * will be used. For example:
+   *
+   * {{{
+   * @BigQueryType.fromStorage("project:dataset.table_%s", "\$LATEST")
+   * }}}
+   *
+   * Also generate a companion object with convenience methods.
+   * @group annotation
+   */
+  @compileTimeOnly("enable macro paradise to expand macro annotations")
+  class fromStorage(
+    tableSpec: String,
+    args: List[Any] = Nil,
+    selectedFields: List[String] = Nil,
+    rowRestriction: String = ""
+  ) extends StaticAnnotation {
+    def macroTransform(annottees: Any*): Any = macro TypeProvider.storageImpl
   }
 
   /**
@@ -216,6 +300,7 @@ object BigQueryType {
    * behavior, start the query string with `#legacysql` or `#standardsql`.
    * @group annotation
    */
+  @compileTimeOnly("enable macro paradise to expand macro annotations")
   class fromQuery(query: String, args: Any*) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.queryImpl
   }
@@ -233,9 +318,15 @@ object BigQueryType {
    * }}}
    * @group annotation
    */
+  @compileTimeOnly("enable macro paradise to expand macro annotations")
   class toTable extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.toTableImpl
   }
+
+  /**
+   * Generate [[org.apache.avro.Schema Schema]] for a case class.
+   */
+  def avroSchemaOf[T: TypeTag]: Schema = SchemaProvider.avroSchemaOf[T]
 
   /**
    * Generate [[com.google.api.services.bigquery.model.TableSchema TableSchema]] for a case class.
@@ -247,6 +338,12 @@ object BigQueryType {
    * @group converters
    */
   def fromAvro[T]: GenericRecord => T = macro ConverterProvider.fromAvroImpl[T]
+
+  /**
+   * Generate a converter function from the given case class `T` to [[GenericRecord]].
+   * @group converters
+   */
+  def toAvro[T]: T => GenericRecord = macro ConverterProvider.toAvroImpl[T]
 
   /**
    * Generate a converter function from [[TableRow]] to the given case class `T`.
@@ -263,7 +360,6 @@ object BigQueryType {
 
   /** Create a new BigQueryType instance. */
   @inline final def apply[T: TypeTag]: BigQueryType[T] = new BigQueryType[T]
-
 }
 
 /**
@@ -272,7 +368,6 @@ object BigQueryType {
  * This decouples generated fields and methods from macro expansion to keep core macro free.
  */
 class BigQueryType[T: TypeTag] {
-
   private[this] val bases = typeOf[T].companion.baseClasses
 
   private[this] val instance = runtimeMirror(getClass.getClassLoader)
@@ -286,6 +381,10 @@ class BigQueryType[T: TypeTag] {
   def isTable: Boolean =
     bases.contains(typeOf[BigQueryType.HasTable].typeSymbol)
 
+  /** Whether the case class is annotated for storage API. */
+  def isStorage: Boolean =
+    bases.contains(typeOf[BigQueryType.HasStorageOptions].typeSymbol)
+
   /** Whether the case class is annotated for a query. */
   def isQuery: Boolean =
     bases.contains(typeOf[BigQueryType.HasQuery].typeSymbol)
@@ -293,6 +392,14 @@ class BigQueryType[T: TypeTag] {
   /** Table reference from the annotation. */
   def table: Option[String] =
     Try(getField("table").asInstanceOf[String]).toOption
+
+  /** Storage API `selectedFields` from the annotation. */
+  def selectedFields: Option[List[String]] =
+    Try(getField("selectedFields").asInstanceOf[List[String]]).toOption
+
+  /** Storage API `restriction` from the annotation. */
+  def rowRestriction: Option[String] =
+    Try(getField("rowRestriction").asInstanceOf[Option[String]]).toOption.flatten
 
   /** Query from the annotation. */
   def query: Option[String] =
@@ -306,6 +413,10 @@ class BigQueryType[T: TypeTag] {
   def fromAvro: GenericRecord => T =
     getField("fromAvro").asInstanceOf[GenericRecord => T]
 
+  /** `T` to [[GenericRecord]] converter. */
+  def toAvro: T => GenericRecord =
+    getField("toAvro").asInstanceOf[T => GenericRecord]
+
   /** TableRow to `T` converter. */
   def fromTableRow: TableRow => T =
     getField("fromTableRow").asInstanceOf[TableRow => T]
@@ -315,6 +426,14 @@ class BigQueryType[T: TypeTag] {
     getField("toTableRow").asInstanceOf[T => TableRow]
 
   /** TableSchema of `T`. */
-  def schema: TableSchema = BigQueryType.schemaOf[T]
+  def schema: TableSchema =
+    Try(getField("schema").asInstanceOf[TableSchema]).toOption.getOrElse {
+      BigQueryType.schemaOf[T]
+    }
 
+  /** Avro schema of `T`. */
+  def avroSchema: Schema =
+    Try(getField("avroSchema").asInstanceOf[Schema]).toOption.getOrElse {
+      BigQueryType.avroSchemaOf[T]
+    }
 }

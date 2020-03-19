@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ package com.spotify.scio.extra
 import java.util.UUID
 
 import com.spotify.scio.ScioContext
+import com.spotify.scio.annotations.experimental
 import com.spotify.scio.values.{SCollection, SideInput}
 import org.apache.beam.sdk.transforms.{DoFn, View}
 import org.apache.beam.sdk.values.PCollectionView
@@ -93,7 +94,6 @@ import scala.collection.JavaConverters._
  * }}}
  */
 package object annoy {
-
   sealed trait AnnoyMetric
   case object Angular extends AnnoyMetric
   case object Euclidean extends AnnoyMetric
@@ -109,7 +109,6 @@ package object annoy {
    * @param dim Number of dimensions in vectors
    */
   class AnnoyReader private[annoy] (path: String, metric: AnnoyMetric, dim: Int) {
-
     require(dim > 0, "Vector dimension should be > 0")
 
     import com.spotify.annoy._
@@ -137,7 +136,6 @@ package object annoy {
      */
     def getNearest(v: Array[Float], maxNumResults: Int): Seq[Int] =
       index.getNearest(v, maxNumResults).asScala.asInstanceOf[Seq[Int]]
-
   }
 
   /** Enhanced version of [[ScioContext]] with Annoy methods. */
@@ -150,6 +148,7 @@ package object annoy {
      * @param metric Metric (Angular, Euclidean) used to build the Annoy index
      * @param dim Number of dimensions in vectors used to build the Annoy index
      */
+    @experimental
     def annoySideInput(path: String, metric: AnnoyMetric, dim: Int): SideInput[AnnoyReader] = {
       val uri = AnnoyUri(path, self.options)
       val view = self.parallelize(Seq(uri)).applyInternal(View.asSingleton())
@@ -172,6 +171,7 @@ package object annoy {
      *               that they will take at most 2x the memory of the vectors.
      * @return A singleton SCollection containing the [[AnnoyUri]] of the saved files
      */
+    @experimental
     def asAnnoy(path: String, metric: AnnoyMetric, dim: Int, nTrees: Int): SCollection[AnnoyUri] = {
       val uri = AnnoyUri(path, self.context.options)
       require(!uri.exists, s"Annoy URI ${uri.path} already exists")
@@ -212,6 +212,7 @@ package object annoy {
      *               that they will take at most 2x the memory of the vectors.
      * @return A singleton SCollection containing the [[AnnoyUri]] of the saved files
      */
+    @experimental
     def asAnnoy(metric: AnnoyMetric, dim: Int, nTrees: Int): SCollection[AnnoyUri] = {
       val uuid = UUID.randomUUID()
       val tempLocation = self.context.options.getTempLocation
@@ -232,6 +233,7 @@ package object annoy {
      *               that they will take at most 2x the memory of the vectors.
      * @return SideInput[AnnoyReader]
      */
+    @experimental
     def asAnnoySideInput(metric: AnnoyMetric, dim: Int, nTrees: Int): SideInput[AnnoyReader] =
       self.asAnnoy(metric, dim, nTrees).asAnnoySideInput(metric, dim)
   }
@@ -249,6 +251,7 @@ package object annoy {
      * @param dim Number of dimensions in vectors used to build the Annoy index
      * @return SideInput[AnnoyReader]
      */
+    @experimental
     def asAnnoySideInput(metric: AnnoyMetric, dim: Int): SideInput[AnnoyReader] = {
       val view = self.applyInternal(View.asSingleton())
       new AnnoySideInput(view, metric, dim)

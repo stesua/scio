@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,19 +25,18 @@ import com.spotify.scio.avro._
 import com.spotify.scio.testing.PipelineSpec
 
 class FileFormatTest extends PipelineSpec {
-
   // Legacy files generated with 0.3.0-beta1, the last release before the
   // BufferedPrefix{Input,Output}Stream change.
 
   private val objects =
     (1 to 100).map(x => (x, x.toDouble, x % 2 == 0, "s" + x))
   private val protobufs = (1 to 100)
-    .map(
-      x =>
-        com.google.protobuf.Timestamp.newBuilder
-          .setSeconds(x * 1000)
-          .setNanos(x)
-          .build)
+    .map(x =>
+      com.google.protobuf.Timestamp.newBuilder
+        .setSeconds(x * 1000)
+        .setNanos(x)
+        .build
+    )
 
   // Object file is NOT backwards compatible
   "Object file" should "round trip latest file format" in {
@@ -46,12 +45,12 @@ class FileFormatTest extends PipelineSpec {
 
     val sc1 = ScioContext()
     sc1.parallelize(objects).saveAsObjectFile(temp.toString, 1)
-    sc1.close()
+    sc1.run()
 
     val sc2 = ScioContext()
     val p = sc2.objectFile[(Int, Double, Boolean, String)](temp.toString + "/*")
     p should containInAnyOrder(objects)
-    sc2.close()
+    sc2.run()
   }
 
   // Protobuf file IS not backwards compatible
@@ -59,7 +58,7 @@ class FileFormatTest extends PipelineSpec {
     val sc = ScioContext()
     val p = sc.protobufFile[Timestamp](getClass.getResource("/protobuf-file.avro").toString)
     p should containInAnyOrder(protobufs)
-    sc.close()
+    sc.run()
   }
 
   it should "round trip latest file format" in {
@@ -68,12 +67,11 @@ class FileFormatTest extends PipelineSpec {
 
     val sc1 = ScioContext()
     sc1.parallelize(protobufs).saveAsProtobufFile(temp.toString, 1)
-    sc1.close()
+    sc1.run()
 
     val sc2 = ScioContext()
     val p = sc2.protobufFile[Timestamp](temp.toString + "/*")
     p should containInAnyOrder(protobufs)
-    sc2.close()
+    sc2.run()
   }
-
 }

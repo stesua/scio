@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,16 +35,18 @@ trait PipelineTestUtils {
    * }
    * }}}
    */
-  def runWithContext[T](fn: ScioContext => T): ClosedScioContext = {
+  def runWithContext[T](fn: ScioContext => T): ScioExecutionContext = {
     val sc = ScioContext.forTest()
     fn(sc)
-    sc.close()
+    sc.run()
   }
 
-  def runWithRealContext[T](options: PipelineOptions)(fn: ScioContext => T): ClosedScioContext = {
+  def runWithRealContext[T](
+    options: PipelineOptions
+  )(fn: ScioContext => T): ScioExecutionContext = {
     val sc = ScioContext(options)
     fn(sc)
-    sc.close()
+    sc.run()
   }
 
   /**
@@ -64,11 +66,10 @@ trait PipelineTestUtils {
    * } shouldBe Seq(6)
    * }}}
    */
-  def runWithData[T: Coder, U: Coder](data: Iterable[T])(
-    fn: SCollection[T] => SCollection[U]): Seq[U] =
-    runWithLocalOutput { sc =>
-      fn(sc.parallelize(data))
-    }._2
+  def runWithData[T: Coder, U: Coder](
+    data: Iterable[T]
+  )(fn: SCollection[T] => SCollection[U]): Seq[U] =
+    runWithLocalOutput(sc => fn(sc.parallelize(data)))._2
 
   /**
    * Test pipeline components with in-memory data.
@@ -83,11 +84,9 @@ trait PipelineTestUtils {
    * @return output data
    */
   def runWithData[T1: Coder, T2: Coder, U: Coder](data1: Iterable[T1], data2: Iterable[T2])(
-    fn: (SCollection[T1], SCollection[T2]) => SCollection[U]): Seq[U] = {
-    runWithLocalOutput { sc =>
-      fn(sc.parallelize(data1), sc.parallelize(data2))
-    }._2
-  }
+    fn: (SCollection[T1], SCollection[T2]) => SCollection[U]
+  ): Seq[U] =
+    runWithLocalOutput(sc => fn(sc.parallelize(data1), sc.parallelize(data2)))._2
 
   /**
    * Test pipeline components with in-memory data.
@@ -102,14 +101,14 @@ trait PipelineTestUtils {
    * @param fn transform to be tested
    * @return output data
    */
-  def runWithData[T1: Coder, T2: Coder, T3: Coder, U: Coder](data1: Iterable[T1],
-                                                             data2: Iterable[T2],
-                                                             data3: Iterable[T3])(
-    fn: (SCollection[T1], SCollection[T2], SCollection[T3]) => SCollection[U]): Seq[U] = {
+  def runWithData[T1: Coder, T2: Coder, T3: Coder, U: Coder](
+    data1: Iterable[T1],
+    data2: Iterable[T2],
+    data3: Iterable[T3]
+  )(fn: (SCollection[T1], SCollection[T2], SCollection[T3]) => SCollection[U]): Seq[U] =
     runWithLocalOutput { sc =>
       fn(sc.parallelize(data1), sc.parallelize(data2), sc.parallelize(data3))
     }._2
-  }
 
   /**
    * Test pipeline components with in-memory data.
@@ -129,14 +128,13 @@ trait PipelineTestUtils {
     data1: Iterable[T1],
     data2: Iterable[T2],
     data3: Iterable[T3],
-    data4: Iterable[T4])(fn: (SCollection[T1],
-                              SCollection[T2],
-                              SCollection[T3],
-                              SCollection[T4]) => SCollection[U]): Seq[U] = {
+    data4: Iterable[T4]
+  )(
+    fn: (SCollection[T1], SCollection[T2], SCollection[T3], SCollection[T4]) => SCollection[U]
+  ): Seq[U] =
     runWithLocalOutput { sc =>
       fn(sc.parallelize(data1), sc.parallelize(data2), sc.parallelize(data3), sc.parallelize(data4))
     }._2
-  }
 
   /**
    * Test pipeline components with a [[ScioContext]] and materialized resulting collection.
@@ -151,8 +149,7 @@ trait PipelineTestUtils {
   def runWithLocalOutput[U: Coder](fn: ScioContext => SCollection[U]): (ScioResult, Seq[U]) = {
     val sc = ScioContext()
     val f = fn(sc).materialize
-    val result: ScioResult = sc.close().waitUntilFinish() // block non-test runner
+    val result: ScioResult = sc.run().waitUntilFinish() // block non-test runner
     (result, result.tap(f).value.toSeq)
   }
-
 }

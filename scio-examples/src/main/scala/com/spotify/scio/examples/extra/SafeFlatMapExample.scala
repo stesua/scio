@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: SafeFlatMap usage
 
 // Usage:
-// `sbt runMain "com.spotify.scio.examples.extra.SafeFlatMapExample
+// `sbt "runMain com.spotify.scio.examples.extra.SafeFlatMapExample
 //  --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 //  --input=gs://apache-beam-samples/shakespeare/kinglear.txt
 //  --output=gs://[BUCKET]/[PATH]/safe_flat_map"`
@@ -33,8 +33,10 @@ object SafeFlatMapExample {
     val (sc, args) = ContextAndArgs(cmdlineArgs)
     val (longs, errors) = sc
       .textFile(args.getOrElse("input", ExampleData.KING_LEAR))
-      .flatMap(_.split("[^a-zA-Z0-9']+")
-        .filter(_.nonEmpty))
+      .flatMap(
+        _.split("[^a-zA-Z0-9']+")
+          .filter(_.nonEmpty)
+      )
       .safeFlatMap(e => Seq(e.toLong))
 
     // rescue from number format exceptions:
@@ -45,6 +47,7 @@ object SafeFlatMapExample {
 
     (longs ++ rescue).sum.saveAsTextFile("num-sum")
 
-    sc.close()
+    sc.run()
+    ()
   }
 }

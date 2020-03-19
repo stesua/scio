@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,17 +24,20 @@ import org.apache.beam.sdk.io.gcp.bigquery.{
   TableDestination,
   TableDestinationCoder
 }
-import org.apache.beam.sdk.util.Transport
+import org.apache.beam.sdk.extensions.gcp.util.Transport
 import org.apache.beam.sdk.values.ValueInSingleWindow
 
 private[dynamic] object DynamicDestinationsUtil {
-
-  def constant[T](dst: TableDestination,
-                  schema: TableSchema): DynamicDestinations[T, TableDestination] =
+  def constant[T](
+    dst: TableDestination,
+    schema: TableSchema
+  ): DynamicDestinations[T, TableDestination] =
     tableFn(_ => dst, schema)
 
-  def tableFn[T](fn: ValueInSingleWindow[T] => TableDestination,
-                 schema: TableSchema): DynamicDestinations[T, TableDestination] = {
+  def tableFn[T](
+    fn: ValueInSingleWindow[T] => TableDestination,
+    schema: TableSchema
+  ): DynamicDestinations[T, TableDestination] = {
     val jsonSchema = Transport.getJsonFactory.toString(schema)
     new DynamicDestinations[T, TableDestination] {
       @transient private lazy val tableSchema =
@@ -53,5 +56,4 @@ private[dynamic] object DynamicDestinationsUtil {
         TableDestinationCoder.of
     }
   }
-
 }

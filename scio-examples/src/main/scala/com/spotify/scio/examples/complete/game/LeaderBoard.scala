@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.complete.game.LeaderBoard
+// `sbt "runMain com.spotify.scio.examples.complete.game.LeaderBoard
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --teamWindowDuration=60
 // --allowedLateness=120
@@ -42,19 +42,19 @@ import org.joda.time.format.DateTimeFormat
 import org.joda.time.{DateTimeZone, Duration, Instant}
 
 object LeaderBoard {
-
   // The schemas for the BigQuery tables to write output to are defined as annotated case classes
   @BigQueryType.toTable
-  case class TeamScoreSums(team: String,
-                           total_score: Int,
-                           window_start: String,
-                           processing_time: String,
-                           timing: String)
+  case class TeamScoreSums(
+    team: String,
+    total_score: Int,
+    window_start: String,
+    processing_time: String,
+    timing: String
+  )
 
   @BigQueryType.toTable
   case class UserScoreSums(user: String, total_score: Int, processing_time: String)
 
-  // scalastyle:off method.length
   def main(cmdlineArgs: Array[String]): Unit = {
     // Create `ScioContext` and `Args`
     val (opts, args) = ScioContext.parseArguments[ExampleOptions](cmdlineArgs)
@@ -93,7 +93,7 @@ object LeaderBoard {
       // Done with windowing information, convert back to regular `SCollection`
       .toSCollection
       // Save to the BigQuery table defined by "output" in the arguments passed in + "_team" suffix
-      .saveAsTypedBigQuery(args("output") + "_team")
+      .saveAsTypedBigQueryTable(Table.Spec(args("output") + "_team"))
 
     gameEvents
     // Use a global window for unbounded data, which updates calculation every 10 minutes,
@@ -105,13 +105,17 @@ object LeaderBoard {
     // allowedLateness duration.
     // For more information on these options, see the Beam docs:
     // https://beam.apache.org/documentation/programming-guide/#triggers
-      .withGlobalWindow(WindowOptions(
-        trigger = Repeatedly.forever(AfterProcessingTime
-          .pastFirstElementInPane()
-          .plusDelayOf(Duration.standardMinutes(10))),
-        accumulationMode = ACCUMULATING_FIRED_PANES,
-        allowedLateness = allowedLateness
-      ))
+      .withGlobalWindow(
+        WindowOptions(
+          trigger = Repeatedly.forever(
+            AfterProcessingTime
+              .pastFirstElementInPane()
+              .plusDelayOf(Duration.standardMinutes(10))
+          ),
+          accumulationMode = ACCUMULATING_FIRED_PANES,
+          allowedLateness = allowedLateness
+        )
+      )
       // Change each event into a tuple of: user, and that user's score
       .map(i => (i.user, i.score))
       // Sum the scores by user
@@ -119,18 +123,19 @@ object LeaderBoard {
       // Map summed results from tuples into `UserScoreSums` case class, so we can save to BQ
       .map(kv => UserScoreSums(kv._1, kv._2, fmt.print(Instant.now())))
       // Save to the BigQuery table defined by "output" in the arguments passed in + "_user" suffix
-      .saveAsTypedBigQuery(args("output") + "_user")
+      .saveAsTypedBigQueryTable(Table.Spec(args("output") + "_user"))
 
-    // Close context and execute the pipeline
-    val result = sc.close()
+    // Execute the pipeline
+    val result = sc.run()
     // Wait to finish processing before exiting when streaming pipeline is canceled during shutdown
     exampleUtils.waitToFinish(result.pipelineResult)
   }
-  // scalastyle:on method.length
 
-  def calculateTeamScores(infos: SCollection[GameActionInfo],
-                          teamWindowDuration: Duration,
-                          allowedLateness: Duration): SCollection[(String, Int)] =
+  def calculateTeamScores(
+    infos: SCollection[GameActionInfo],
+    teamWindowDuration: Duration,
+    allowedLateness: Duration
+  ): SCollection[(String, Int)] =
     infos
       .withFixedWindows(
         // Using a fixed window, calculate every time the window ends.
@@ -151,10 +156,13 @@ object LeaderBoard {
             .withEarlyFirings(
               AfterProcessingTime
                 .pastFirstElementInPane()
-                .plusDelayOf(Duration.standardMinutes(5)))
-            .withLateFirings(AfterProcessingTime
-              .pastFirstElementInPane()
-              .plusDelayOf(Duration.standardMinutes(10))),
+                .plusDelayOf(Duration.standardMinutes(5))
+            )
+            .withLateFirings(
+              AfterProcessingTime
+                .pastFirstElementInPane()
+                .plusDelayOf(Duration.standardMinutes(10))
+            ),
           accumulationMode = ACCUMULATING_FIRED_PANES,
           allowedLateness = allowedLateness
         )
@@ -163,5 +171,4 @@ object LeaderBoard {
       .map(i => (i.team, i.score))
       // Sum the scores across the defined window, using "team" as the key to sum by
       .sumByKey
-
 }

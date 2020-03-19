@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,7 +81,10 @@ object IsJavaBean {
       checkGetterAndSetters(c)(wtt)
       q"null: _root_.com.spotify.scio.IsJavaBean[$wtt]"
     } else {
-      c.abort(c.enclosingPosition, s"$wtt is not a Java class")
+      c.abort(
+        c.enclosingPosition,
+        s"$wtt is not a Java class. (isJava: ${sym.isJava}, isClass: ${sym.isClass})"
+      )
     }
   }
 }

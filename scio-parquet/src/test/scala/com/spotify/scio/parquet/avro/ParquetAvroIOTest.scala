@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,9 @@ import com.spotify.scio.io.TapSpec
 import com.spotify.scio.testing._
 import org.apache.avro.generic.GenericRecord
 import org.apache.commons.io.FileUtils
-import org.scalatest._
+import org.scalatest.BeforeAndAfterAll
 
 class ParquetAvroIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAll {
-
   private val dir = tmpDir
   private val specificRecords = (1 to 10).map(AvroUtils.newSpecificRecord)
 
@@ -35,7 +34,8 @@ class ParquetAvroIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAll {
     val sc = ScioContext()
     sc.parallelize(specificRecords)
       .saveAsParquetAvroFile(dir.toString)
-    sc.close()
+    sc.run()
+    ()
   }
 
   override protected def afterAll(): Unit = FileUtils.deleteDirectory(dir)
@@ -44,7 +44,8 @@ class ParquetAvroIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAll {
     val xs = (1 to 100).map(AvroUtils.newSpecificRecord)
     testTap(xs)(_.saveAsParquetAvroFile(_))(".parquet")
     testJobTest(xs)(ParquetAvroIO(_))(_.parquetAvroFile[TestRecord](_).map(identity))(
-      _.saveAsParquetAvroFile(_))
+      _.saveAsParquetAvroFile(_)
+    )
   }
 
   it should "read specific records with projection" in {
@@ -58,7 +59,8 @@ class ParquetAvroIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAll {
       r.getBooleanField == null && r.getStringField == null && r.getArrayField
         .size() == 0
     }
-    sc.close()
+    sc.run()
+    ()
   }
 
   it should "read specific records with predicate" in {
@@ -67,7 +69,8 @@ class ParquetAvroIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAll {
     val data =
       sc.parquetAvroFile[TestRecord](dir + "/*.parquet", predicate = predicate)
     data.map(identity) should containInAnyOrder(specificRecords.filter(_.getIntField <= 5))
-    sc.close()
+    sc.run()
+    ()
   }
 
   it should "read specific records with projection and predicate" in {
@@ -82,7 +85,8 @@ class ParquetAvroIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAll {
       r.getBooleanField == null && r.getStringField == null && r.getArrayField
         .size() == 0
     }
-    sc.close()
+    sc.run()
+    ()
   }
 
   it should "read with incomplete projection" in {
@@ -94,7 +98,7 @@ class ParquetAvroIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAll {
     sc1
       .parallelize(nestedRecords)
       .saveAsParquetAvroFile(dir.toString)
-    sc1.close()
+    sc1.run()
 
     val sc2 = ScioContext()
     val projection = Projection[Account](_.getName)
@@ -103,7 +107,7 @@ class ParquetAvroIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAll {
     val expected = nestedRecords.map(_.getName.toString)
     data.map(_.getName.toString) should containInAnyOrder(expected)
     data.flatMap(a => Some(a.getName.toString)) should containInAnyOrder(expected)
-    sc2.close()
+    sc2.run()
 
     FileUtils.deleteDirectory(dir)
   }
@@ -116,7 +120,7 @@ class ParquetAvroIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAll {
     implicit val coder = Coder.avroGenericRecordCoder(AvroUtils.schema)
     sc.parallelize(genericRecords)
       .saveAsParquetAvroFile(dir.toString, numShards = 1, schema = AvroUtils.schema)
-    sc.close()
+    sc.run()
 
     val files = dir.listFiles()
     files.length shouldBe 1

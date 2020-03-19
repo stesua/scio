@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.complete.game.UserScore
+// `sbt "runMain com.spotify.scio.examples.complete.game.UserScore
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --output=bq://[PROJECT]/[DATASET]/mobile_game_user_score"`
 
@@ -32,7 +32,6 @@ import com.spotify.scio.examples.common.ExampleData
 import scala.util.Try
 
 object UserScore {
-
   // Case class containing all the fields within an event, for internal model
   case class GameActionInfo(user: String, team: String, score: Int, timestamp: Long)
 
@@ -63,10 +62,10 @@ object UserScore {
       // Map summed results from tuples into `UserScoreSums` case class, so we can save to BQ
       .map(UserScoreSums.tupled)
       // Save to the BigQuery table defined by "output" in the arguments passed in
-      .saveAsTypedBigQuery(args("output"))
+      .saveAsTypedBigQueryTable(Table.Spec(args("output")))
 
-    // Close context and execute the pipeline
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
-
 }

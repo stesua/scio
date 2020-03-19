@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,6 @@ import org.joda.time.Duration
 import scala.collection.JavaConverters._
 
 object BigtableIT {
-
   val projectId = "data-integration-test"
   val instanceId = "scio-bigtable-it"
   val clusterId = "scio-bigtable-it-cluster"
@@ -40,7 +39,8 @@ object BigtableIT {
   val uuid = UUID.randomUUID().toString.substring(0, 8)
   val testData = Seq((s"$uuid-key1", 1L), (s"$uuid-key2", 2L), (s"$uuid-key3", 3L))
 
-  val bigtableOptions = new BigtableOptions.Builder()
+  val bigtableOptions = BigtableOptions
+    .builder()
     .setProjectId(projectId)
     .setInstanceId(instanceId)
     .build
@@ -49,10 +49,12 @@ object BigtableIT {
   val COLUMN_QUALIFIER: ByteString = ByteString.copyFromUtf8("long")
 
   def toWriteMutation(key: String, value: Long): (ByteString, Iterable[Mutation]) = {
-    val m = Mutations.newSetCell(FAMILY_NAME,
-                                 COLUMN_QUALIFIER,
-                                 ByteString.copyFromUtf8(value.toString),
-                                 0L)
+    val m = Mutations.newSetCell(
+      FAMILY_NAME,
+      COLUMN_QUALIFIER,
+      ByteString.copyFromUtf8(value.toString),
+      0L
+    )
     (ByteString.copyFromUtf8(key), Iterable(m))
   }
 
@@ -72,7 +74,6 @@ object BigtableIT {
 }
 
 class BigtableIT extends PipelineSpec {
-
   import BigtableIT._
 
   // "Update number of bigtable nodes" should "work" in {
@@ -95,7 +96,7 @@ class BigtableIT extends PipelineSpec {
       sc1
         .parallelize(testData.map(kv => toWriteMutation(kv._1, kv._2)))
         .saveAsBigtable(projectId, instanceId, tableId)
-      sc1.close().waitUntilFinish()
+      sc1.run().waitUntilFinish()
 
       // Read rows back
       val sc2 = ScioContext()
@@ -107,7 +108,7 @@ class BigtableIT extends PipelineSpec {
       sc2
         .bigtable(projectId, instanceId, tableId, rowFilter = rowFilter)
         .map(fromRow) should containInAnyOrder(testData)
-      sc2.close().waitUntilFinish()
+      sc2.run().waitUntilFinish()
     } catch {
       case e: Throwable => throw e
     } finally {
@@ -115,7 +116,8 @@ class BigtableIT extends PipelineSpec {
       val sc = ScioContext()
       sc.parallelize(testData.map(kv => toDeleteMutation(kv._1)))
         .saveAsBigtable(projectId, instanceId, tableId)
-      sc.close().waitUntilFinish()
+      sc.run().waitUntilFinish()
+      ()
     }
   }
 
@@ -125,7 +127,7 @@ class BigtableIT extends PipelineSpec {
       s"scio-bigtable-one-cf-table-$uuid" -> List("colfam1"),
       s"scio-bigtable-two-cf-table-$uuid" -> List("colfam1", "colfam2")
     )
-    val channel = ChannelPoolCreator.createPool(bigtableOptions.getAdminHost)
+    val channel = ChannelPoolCreator.createPool(bigtableOptions)
     val executorService = BigtableSessionSharedThreadPools.getInstance().getRetryExecutor
     val client = new BigtableTableAdminGrpcClient(channel, executorService, bigtableOptions)
     val instancePath = s"projects/$projectId/instances/$instanceId"
@@ -153,7 +155,8 @@ class BigtableIT extends PipelineSpec {
         GetTableRequest
           .newBuilder()
           .setName(tablePath(table))
-          .build)
+          .build
+      )
       val actualColumnFamilies = tableInfo.getColumnFamiliesMap.asScala.keys
       actualColumnFamilies should contain theSameElementsAs columnFamilies
     }
@@ -161,5 +164,4 @@ class BigtableIT extends PipelineSpec {
     // Clean up and delete
     tables.keys.foreach(deleteTable)
   }
-
 }

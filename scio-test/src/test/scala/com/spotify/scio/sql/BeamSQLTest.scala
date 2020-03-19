@@ -22,17 +22,33 @@ import java.lang.{Iterable => JIterable}
 import com.spotify.scio.IsJavaBean
 import com.spotify.scio.bean.UserBean
 import com.spotify.scio.coders.Coder
-import com.spotify.scio.schemas.{Schema, To}
+import com.spotify.scio.schemas.{LogicalType, Schema, To}
 import com.spotify.scio.testing.PipelineSpec
 import org.apache.beam.sdk.extensions.sql.BeamSqlUdf
 import org.apache.beam.sdk.schemas.{Schema => BSchema}
 import org.apache.beam.sdk.transforms.Combine.CombineFn
 import org.apache.beam.sdk.transforms.SerializableFunction
 import org.apache.beam.sdk.values.{Row, TupleTag}
+import org.joda.time.{DateTime, Instant}
+import org.joda.time.DateTimeZone.UTC
 import org.scalatest.Assertion
 
 import scala.collection.JavaConverters._
 import com.spotify.scio.avro
+import com.spotify.scio.avro.MessageRecord
+import org.apache.avro.generic.GenericRecord
+
+object Schemas {
+  // test logical type support
+  implicit val localeSchema: Schema[Locale] =
+    LogicalType[Locale, String](
+      BSchema.FieldType.STRING,
+      l => l.toLanguageTag(),
+      s => Locale.forLanguageTag(s)
+    )
+}
+
+import Schemas._
 
 object TestData {
   case class Foo(i: Int, s: String)
@@ -41,23 +57,20 @@ object TestData {
 
   case class User(username: String, email: String, age: Int)
   val users =
-    (1 to 10).map { i =>
-      User(s"user$i", s"user$i@spotify.com", 20 + i)
-    }.toList
+    (1 to 10).map(i => User(s"user$i", s"user$i@spotify.com", 20 + i)).toList
 
   case class UserId(id: Long)
   case class UserWithId(id: UserId, username: String, email: String, age: Int)
 
   val usersWithIds =
-    (1 to 10).map { i =>
-      UserWithId(UserId(i), s"user$i", s"user$i@spotify.com", 20 + i)
-    }.toList
+    (1 to 10).map(i => UserWithId(UserId(i), s"user$i", s"user$i@spotify.com", 20 + i)).toList
 
-  case class UserWithFallBack(id: Long, username: String, locale: Locale)
+  case class UserWithLogicalType(id: Long, username: String, locale: Locale)
+  object UserWithLogicalType {
+    implicit def userWithLogicalTypeSchema = Schema.gen[UserWithLogicalType]
+  }
   val usersWithLocale =
-    (1 to 10).map { i =>
-      UserWithFallBack(i, s"user$i", Locale.FRANCE)
-    }.toList
+    (1 to 10).map(i => UserWithLogicalType(i, s"user$i", Locale.FRANCE)).toList
 
   case class UserWithOption(username: String, email: String, age: Option[Int])
   val usersWithOption =
@@ -67,20 +80,28 @@ object TestData {
 
   case class UserWithList(username: String, emails: List[String])
   val usersWithList =
-    (1 to 10).map { i =>
-      UserWithList(s"user$i", List(s"user$i@spotify.com", s"user$i@yolo.com"))
-    }.toList
+    (1 to 10)
+      .map(i => UserWithList(s"user$i", List(s"user$i@spotify.com", s"user$i@yolo.com")))
+      .toList
 
   val javaUsers =
-    (1 to 10).map { i =>
-      new UserBean(s"user$i", 20 + i)
-    }
+    (1 to 10).map(i => new UserBean(s"user$i", 20 + i))
 
   case class UserWithJList(username: String, emails: java.util.List[String])
   val usersWithJList =
     (1 to 10).map { i =>
       UserWithJList(s"user$i", java.util.Arrays.asList(s"user$i@spotify.com", s"user$i@yolo.com"))
     }.toList
+
+  case class UserWithMap(username: String, contacts: Map[String, String])
+  val usersWithMap =
+    (1 to 10).map { i =>
+      UserWithMap(s"user$i", Map("work" -> s"user$i@spotify.com", "personal" -> s"user$i@yolo.com"))
+    }.toList
+
+  case class UserWithInstant(username: String, created: Instant, dateString: String)
+  val usersWithJoda =
+    (1 to 10).map(i => UserWithInstant(s"user$i", Instant.now(), "19851026")).toList
 
   class IsOver18UdfFn extends SerializableFunction[Integer, Boolean] {
     override def apply(input: Integer): Boolean = input >= 18
@@ -115,6 +136,24 @@ object TestData {
         )
       new avro.User(i, s"lastname_$i", s"firstname_$i", s"email$i@spotify.com", Nil.asJava, addr)
     }.toList
+
+  case class Order(order_id: Long, price: Long, site_id: Long)
+  val orders = List(Order(1, 2, 2), Order(2, 2, 1), Order(1, 4, 3), Order(3, 2, 1), Order(3, 3, 1))
+
+  // Coders
+  implicit def coderLocale: Coder[Locale] = Coder.kryo[Locale]
+  implicit def coderFoo: Coder[Foo] = Coder.gen[Foo]
+  implicit def coderResult: Coder[Result] = Coder.gen[Result]
+  implicit def coderUser: Coder[User] = Coder.gen[User]
+  implicit def coderUserId: Coder[UserId] = Coder.gen[UserId]
+  implicit def coderUserWithId: Coder[UserWithId] = Coder.gen[UserWithId]
+  implicit def coderUserWithLogicalType: Coder[UserWithLogicalType] = Coder.gen[UserWithLogicalType]
+  implicit def coderUserWithOption: Coder[UserWithOption] = Coder.gen[UserWithOption]
+  implicit def coderUserWithList: Coder[UserWithList] = Coder.gen[UserWithList]
+  implicit def coderUserWithJList: Coder[UserWithJList] = Coder.gen[UserWithJList]
+  implicit def coderUserWithMap: Coder[UserWithMap] = Coder.gen[UserWithMap]
+  implicit def coderUserWithInstant: Coder[UserWithInstant] = Coder.gen[UserWithInstant]
+  implicit def coderOrder: Coder[Order] = Coder.gen[Order]
 }
 
 class BeamSQLTest extends PipelineSpec {
@@ -122,9 +161,7 @@ class BeamSQLTest extends PipelineSpec {
 
   "BeamSQL" should "support queries on case classes" in runWithContext { sc =>
     val schemaRes = BSchema.builder().addStringField("username").build()
-    val expected = users.map { u =>
-      Row.withSchema(schemaRes).addValue(u.username).build()
-    }
+    val expected = users.map(u => Row.withSchema(schemaRes).addValue(u.username).build())
     implicit def coderRowRes: Coder[Row] = Coder.row(schemaRes)
     val in = sc.parallelize(users)
     val r = in.query("select username from SCOLLECTION")
@@ -133,7 +170,7 @@ class BeamSQLTest extends PipelineSpec {
 
   it should "support different tag" in runWithContext { sc =>
     val expected = 255
-    val q = Query[User, Int]("select sum(age) from users", tag = new TupleTag[User]("users"))
+    val q = Query1[User, Int]("select sum(age) from users", tag = new TupleTag[User]("users"))
     val r = sc.parallelize(users).queryAs(q)
     r should containSingleValue(expected)
   }
@@ -171,7 +208,7 @@ class BeamSQLTest extends PipelineSpec {
     r2 should containInAnyOrder(expected)
   }
 
-  it should "support fallback coders" in runWithContext { sc =>
+  it should "support logical types" in runWithContext { sc =>
     val schemaRes = BSchema.builder().addStringField("username").build()
     val expected = usersWithLocale.map { u =>
       Row.withSchema(schemaRes).addValue(u.username).build()
@@ -184,9 +221,7 @@ class BeamSQLTest extends PipelineSpec {
 
   it should "infer the schema of results" in runWithContext { sc =>
     val schemaRes = BSchema.builder().addStringField("username").build()
-    val expected = users.map { u =>
-      Row.withSchema(schemaRes).addValue(u.username).build()
-    }
+    val expected = users.map(u => Row.withSchema(schemaRes).addValue(u.username).build())
     implicit def coderRowRes: Coder[Row] = Coder.row(schemaRes)
     val in = sc.parallelize(users)
     val r = in.query("select username from SCOLLECTION")
@@ -194,27 +229,21 @@ class BeamSQLTest extends PipelineSpec {
   }
 
   it should "Automatically convert rows results to Products" in runWithContext { sc =>
-    val expected = users.map { u =>
-      (u.username, u.age)
-    }
+    val expected = users.map(u => (u.username, u.age))
     val in = sc.parallelize(users)
     val r = in.queryAs[(String, Int)]("select username, age from SCOLLECTION")
     r should containInAnyOrder(expected)
   }
 
-  it should "support fallback in sql" in runWithContext { sc =>
-    val expected = usersWithLocale.map { u =>
-      (u.username, u.locale)
-    }
+  it should "support logical type in sql" in runWithContext { sc =>
+    val expected = usersWithLocale.map(u => (u.username, u.locale))
     val in = sc.parallelize(usersWithLocale)
     val r = in.queryAs[(String, Locale)]("select username, locale from SCOLLECTION")
     r should containInAnyOrder(expected)
   }
 
   it should "support Option" in runWithContext { sc =>
-    val expected = usersWithOption.map { u =>
-      (u.username, u.age)
-    }
+    val expected = usersWithOption.map(u => (u.username, u.age))
     val in = sc.parallelize(usersWithOption)
     val r = in.queryAs[(String, Option[Int])]("select username, age from SCOLLECTION")
     r should containInAnyOrder(expected)
@@ -225,9 +254,7 @@ class BeamSQLTest extends PipelineSpec {
   }
 
   it should "support scala collections" in runWithContext { sc =>
-    val expected = usersWithList.map { u =>
-      (u.username, u.emails)
-    }
+    val expected = usersWithList.map(u => (u.username, u.emails))
     val in = sc.parallelize(usersWithList)
     val r = in.queryAs[(String, List[String])]("select username, emails from SCOLLECTION")
     r should containInAnyOrder(expected)
@@ -241,12 +268,18 @@ class BeamSQLTest extends PipelineSpec {
   }
 
   it should "support java collections" in runWithContext { sc =>
-    val expected = usersWithJList.map { u =>
-      (u.username, u.emails.get(0))
-    }
+    val expected = usersWithJList.map(u => (u.username, u.emails.get(0)))
     val in = sc.parallelize(usersWithJList)
     val r =
       in.queryAs[(String, String)]("select username, emails[1] from SCOLLECTION")
+    r should containInAnyOrder(expected)
+  }
+
+  it should "support Map[K, V]" in runWithContext { sc =>
+    val expected = usersWithMap.map(u => (u.username, u.contacts))
+    val in = sc.parallelize(usersWithMap)
+    val r =
+      in.queryAs[(String, Map[String, String])]("select username, contacts from SCOLLECTION")
     r should containInAnyOrder(expected)
   }
 
@@ -261,21 +294,95 @@ class BeamSQLTest extends PipelineSpec {
     "Schema.javaBeanSchema[TypeMismatch]" shouldNot compile
   }
 
+  it should "support joda types" in runWithContext { sc =>
+    val expected = usersWithJoda.map(u => (u.username, u.created))
+
+    val r = sc
+      .parallelize(usersWithJoda)
+      .queryAs[(String, Instant)]("select username, created from SCOLLECTION")
+
+    r should containInAnyOrder(expected)
+
+    val expectedCast = usersWithJoda.map { u =>
+      (u.username, new DateTime(1985, 10, 26, 0, 0, UTC).toInstant())
+    }
+
+    val query = """
+    | select username,
+    |        cast(
+    |         substring(trim(dateString) from 1 for 4)
+    |           ||'-'
+    |           ||substring(trim(dateString) from 5 for 2)
+    |           ||'-'
+    |           ||substring(trim(dateString) from 7 for 2) as date)
+    |         from SCOLLECTION
+    """.stripMargin
+
+    val cast = sc
+      .parallelize(usersWithJoda)
+      .queryAs[(String, Instant)](query)
+
+    cast should containInAnyOrder(expectedCast)
+  }
+
+  it should "support tags" in runWithContext { sc =>
+    val a = sc.parallelize(users)
+    val q = new Query1[User, String]("select username from A", new TupleTag[User]("A"))
+    a.queryAs(q) shouldNot beEmpty
+  }
+
   it should "support JOIN" in runWithContext { sc =>
+    val a = sc.parallelize(users)
+    val b = sc.parallelize(users)
+    val c = sc.parallelize(users)
+
+    Sql
+      .from(a, b)
+      .query(
+        "select a.username from B a join A b on a.username = b.username",
+        new TupleTag[User]("A"),
+        new TupleTag[User]("B")
+      ) shouldNot beEmpty
+
+    Sql
+      .from(a, b)
+      .queryAs[String](
+        "select a.username from B a join A b on a.username = b.username",
+        new TupleTag[User]("A"),
+        new TupleTag[User]("B")
+      ) shouldNot beEmpty
+
+    Sql
+      .from(a, b, c)
+      .queryAs[String](
+        """select a.username
+        from A a join B b on a.username = b.username
+        join C c on a.username = c.username""",
+        new TupleTag[User]("A"),
+        new TupleTag[User]("B"),
+        new TupleTag[User]("C")
+      ) should containInAnyOrder(users.map(_.username))
+  }
+
+  it should "support sql subqueries" in runWithContext { sc =>
     val a = sc.parallelize(users)
     val b = sc.parallelize(users)
 
     Sql
       .from(a, b)
-      .query("select a.username from B a join A b on a.username = b.username",
-             new TupleTag[User]("A"),
-             new TupleTag[User]("B")) shouldNot beEmpty
+      .queryAs[String](
+        "select username from A where username in (select username from B)",
+        new TupleTag[User]("A"),
+        new TupleTag[User]("B")
+      ) shouldNot beEmpty
 
     Sql
       .from(a, b)
-      .queryAs[String]("select a.username from B a join A b on a.username = b.username",
-                       new TupleTag[User]("A"),
-                       new TupleTag[User]("B")) shouldNot beEmpty
+      .queryAs[(String, Boolean)](
+        "select username, username not in (select username from B where username = 'user1') from A",
+        new TupleTag[User]("A"),
+        new TupleTag[User]("B")
+      ) shouldNot beEmpty
   }
 
   it should "properly chain typed queries" in runWithContext { sc =>
@@ -292,7 +399,8 @@ class BeamSQLTest extends PipelineSpec {
       .queryAs[(String, Int)](
         "select a.username, b.age from B a join A b on a.username = b.username",
         new TupleTag[User]("A"),
-        new TupleTag[User]("B"))
+        new TupleTag[User]("B")
+      )
       .queryAs[Int]("select sum(_2) from SCOLLECTION")
 
     r2 should containSingleValue(expected)
@@ -315,22 +423,26 @@ class BeamSQLTest extends PipelineSpec {
   it should "provide a typecheck method for tests" in {
     object checkOK {
       def apply[A: Schema, B: Schema](q: String): Assertion =
-        Queries.typecheck(Query[A, B](q)) should be('right)
+        Query1.typecheck(Query1[A, B](q, Sql.defaultTag)) should be('right)
 
-      def apply[A: Schema, B: Schema, C: Schema](q: String,
-                                                 a: TupleTag[A],
-                                                 b: TupleTag[B]): Assertion =
-        Queries.typecheck(Query2[A, B, C](q, a, b)) should be('right)
+      def apply[A: Schema, B: Schema, C: Schema](
+        q: String,
+        a: TupleTag[A],
+        b: TupleTag[B]
+      ): Assertion =
+        Query2.typecheck(Query2[A, B, C](q, a, b)) should be('right)
     }
 
     object checkNOK {
       def apply[A: Schema, B: Schema](q: String): Assertion =
-        Queries.typecheck(Query[A, B](q)) should be('left)
+        Query1.typecheck(Query1[A, B](q, Sql.defaultTag)) should be('left)
 
-      def apply[A: Schema, B: Schema, C: Schema](q: String,
-                                                 a: TupleTag[A],
-                                                 b: TupleTag[B]): Assertion =
-        Queries.typecheck(Query2[A, B, C](q, a, b)) should be('left)
+      def apply[A: Schema, B: Schema, C: Schema](
+        q: String,
+        a: TupleTag[A],
+        b: TupleTag[B]
+      ): Assertion =
+        Query2.typecheck(Query2[A, B, C](q, a, b)) should be('left)
     }
 
     checkOK[Bar, Long]("select l from SCOLLECTION")
@@ -339,8 +451,7 @@ class BeamSQLTest extends PipelineSpec {
     checkOK[Bar, Foo]("select f from SCOLLECTION")
     checkOK[Bar, (String, Long)]("select `SCOLLECTION`.`f`.`s`, l from SCOLLECTION")
 
-    // test fallback support
-    checkOK[UserWithFallBack, Locale]("select locale from SCOLLECTION")
+    checkOK[UserWithLogicalType, Locale]("select locale from SCOLLECTION")
 
     checkOK[UserWithOption, Option[Int]]("select age from SCOLLECTION")
     checkNOK[UserWithOption, Int]("select age from SCOLLECTION")
@@ -360,7 +471,8 @@ class BeamSQLTest extends PipelineSpec {
     checkNOK[UserBean, Bar]("select name, age from SCOLLECTION")
     // Calcite flattens the row value
     checkOK[UserBean, (Long, Int, String)](
-      "select cast(age AS BIGINT), row(age, name) from SCOLLECTION")
+      "select cast(age AS BIGINT), row(age, name) from SCOLLECTION"
+    )
 
     checkOK[UserBean, List[Int]]("select ARRAY[age] from SCOLLECTION")
     checkOK[UserBean, (String, List[Int])]("select name, ARRAY[age] from SCOLLECTION")
@@ -370,63 +482,13 @@ class BeamSQLTest extends PipelineSpec {
     checkOK[User, User, (String, Int)](
       "select a.username, b.age from A a join B b on a.username = b.username",
       new TupleTag[User]("A"),
-      new TupleTag[User]("B"))
+      new TupleTag[User]("B")
+    )
     checkNOK[User, User, (String, String)](
       "select a.username, b.age from A a join B b on a.username = b.username",
       new TupleTag[User]("A"),
-      new TupleTag[User]("B"))
-  }
-
-  it should "typecheck queries at compile time" in {
-    import Queries.typed
-    // scalastyle:off line.size.limit
-    """typed[Bar, Long]("select l from SCOLLECTION")""" should compile
-    """typed[Bar, Int]("select `SCOLLECTION`.`f`.`i` from SCOLLECTION")""" should compile
-    """typed[Bar, Result]("select `SCOLLECTION`.`f`.`i` from SCOLLECTION")""" should compile
-    """typed[Bar, TestData.Foo]("select f from SCOLLECTION")""" should compile
-    """typed[Bar, (String, Long)]("select `SCOLLECTION`.`f`.`s`, l from SCOLLECTION")""" should compile
-    // st fallback support
-    // XXX: scalac :bomb: this test seems to be problematic under scala 2.11 ...
-//    """tsql[UserWithFallBack, Locale]("select locale from SCOLLECTION")""" should compile
-    """typed[UserWithOption, Option[Int]]("select age from SCOLLECTION")""" should compile
-    """typed[Bar, Long]("select cast(`SCOLLECTION`.`f`.`i` as BIGINT) from SCOLLECTION")""" should compile
-    """typed[UserBean, (String, Int)]("select name, age from SCOLLECTION")""" should compile
-    """typed[UserBean, (Long, Int, String)]("select cast(age AS BIGINT), row(age, name) from SCOLLECTION")""" should compile
-    """typed[UserBean, List[Int]]("select ARRAY[age] from SCOLLECTION")""" should compile
-    """typed[UserBean, (String, List[Int])]("select name, ARRAY[age] from SCOLLECTION")""" should compile
-    """typed[UserWithOption, Int]("select age from SCOLLECTION")""" shouldNot compile
-    """typed[Bar, (String, Long)]("select l from SCOLLECTION")""" shouldNot compile
-    """typed[Bar, String]("select l from SCOLLECTION")""" shouldNot compile
-    """typed[UserBean, (String, Long)]("select name, age from SCOLLECTION")""" shouldNot compile
-    """typed[UserBean, User]("select name, age from SCOLLECTION")""" shouldNot compile
-    """typed[UserBean, (String, Option[Int])]("select name, age from SCOLLECTION")""" shouldNot compile
-    """typed[UserBean, Bar]("select name, age from SCOLLECTION")""" shouldNot compile
-    """typed[UserBean, (String, Int)]("select name, ARRAY[age] from SCOLLECTION")""" shouldNot compile
-    """typed[UserBean, (String, List[Int])]("select name, age from SCOLLECTION")""" shouldNot compile
-
-    // joins
-
-    """
-      |typed[User, User, String]("select a.username from B a join A b on a.username = b.username", new TupleTag[User]("A"), new TupleTag[User]("B"))
-      |""".stripMargin should compile
-    """
-      |typed[User, User, Int]("select a.username from B a join A b on a.username = b.username", new TupleTag[User]("A"), new TupleTag[User]("B"))
-      |""".stripMargin shouldNot compile
-    """
-      |typed[User, User, String]("select a.username from B a join A b on a.username = b.username", new TupleTag[User]("C"), new TupleTag[User]("D"))
-      |""".stripMargin shouldNot compile
-    // scalastyle:on line.size.limit
-  }
-
-  it should "give a clear error message when the query can not be checked at compile time" in {
-    """
-    val q = "select name, age from SCOLLECTION"
-    Queries.typed[UserBean, (String, Int)](q)
-    """ shouldNot compile
-
-    """
-    def functionName(q: String) = Queries.typed[(String, String), String](q)
-    """ shouldNot compile
+      new TupleTag[User]("B")
+    )
   }
 
   it should "support UDFs from SerializableFunctions and classes" in runWithContext { sc =>
@@ -482,32 +544,68 @@ class BeamSQLTest extends PipelineSpec {
       .to[TinyTo](To.unsafe) should containInAnyOrder(tinyTo)
 
     sc.parallelize(from)
-      .to[To1](To.safe) should containInAnyOrder(to)
+      .to(To.safe[From0, To1]) should containInAnyOrder(to)
 
     sc.parallelize(javaUsers)
-      .to[JavaCompatibleUser](To.safe) should containInAnyOrder(expectedJavaCompatUsers)
+      .to(To.safe[UserBean, JavaCompatibleUser]) should containInAnyOrder(expectedJavaCompatUsers)
 
     sc.parallelize(from)
-      .to[TinyTo](To.safe) should containInAnyOrder(tinyTo)
+      .to(To.safe[From0, TinyTo]) should containInAnyOrder(tinyTo)
+  }
+
+  it should "Support LogicalTypes" in runWithContext { sc =>
+    val foosWithEnum = List(FooWithEnum("hello", j.Level.LOW), FooWithEnum("hello", j.Level.MEDIUM))
+    val barsWithEnum = List(BarWithEnum("hello", j.Level.LOW), BarWithEnum("hello", j.Level.MEDIUM))
+
+    sc.parallelize(foosWithEnum)
+      .to(To.unsafe[FooWithEnum, BarWithEnum]) should containInAnyOrder(barsWithEnum)
   }
 
   it should "Support queries on Avro generated classes" in runWithContext { sc =>
     val expected: List[(Int, String, String)] =
-      avroUsers.map { u =>
-        (u.getId.toInt, u.getFirstName.toString, u.getLastName.toString)
-      }
+      avroUsers.map(u => (u.getId.toInt, u.getFirstName.toString, u.getLastName.toString))
 
     val q =
-      Query[avro.User, (Int, String, String)]("SELECT id, first_name, last_name from SCOLLECTION")
+      Query1[avro.User, (Int, String, String)](
+        "SELECT id, first_name, last_name from SCOLLECTION",
+        Sql.defaultTag
+      )
 
     sc.parallelize(avroUsers).queryAs(q) should containInAnyOrder(expected)
   }
 
   it should "Automatically convert from Avro to Scala" in runWithContext { sc =>
     import TypeConvertionsTestData._
+
+    val avroSchema =
+      """
+        {
+          "type": "record",
+          "name": "User",
+          "namespace": "com.spotify.scio.avro",
+          "doc": "Record for a user",
+          "fields": [
+              {"name": "id", "type": "int"},
+              {"name": "last_name", "type": "string"},
+              {"name": "first_name", "type": "string"}
+            ]
+        }
+      """
+
+    val schema = new org.apache.avro.Schema.Parser().parse(avroSchema)
+
     val expected: List[AvroCompatibleUser] =
       avroUsers.map { u =>
         AvroCompatibleUser(u.getId.toInt, u.getFirstName.toString, u.getLastName.toString)
+      }
+
+    val genericRecords: List[GenericRecord] =
+      avroUsers.map { u =>
+        val record = new org.apache.avro.generic.GenericData.Record(schema)
+        record.put("id", u.id)
+        record.put("first_name", u.first_name)
+        record.put("last_name", u.last_name)
+        record
       }
 
     sc.parallelize(avroUsers)
@@ -518,16 +616,102 @@ class BeamSQLTest extends PipelineSpec {
       .to[CompatibleAvroTestRecord](To.unsafe) should containInAnyOrder(expectedAvro)
 
     sc.parallelize(avroUsers)
-      .to[AvroCompatibleUser](To.safe) should containInAnyOrder(expected)
+      .to(To.safe[avro.User, AvroCompatibleUser]) should containInAnyOrder(expected)
 
     sc.parallelize(avroWithNullable)
-      .to[CompatibleAvroTestRecord](To.safe) should containInAnyOrder(expectedAvro)
+      .to(To.safe[avro.TestRecord, CompatibleAvroTestRecord]) should containInAnyOrder(expectedAvro)
+
+    implicit val genericRecordSchema = Schema.fromAvroSchema(schema)
+
+    sc.parallelize(avroUsers.map(_.asInstanceOf[GenericRecord]))
+      .to(To.unsafe[GenericRecord, AvroCompatibleUser]) should containInAnyOrder(expected)
+
+    sc.parallelize(expected)
+      .to(To.unsafe[AvroCompatibleUser, GenericRecord]) should containInAnyOrder(genericRecords)
   }
 
-  it should "typecheck classes compatibilty" in {
+  it should "support bytes in avro generic classes" in {
+    import com.spotify.scio.avro.AvroWithBytesRecord
+    import java.nio.ByteBuffer
     import TypeConvertionsTestData._
-    """To.safe[TinyTo, From0]""" shouldNot compile
-    """To.safe[From0, CompatibleAvroTestRecord]""" shouldNot compile
+
+    val cat = "lorem"
+    val cid = "42"
+    val devId = "device_id".getBytes()
+
+    val m = MessageRecord.newBuilder()
+    val r = AvroWithBytesRecord.newBuilder()
+    m.setCatalogue(cat)
+    m.setClientId(cid)
+    m.setDeviceId(ByteBuffer.wrap(devId))
+    r.setMessage(m.build())
+
+    val expected =
+      ScalaRecord(
+        Option(ScalaMessage(Option(cat), Option(cid), Option(devId)))
+      )
+
+    val rec = r.build()
+    val to = To.safe[AvroWithBytesRecord, ScalaRecord]
+
+    val converted = to.convert(rec)
+    converted.message.get.catalogue shouldBe expected.message.get.catalogue
+    converted.message.get.client_id shouldBe expected.message.get.client_id
+    new String(converted.message.get.device_id.get) shouldBe new String(
+      expected.message.get.device_id.get
+    )
+  }
+
+  "String interpolation" should "support simple queries" in runWithContext { sc =>
+    val expected = users.map(u => (u.username, u.age))
+    val in = sc.parallelize(users)
+    val r = sql"select username, age from $in".as[(String, Int)]
+    r should containInAnyOrder(expected)
+  }
+
+  it should "support UDF" in runWithContext { sc =>
+    val in = sc.parallelize(users)
+    val maxUserAge = Udf.fromAggregateFn("maxUserAge", new MaxUserAgeUdafFn())
+    val r = sql"select $maxUserAge(age) as maxUserAge from $in".as[Int]
+    r should containSingleValue(30)
+  }
+
+  it should "support joins" in runWithContext { sc =>
+    val a = sc.parallelize(users)
+    val b = sc.parallelize(users)
+    sql"""
+      SELECT $a.username
+      FROM $a
+      JOIN $b ON $a.username = $b.username
+    """.as[String] shouldNot beEmpty
+
+    val o1 = sc.parallelize(orders)
+    val o2 = sc.parallelize(orders)
+    sql"""
+      SELECT $o1.order_id, $o1.price, $o1.site_id, $o2.order_id, $o2.price, $o2.site_id
+      FROM $o1
+      JOIN $o2
+      ON $o1.order_id = $o2.site_id AND $o2.price = $o1.site_id
+    """.as[(Long, Long, Long, Long, Long, Long)] shouldNot beEmpty
+
+    sql"""
+      SELECT o1.order_id, o1.price, o1.site_id, o2.order_id, o2.price, o2.site_id
+      FROM $o1 o1
+      JOIN $o2 o2
+      ON o1.order_id = o2.site_id AND o2.price = o1.site_id
+    """.as[(Long, Long, Long, Long, Long, Long)] shouldNot beEmpty
+  }
+
+  it should "support joins and UDF in the same query" in runWithContext { sc =>
+    val a = sc.parallelize(users)
+    val b = sc.parallelize(users)
+    val maxUserAge = Udf.fromAggregateFn("maxUserAge", new MaxUserAgeUdafFn())
+    val r =
+      sql"""
+        SELECT $maxUserAge($a.age) FROM $a
+        JOIN $b ON $a.username = $b.username
+      """.as[Int]
+    r should containSingleValue(30)
   }
 }
 
@@ -550,7 +734,7 @@ object TypeConvertionsTestData {
     from.map {
       case From0(i, s, From1(xs, q)) =>
         To1(s, To0(q, xs), i)
-    }.toList
+    }
 
   val tinyTo = to.map {
     case To1(s, _, i) => TinyTo(s, i)
@@ -558,9 +742,7 @@ object TypeConvertionsTestData {
 
   case class JavaCompatibleUser(name: String, age: Int)
   val expectedJavaCompatUsers =
-    javaUsers.map { j =>
-      JavaCompatibleUser(j.getName, j.getAge)
-    }
+    javaUsers.map(j => JavaCompatibleUser(j.getName, j.getAge))
 
   case class AvroCompatibleUser(id: Int, first_name: String, last_name: String)
 
@@ -572,12 +754,12 @@ object TypeConvertionsTestData {
   val expectedAvro =
     avroWithNullable.map { r =>
       CompatibleAvroTestRecord(
-        Option(r.getIntField),
-        Option(r.getLongField),
+        Option(r.getIntField.toInt),
+        Option(r.getLongField.toLong),
         Option(r.getStringField).map(_.toString),
         r.getArrayField.asScala.toList.map(_.toString)
       )
-    }.toList
+    }
 
   case class CompatibleAvroTestRecord(
     int_field: Option[Int],
@@ -585,4 +767,11 @@ object TypeConvertionsTestData {
     string_field: Option[String],
     array_field: List[String]
   )
+
+  case class ScalaMessage(
+    catalogue: Option[String],
+    client_id: Option[String],
+    device_id: Option[Array[Byte]]
+  )
+  case class ScalaRecord(message: Option[ScalaMessage])
 }

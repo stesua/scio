@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,18 +43,18 @@ import scala.collection.mutable
  * }}}
  */
 object Iterators {
-
   private[extra] def lowerBound(idx: Long, size: Long, offset: Long): Long =
     if (idx < offset) offset - size else ((idx - offset) / size) * size + offset
 
   private[extra] def upperBound(idx: Long, size: Long, offset: Long): Long =
     if (idx < offset) offset else ((idx - offset) / size + 1) * size + offset
 
-  private class FixedIterator[T](self: Iterator[T],
-                                 timestampFn: T => Long,
-                                 size: Long,
-                                 offset: Long = 0L)
-      extends Iterator[Seq[T]] {
+  private class FixedIterator[T](
+    self: Iterator[T],
+    timestampFn: T => Long,
+    size: Long,
+    offset: Long = 0L
+  ) extends Iterator[Seq[T]] {
     private val bi = self.buffered
     override def hasNext: Boolean = bi.hasNext
     override def next(): Seq[T] = {
@@ -86,12 +86,13 @@ object Iterators {
     }
   }
 
-  private class SlidingIterator[T](self: Iterator[T],
-                                   timestampFn: T => Long,
-                                   size: Long,
-                                   period: Long = 1L,
-                                   offset: Long = 0L)
-      extends Iterator[Seq[T]] {
+  private class SlidingIterator[T](
+    self: Iterator[T],
+    timestampFn: T => Long,
+    size: Long,
+    period: Long = 1L,
+    offset: Long = 0L
+  ) extends Iterator[Seq[T]] {
     private val bi = self.buffered
     private val queue = mutable.Queue[T]()
     fill()
@@ -130,8 +131,10 @@ object Iterators {
   }
 
   /** Iterator for time series data. */
-  class TimeSeriesIterator[T] private[extra] (private val self: Iterator[T],
-                                              private val timestampFn: T => Long) {
+  class TimeSeriesIterator[T] private[extra] (
+    private val self: Iterator[T],
+    private val timestampFn: T => Long
+  ) {
 
     /**
      * Iterator of fixed-size timestamp-based windows.
@@ -165,7 +168,6 @@ object Iterators {
       require(offset < size, "offset must be < size")
       new SlidingIterator[T](self, timestampFn, size, period, offset)
     }
-
   }
 
   /** Enhance Iterator by adding a `timeSeries` method. */
@@ -178,5 +180,4 @@ object Iterators {
     def timeSeries(timestampFn: T => Long): TimeSeriesIterator[T] =
       new TimeSeriesIterator(self, timestampFn)
   }
-
 }

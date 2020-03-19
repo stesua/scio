@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,13 @@ import java.nio.file.{Files, Path}
 import java.util.UUID
 
 import com.spotify.scio.CoreSysProps
-import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-class TapsTest extends FlatSpec with Matchers {
-
+class TapsTest extends AnyFlatSpec with Matchers {
   val data = Seq("a", "b", "c")
 
   private def tmpFile: Path =
@@ -87,5 +87,4 @@ class TapsTest extends FlatSpec with Matchers {
 
     Await.ready(future, 10.seconds)
   }
-
 }

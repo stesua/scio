@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,16 @@ package com.spotify.scio.coders.instances.kryo
 
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.twitter.chill.{Kryo, KryoSerializer}
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.reflect.ClassTag
 
-class JTraversableSerializerTest extends FlatSpec with Matchers {
-
-  private def testRoundTrip[T: ClassTag, C <: Traversable[T]](ser: JTraversableSerializer[T, C],
-                                                              elems: C): Unit = {
+class JTraversableSerializerTest extends AnyFlatSpec with Matchers {
+  private def testRoundTrip[T: ClassTag, C <: Iterable[T]](
+    ser: JTraversableSerializer[T, C],
+    elems: C
+  ): Unit = {
     val k: Kryo = KryoSerializer.registered.newKryo()
     val bufferSize: Int = 1024
     val o = new Array[Byte](bufferSize)
@@ -33,6 +35,7 @@ class JTraversableSerializerTest extends FlatSpec with Matchers {
     val back = ser.read(k, new Input(o), null)
     elems.size shouldBe back.size
     elems should contain theSameElementsAs back
+    ()
   }
 
   "JIterableWrapperSerializer" should "cope with the internal buffer overflow" in {
@@ -46,5 +49,4 @@ class JTraversableSerializerTest extends FlatSpec with Matchers {
     val input = Seq("o" * 3)
     testRoundTrip(ser, input)
   }
-
 }

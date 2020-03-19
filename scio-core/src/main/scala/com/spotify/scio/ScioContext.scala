@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
-// scalastyle:off file.size.limit
 
 package com.spotify.scio
 
@@ -33,6 +31,7 @@ import com.spotify.scio.options.ScioOptions
 import com.spotify.scio.testing._
 import com.spotify.scio.util._
 import com.spotify.scio.values._
+import org.apache.beam.runners.core.construction.resources.PipelineResources
 import org.apache.beam.sdk.Pipeline.PipelineExecutionException
 import org.apache.beam.sdk.PipelineResult.State
 import org.apache.beam.sdk.extensions.gcp.options.GcsOptions
@@ -52,7 +51,9 @@ import scala.collection.mutable.{Buffer => MBuffer}
 import scala.concurrent.duration.Duration
 import scala.io.Source
 import scala.reflect.ClassTag
+import scala.util.control.NoStackTrace
 import scala.util.{Failure, Success, Try}
+import scala.concurrent.Future
 
 /** Runner specific context. */
 trait RunnerContext {
@@ -60,20 +61,24 @@ trait RunnerContext {
 }
 
 private case object NoOpContext extends RunnerContext {
-  override def prepareOptions(options: PipelineOptions, artifacts: List[String]): Unit = Unit
+  override def prepareOptions(options: PipelineOptions, artifacts: List[String]): Unit = ()
 }
 
 /** Direct runner specific context. */
 private case object DirectContext extends RunnerContext {
-  override def prepareOptions(options: PipelineOptions, artifacts: List[String]): Unit = Unit
+  override def prepareOptions(options: PipelineOptions, artifacts: List[String]): Unit = ()
 }
 
 /** Companion object for [[RunnerContext]]. */
 private object RunnerContext {
+  private val logger = LoggerFactory.getLogger(this.getClass)
+
   private val mapping =
-    Map("DirectRunner" -> DirectContext.getClass.getName,
-        "DataflowRunner" -> "com.spotify.scio.runners.dataflow.DataflowContext$")
-      .withDefaultValue(NoOpContext.getClass.getName)
+    Map(
+      "DirectRunner" -> DirectContext.getClass.getName,
+      "DataflowRunner" -> "com.spotify.scio.runners.dataflow.DataflowContext$",
+      "SparkRunner" -> "com.spotify.scio.runners.spark.SparkContext$"
+    ).withDefaultValue(NoOpContext.getClass.getName)
 
   // FIXME: this is ugly, is there a better way?
   private def get(options: PipelineOptions): RunnerContext = {
@@ -93,13 +98,50 @@ private object RunnerContext {
 
   def prepareOptions(options: PipelineOptions, artifacts: List[String]): Unit =
     get(options).prepareOptions(options, artifacts)
+
+  // =======================================================================
+  // Extra artifacts - jars/files etc
+  // =======================================================================
+
+  /** Compute list of local files to make available to workers. */
+  def filesToStage(
+    pipelineOptions: PipelineOptions,
+    classLoader: ClassLoader,
+    extraLocalArtifacts: List[String]
+  ): Iterable[String] = {
+    val finalLocalArtifacts =
+      (detectClassPathResourcesToStage(pipelineOptions, classLoader) ++ extraLocalArtifacts)
+        .map(path => path.substring(path.lastIndexOf("/") + 1, path.length) -> path)
+        .toMap
+        .values
+
+    logger.debug(s"Final list of extra artifacts: ${finalLocalArtifacts.mkString(":")}")
+    finalLocalArtifacts
+  }
+
+  /** Borrowed from DataflowRunner. */
+  private[this] def detectClassPathResourcesToStage(
+    pipelineOptions: PipelineOptions,
+    classLoader: ClassLoader
+  ): Iterable[String] = {
+    // exclude jars from JAVA_HOME and files from current directory
+    val javaHome = new File(CoreSysProps.Home.value).getCanonicalPath
+    val userDir = new File(CoreSysProps.UserDir.value).getCanonicalPath
+
+    val classPathJars = PipelineResources
+      .detectClassPathResourcesToStage(classLoader, pipelineOptions)
+      .asScala
+      .filter(path => !path.startsWith(javaHome) && path != userDir)
+
+    logger.debug(s"Classpath jars: ${classPathJars.mkString(":")}")
+
+    classPathJars
+  }
 }
 
 /** Convenience object for creating [[ScioContext]] and [[Args]]. */
 object ContextAndArgs {
-
-  import scala.language.higherKinds
-  sealed trait ArgsParser[F[_]] {
+  trait ArgsParser[F[_]] {
     type ArgsType
     type UsageOrHelp = String
     type Result = Either[UsageOrHelp, (PipelineOptions, ArgsType)]
@@ -133,8 +175,6 @@ object ContextAndArgs {
       case _ => arg
     }
 
-    // scalastyle:off regex
-    // scalastyle:off cyclomatic.complexity
     override def parse(args: Array[String]): Try[Result] = {
       // limit the options passed to case-app
       // to options supported in T
@@ -184,24 +224,21 @@ object ContextAndArgs {
           Failure(new Exception(error.message))
       }
     }
-    // scalastyle:on regex
-    // scalastyle:on cyclomatic.complexity
   }
 
   def withParser[T](parser: ArgsParser[Try]): Array[String] => (ScioContext, T) =
     args =>
       parser.parse(args) match {
-        // scalastyle:off regex
         case Failure(exception) =>
-          Console.err.println(exception.getMessage)
-          sys.exit(1)
+          throw exception
         case Success(Left(usageOrHelp)) =>
           Console.out.println(usageOrHelp)
-          sys.exit(0)
+
+          UsageOrHelpException.attachUncaughtExceptionHandler()
+          throw new UsageOrHelpException()
         case Success(Right((_opts, _args))) =>
           (new ScioContext(_opts, Nil), _args.asInstanceOf[T])
-        // scalastyle:on regex
-    }
+      }
 
   /** Create [[ScioContext]] and [[Args]] for command line arguments. */
   def apply(args: Array[String]): (ScioContext, Args) =
@@ -210,11 +247,78 @@ object ContextAndArgs {
   def typed[T: Parser: Help](args: Array[String]): (ScioContext, T) =
     withParser(TypedParser[T]()).apply(args)
 
+  private[scio] class UsageOrHelpException extends Exception with NoStackTrace
+
+  private[scio] object UsageOrHelpException {
+    def attachUncaughtExceptionHandler(): Unit = {
+      val currentThread = Thread.currentThread()
+      val originalHandler = currentThread.getUncaughtExceptionHandler
+      currentThread.setUncaughtExceptionHandler(
+        new Thread.UncaughtExceptionHandler {
+          def uncaughtException(thread: Thread, exception: Throwable): Unit =
+            exception match {
+              case _: UsageOrHelpException =>
+                sys.exit(0)
+              case _ =>
+                originalHandler.uncaughtException(thread, exception)
+            }
+        }
+      )
+    }
+  }
+}
+
+/**
+ * ScioExecutionContext is the result of [[ScioContext#run()]].
+ *
+ * This is a handle to the underlying running job and allows getting the state,
+ * checking if it's completed and to wait for it's execution.
+ */
+trait ScioExecutionContext {
+  def pipelineResult: PipelineResult
+
+  /** Whether the pipeline is completed. */
+  def isCompleted: Boolean
+
+  /** Pipeline's current state. */
+  def state: State
+
+  /** default await duration when using [[waitUntilFinish]] or [[waitUntilDone]] */
+  def awaitDuration: Duration
+
+  /** default cancel job option when using [[waitUntilFinish]] or [[waitUntilDone]] */
+  def cancelJob: Boolean
+
+  /**
+   * Wait until the pipeline finishes. If timeout duration is exceeded and `cancelJob` is set,
+   * cancel the internal [[PipelineResult]].
+   */
+  def waitUntilFinish(
+    duration: Duration = awaitDuration,
+    cancelJob: Boolean = cancelJob
+  ): ScioResult
+
+  /**
+   * Wait until the pipeline finishes with the State `DONE` (as opposed to `CANCELLED` or
+   * `FAILED`). Throw exception otherwise.
+   */
+  def waitUntilDone(
+    duration: Duration = awaitDuration,
+    cancelJob: Boolean = cancelJob
+  ): ScioResult
+}
+
+object ScioExecutionContext {
+  @deprecated(
+    "close() now returns a ScioExecutionContext instead of a ScioResult. See https://git.io/JvvLu",
+    since = "0.8.0"
+  )
+  implicit def toResult(sec: ScioExecutionContext): ScioResult =
+    sec.waitUntilDone(Duration.Inf)
 }
 
 /** Companion object for [[ScioContext]]. */
 object ScioContext {
-
   private val log = LoggerFactory.getLogger(this.getClass)
 
   import org.apache.beam.sdk.options.PipelineOptionsFactory
@@ -244,8 +348,10 @@ object ScioContext {
 
   /** Parse PipelineOptions and application arguments from command line arguments. */
   @tailrec
-  def parseArguments[T <: PipelineOptions: ClassTag](cmdlineArgs: Array[String],
-                                                     withValidation: Boolean = false): (T, Args) = {
+  def parseArguments[T <: PipelineOptions: ClassTag](
+    cmdlineArgs: Array[String],
+    withValidation: Boolean = false
+  ): (T, Args) = {
     val optClass = ScioUtil.classOf[T]
 
     // Extract --pattern of all registered derived types of PipelineOptions
@@ -279,90 +385,37 @@ object ScioContext {
       log.info(s"Appending options from $optionsFile")
       parseArguments(
         cmdlineArgs.filterNot(_.startsWith("--optionsFile=")) ++
-          Source.fromFile(optionsFile).getLines())
+          Source.fromFile(optionsFile).getLines()
+      )
     } else {
       val args = Args(appArgs)
       if (appArgs.nonEmpty) {
+        val argString = args.toString("", ", ", "")
+        val sanitizedArgString =
+          if (argString.length > appArgStringMaxLength) {
+            log.warn("Truncating long app arguments")
+            argString.substring(0, appArgStringMaxLength) + " [...]"
+          } else {
+            argString
+          }
+
         pipelineOpts
           .as(classOf[ScioOptions])
-          .setAppArguments(args.toString("", ", ", ""))
+          .setAppArguments(sanitizedArgString)
       }
       (pipelineOpts, args)
     }
   }
 
-  import scala.language.implicitConversions
+  // Used to trim app args for UI if too long to avoid
+  // contributing to an exceeded upload size limit.
+  private val appArgStringMaxLength = 50000
 
   /** Implicit conversion from ScioContext to DistCacheScioContext. */
   implicit def makeDistCacheScioContext(self: ScioContext): DistCacheScioContext =
     new DistCacheScioContext(self)
 
   private def defaultOptions: PipelineOptions = PipelineOptionsFactory.create()
-
-}
-
-final case class ClosedScioContext private (pipelineResult: PipelineResult, context: ScioContext) {
-
-  /** Get the timeout period of the Scio job. Default to `Duration.Inf`. */
-  def getAwaitDuration: Duration = context.awaitDuration
-
-  /** Whether the pipeline is completed. */
-  def isCompleted: Boolean = pipelineResult.getState.isTerminal
-
-  /** Pipeline's current state. */
-  def state: State = Try(pipelineResult.getState).getOrElse(State.UNKNOWN)
-
-  /** Wait until the pipeline finishes. If timeout duration is exceeded and `cancelJob` is set,
-   * cancel the internal [[PipelineResult]]. */
-  def waitUntilFinish(duration: Duration = getAwaitDuration,
-                      cancelJob: Boolean = true): ScioResult = {
-    try {
-      val wait = duration match {
-        case Duration.Inf => 0
-        case d            => d.toMillis
-      }
-      pipelineResult.waitUntilFinish(time.Duration.millis(wait))
-    } catch {
-      case e: InterruptedException =>
-        val cause = if (cancelJob) {
-          pipelineResult.cancel()
-          new InterruptedException(s"Job cancelled after exceeding timeout value $duration")
-        } else {
-          e
-        }
-        throw new PipelineExecutionException(cause)
-    }
-
-    new ScioResult(pipelineResult) {
-      private val metricsLocation = context.optionsAs[ScioOptions].getMetricsLocation
-      if (metricsLocation != null) {
-        saveMetrics(metricsLocation)
-      }
-
-      override def getMetrics: Metrics =
-        Metrics(BuildInfo.version,
-                BuildInfo.scalaVersion,
-                context.optionsAs[ApplicationNameOptions].getAppName,
-                state.toString,
-                getBeamMetrics)
-
-      override def isTest: Boolean = context.isTest
-    }
-  }
-
-  /**
-   * Wait until the pipeline finishes with the State `DONE` (as opposed to `CANCELLED` or
-   * `FAILED`). Throw exception otherwise.
-   */
-  def waitUntilDone(duration: Duration = getAwaitDuration,
-                    cancelJob: Boolean = true): ScioResult = {
-    val result = waitUntilFinish(duration, cancelJob)
-    if (!state.equals(State.DONE)) {
-      throw new PipelineExecutionException(new Exception(s"Job finished with state $state"))
-    }
-
-    result
-  }
 }
 
 /**
@@ -374,13 +427,13 @@ final case class ClosedScioContext private (pipelineResult: PipelineResult, cont
  * @groupname input Input Sources
  * @groupname Ungrouped Other Members
  */
-// scalastyle:off number.of.methods
-class ScioContext private[scio] (val options: PipelineOptions, private var artifacts: List[String])
-    extends TransformNameable {
-
-  private implicit val context: ScioContext = this
-
-  private val logger = LoggerFactory.getLogger(this.getClass)
+class ScioContext private[scio] (
+  val options: PipelineOptions,
+  private var artifacts: List[String]
+) extends TransformNameable {
+  // var _pipeline member is lazily initialized, this makes sure that file systems are registered
+  // before any IO
+  FileSystems.setDefaultPipelineOptions(options)
 
   /** Get PipelineOptions as a more specific sub-type. */
   def optionsAs[T <: PipelineOptions: ClassTag]: T =
@@ -414,19 +467,14 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
           .toList
           .map(_.getClassName.split('$').head)
           .exists(_.equals(classOf[App].getName))) {
-      logger.warn(
-        "Applications defined within scala.App might not work properly. Please use main method!")
+      ScioContext.log.warn(
+        "Applications defined within scala.App might not work properly. Please use main method!"
+      )
     }
   }
 
   private[scio] val testId: Option[String] =
-    Try(optionsAs[ApplicationNameOptions]).toOption.flatMap { o =>
-      if (TestUtil.isTestId(o.getAppName)) {
-        Some(o.getAppName)
-      } else {
-        None
-      }
-    }
+    Try(optionsAs[ApplicationNameOptions]).toOption.map(_.getAppName).filter(TestUtil.isTestId)
 
   /** Amount of time to block job for. */
   private[scio] val awaitDuration: Duration = {
@@ -439,7 +487,8 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
       case _: NumberFormatException =>
         throw new IllegalArgumentException(
           s"blockFor param $blockFor cannot be cast to " +
-            s"type scala.concurrent.duration.Duration")
+            s"type scala.concurrent.duration.Duration"
+        )
     }
   }
 
@@ -447,7 +496,7 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
   // the runner, which may end up with NPE. If not set but user generate new temp dir
   if (ScioUtil.isLocalRunner(options.getRunner) && options.getTempLocation == null) {
     val tmpDir = Files.createTempDirectory("scio-temp-")
-    logger.debug(s"New temp directory at $tmpDir")
+    ScioContext.log.debug(s"New temp directory at $tmpDir")
     options.setTempLocation(tmpDir.toString)
   }
 
@@ -522,28 +571,123 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
     options.setJobName(name)
   }
 
-  /** Close the context. No operation can be performed once the context is closed. */
-  def close(): ClosedScioContext = requireNotClosed {
+  /**
+   * Runs the underlying pipeline.
+   *
+   * Running closes the context and no further transformations can be applied to the
+   * pipeline once the context is closed.
+   *
+   * @return the [[ScioExecutionContext]] for the underlying job execution.
+   */
+  def run(): ScioExecutionContext = requireNotClosed {
     _onClose(())
 
     if (_counters.nonEmpty) {
       val counters = _counters.toArray
-      this.parallelize(Seq(0)).map { _ =>
+      this.parallelize(Seq(0)).withName("Initialize counters").map { _ =>
         counters.foreach(_.inc(0))
       }
     }
 
     _isClosed = true
 
-    val closedContext = ClosedScioContext(this.pipeline.run(), context)
+    val context = execute()
 
-    if (this.isTest || (this
-          .optionsAs[ScioOptions]
-          .isBlocking && awaitDuration == Duration.Inf)) {
-      val result = closedContext.waitUntilDone()
-      if (this.isTest) {
-        TestDataManager.closeTest(testId.get, result)
+    testId.foreach { id =>
+      val result = context.waitUntilDone()
+      TestDataManager.closeTest(id, result)
+    }
+
+    context
+  }
+
+  private[scio] def execute(): ScioExecutionContext = {
+    val sc = this
+    val pr = pipeline.run()
+
+    new ScioExecutionContext {
+      override val pipelineResult: PipelineResult = pr
+
+      override def isCompleted: Boolean = state.isTerminal()
+
+      override def state: State = Try(pipelineResult.getState).getOrElse(State.UNKNOWN)
+
+      override val cancelJob: Boolean = true
+
+      override val awaitDuration: Duration = sc.awaitDuration
+
+      override def waitUntilFinish(duration: Duration, cancelJob: Boolean): ScioResult = {
+        try {
+          val wait = duration match {
+            // according to PipelineResult values <= 1 ms mean `Duration.Inf`
+            case Duration.Inf => -1
+            case d            => d.toMillis
+          }
+          pipelineResult.waitUntilFinish(time.Duration.millis(wait))
+        } catch {
+          case e: InterruptedException =>
+            val cause = if (cancelJob) {
+              pipelineResult.cancel()
+              new InterruptedException(s"Job cancelled after exceeding timeout value $duration")
+            } else {
+              e
+            }
+            throw new PipelineExecutionException(cause)
+        }
+
+        new ScioResult(pipelineResult) {
+          private val metricsLocation = sc.optionsAs[ScioOptions].getMetricsLocation
+          if (metricsLocation != null) {
+            saveMetrics(metricsLocation)
+          }
+
+          override def getMetrics: Metrics =
+            Metrics(
+              BuildInfo.version,
+              BuildInfo.scalaVersion,
+              sc.optionsAs[ApplicationNameOptions].getAppName,
+              state.toString,
+              getBeamMetrics
+            )
+
+          override def isTest: Boolean = sc.isTest
+        }
       }
+
+      override def waitUntilDone(duration: Duration, cancelJob: Boolean): ScioResult = {
+        val result = waitUntilFinish(duration, cancelJob)
+        if (!state.equals(State.DONE)) {
+          throw new PipelineExecutionException(new Exception(s"Job finished with state $state"))
+        }
+
+        result
+      }
+    }
+  }
+
+  /**
+   * Close the context. No operation can be performed once the context is closed.
+   *
+   * This method is deprecated and with it the `--blocking` flag.
+   *
+   * Use [[ScioContext#run]].
+   *
+   * To achieve the same behaviour when `--blocking` was enabled use:
+   *
+   * {{{
+   * val sc: ScioContext = ???
+   *
+   * sc.run().waitUntilDone(Duration.Inf)
+   * }}}
+   *
+   * @see [[ScioContext#run]]
+   */
+  @deprecated("this method will be removed in next scio version; use run() instead.", "0.8.0")
+  def close(): ScioExecutionContext = requireNotClosed {
+    val closedContext = run()
+
+    if (optionsAs[ScioOptions].isBlocking && awaitDuration == Duration.Inf) {
+      closedContext.waitUntilDone()
     }
 
     closedContext
@@ -552,9 +696,9 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
   /** Whether the context is closed. */
   def isClosed: Boolean = _isClosed
 
-  /** Ensure an operation is called before the pipeline is closed. */
+  /** Ensure an operation is called before the pipeline has already been executed. */
   private[scio] def requireNotClosed[T](body: => T): T = {
-    require(!this.isClosed, "ScioContext already closed")
+    require(!this.isClosed, "Pipeline cannot be modified once ScioContext has been executed")
     body
   }
 
@@ -570,7 +714,8 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
   // =======================================================================
 
   private[scio] def applyInternal[Output <: POutput](
-    root: PTransform[_ >: PBegin, Output]): Output =
+    root: PTransform[_ >: PBegin, Output]
+  ): Output =
     pipeline.apply(this.tfName, root)
 
   /**
@@ -580,10 +725,12 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
   def datastore(projectId: String, query: Query, namespace: String = null): SCollection[Entity] =
     this.read(DatastoreIO(projectId))(DatastoreIO.ReadParam(query, namespace))
 
-  private def pubsubIn[T: ClassTag: Coder](isSubscription: Boolean,
-                                           name: String,
-                                           idAttribute: String,
-                                           timestampAttribute: String): SCollection[T] = {
+  private def pubsubIn[T: ClassTag: Coder](
+    isSubscription: Boolean,
+    name: String,
+    idAttribute: String,
+    timestampAttribute: String
+  ): SCollection[T] = {
     val io = PubsubIO[T](name, idAttribute, timestampAttribute)
     this.read(io)(PubsubIO.ReadParam(isSubscription))
   }
@@ -592,25 +739,30 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
    * Get an SCollection for a Pub/Sub subscription.
    * @group input
    */
-  def pubsubSubscription[T: ClassTag: Coder](sub: String,
-                                             idAttribute: String = null,
-                                             timestampAttribute: String = null): SCollection[T] =
+  def pubsubSubscription[T: ClassTag: Coder](
+    sub: String,
+    idAttribute: String = null,
+    timestampAttribute: String = null
+  ): SCollection[T] =
     pubsubIn(isSubscription = true, sub, idAttribute, timestampAttribute)
 
   /**
    * Get an SCollection for a Pub/Sub topic.
    * @group input
    */
-  def pubsubTopic[T: ClassTag: Coder](topic: String,
-                                      idAttribute: String = null,
-                                      timestampAttribute: String = null): SCollection[T] =
+  def pubsubTopic[T: ClassTag: Coder](
+    topic: String,
+    idAttribute: String = null,
+    timestampAttribute: String = null
+  ): SCollection[T] =
     pubsubIn(isSubscription = false, topic, idAttribute, timestampAttribute)
 
   private def pubsubInWithAttributes[T: ClassTag: Coder](
     isSubscription: Boolean,
     name: String,
     idAttribute: String,
-    timestampAttribute: String): SCollection[(T, Map[String, String])] = {
+    timestampAttribute: String
+  ): SCollection[(T, Map[String, String])] = {
     val io = PubsubIO.withAttributes[T](name, idAttribute, timestampAttribute)
     this.read(io)(PubsubIO.ReadParam(isSubscription))
   }
@@ -622,7 +774,8 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
   def pubsubSubscriptionWithAttributes[T: ClassTag: Coder](
     sub: String,
     idAttribute: String = null,
-    timestampAttribute: String = null): SCollection[(T, Map[String, String])] =
+    timestampAttribute: String = null
+  ): SCollection[(T, Map[String, String])] =
     pubsubInWithAttributes[T](isSubscription = true, sub, idAttribute, timestampAttribute)
 
   /**
@@ -632,15 +785,18 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
   def pubsubTopicWithAttributes[T: ClassTag: Coder](
     topic: String,
     idAttribute: String = null,
-    timestampAttribute: String = null): SCollection[(T, Map[String, String])] =
+    timestampAttribute: String = null
+  ): SCollection[(T, Map[String, String])] =
     pubsubInWithAttributes[T](isSubscription = false, topic, idAttribute, timestampAttribute)
 
   /**
    * Get an SCollection for a text file.
    * @group input
    */
-  def textFile(path: String,
-               compression: beam.Compression = beam.Compression.AUTO): SCollection[String] =
+  def textFile(
+    path: String,
+    compression: beam.Compression = beam.Compression.AUTO
+  ): SCollection[String] =
     this.read(TextIO(path))(TextIO.ReadParam(compression))
 
   /**
@@ -649,12 +805,11 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
    */
   def customInput[T: Coder, I >: PBegin <: PInput](
     name: String,
-    transform: PTransform[I, PCollection[T]]): SCollection[T] =
+    transform: PTransform[I, PCollection[T]]
+  ): SCollection[T] =
     requireNotClosed {
       if (this.isTest) {
-        this.parallelize(
-          TestDataManager.getInput(testId.get)(CustomIO[T](name)).asInstanceOf[Seq[T]]
-        )
+        TestDataManager.getInput(testId.get)(CustomIO[T](name)).toSCollection(this)
       } else {
         wrap(this.pipeline.apply(name, transform))
       }
@@ -671,10 +826,8 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
   def read[T: Coder](io: ScioIO[T])(params: io.ReadP): SCollection[T] =
     io.readWithContext(this, params)
 
-  // scalastyle:off structural.type
   def read[T: Coder](io: ScioIO[T] { type ReadP = Unit }): SCollection[T] =
     io.readWithContext(this, ())
-  // scalastyle:on structural.type
 
   // =======================================================================
   // In-memory collections
@@ -685,7 +838,7 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
     scs match {
       case Nil => empty()
       case contents =>
-        context.wrap(
+        wrap(
           PCollectionList
             .of(contents.map(_.internal).asJava)
             .apply(this.tfName, Flatten.pCollections())
@@ -701,22 +854,34 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
    */
   def parallelize[T: Coder](elems: Iterable[T]): SCollection[T] =
     requireNotClosed {
-      val coder = CoderMaterializer.beam(context, Coder[T])
+      val coder = CoderMaterializer.beam(this, Coder[T])
       wrap(
         this.applyInternal(
           Create
             .of(elems.asJava)
-            .withCoder(coder)))
+            .withCoder(coder)
+        )
+      )
     }
+  @deprecated("""
+⛔️  makeFuture is PRIVATE and you should NOT be using it
+⛔️     - Scio's internals were simplified and it removed the need for makeFuture
+⛔️     - The current implementation is only there for back-compatibility
+⛔️     - There's NO GUARANTEE that its behavior is 100% similar to Scio < 0.8
+⛔️     - IT WILL BE REMOVED VERY SOON!
+⛔️ https://git.io/JeAt1""", since = "0.8.0")
+  private[scio] def makeFuture[T](value: Tap[T]): Future[Tap[T]] =
+    Future.successful(value)
 
   /**
    * Distribute a local Scala `Map` to form an SCollection.
    * @group in_memory
    */
-  def parallelize[K, V](elems: Map[K, V])(implicit koder: Coder[K],
-                                          voder: Coder[V]): SCollection[(K, V)] =
+  def parallelize[K, V](
+    elems: Map[K, V]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] =
     requireNotClosed {
-      val kvc = CoderMaterializer.kvCoder[K, V](context)
+      val kvc = CoderMaterializer.kvCoder[K, V](this)
       wrap(this.applyInternal(Create.of(elems.asJava).withCoder(kvc)))
         .map(kv => (kv.getKey, kv.getValue))
     }
@@ -727,7 +892,7 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
    */
   def parallelizeTimestamped[T: Coder](elems: Iterable[(T, Instant)]): SCollection[T] =
     requireNotClosed {
-      val coder = CoderMaterializer.beam(context, Coder[T])
+      val coder = CoderMaterializer.beam(this, Coder[T])
       val v = elems.map(t => TimestampedValue.of(t._1, t._2))
       wrap(this.applyInternal(Create.timestamped(v.asJava).withCoder(coder)))
     }
@@ -736,10 +901,12 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
    * Distribute a local Scala `Iterable` with timestamps to form an SCollection.
    * @group in_memory
    */
-  def parallelizeTimestamped[T: Coder](elems: Iterable[T],
-                                       timestamps: Iterable[Instant]): SCollection[T] =
+  def parallelizeTimestamped[T: Coder](
+    elems: Iterable[T],
+    timestamps: Iterable[Instant]
+  ): SCollection[T] =
     requireNotClosed {
-      val coder = CoderMaterializer.beam(context, Coder[T])
+      val coder = CoderMaterializer.beam(this, Coder[T])
       val v = elems.zip(timestamps).map(t => TimestampedValue.of(t._1, t._2))
       wrap(this.applyInternal(Create.timestamped(v.asJava).withCoder(coder)))
     }
@@ -752,25 +919,25 @@ class ScioContext private[scio] (val options: PipelineOptions, private var artif
    * Initialize a new [[org.apache.beam.sdk.metrics.Counter Counter]] metric using `T` as namespace.
    * Default is "com.spotify.scio.ScioMetrics" if `T` is not specified.
    */
-  def initCounter[T: ClassTag](name: String): Counter = {
-    val counter = ScioMetrics.counter[T](name)
-    _counters.append(counter)
-    counter
-  }
+  def initCounter[T: ClassTag](name: String): Counter =
+    initCounter(ScioMetrics.counter[T](name)).head
 
-  /** Initialize a new [[org.apache.beam.sdk.metrics.Counter Counter]] metric. */
-  def initCounter(namespace: String, name: String): Counter = {
-    val counter = ScioMetrics.counter(namespace, name)
-    _counters.append(counter)
-    counter
-  }
+  /**
+   * Initialize a new [[org.apache.beam.sdk.metrics.Counter Counter]] metric from namespace and
+   * name.
+   * */
+  def initCounter(namespace: String, name: String): Counter =
+    initCounter(ScioMetrics.counter(namespace, name)).head
 
+  /** Initialize a given [[org.apache.beam.sdk.metrics.Counter Counter]] metric. */
+  def initCounter(counters: Counter*): Seq[Counter] = {
+    _counters.appendAll(counters)
+    counters
+  }
 }
-// scalastyle:on number.of.methods
 
 /** An enhanced ScioContext with distributed cache features. */
 class DistCacheScioContext private[scio] (self: ScioContext) {
-
   private[scio] def testDistCache: TestDistCache =
     TestDataManager.getDistCache(self.testId.get)
 
@@ -817,7 +984,4 @@ class DistCacheScioContext private[scio] (self: ScioContext) {
         new DistCacheMulti(uris.map(new URI(_)), initFn, self.optionsAs[GcsOptions])
       }
     }
-
 }
-
-// scalastyle:on file.size.limit

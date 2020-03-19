@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,19 +30,19 @@ import org.joda.time.Duration
 
 import scala.collection.JavaConverters._
 
+@deprecated("scio-elasticsearch2 will be removed", "0.8.0")
 final case class ElasticsearchIO[T](esOptions: ElasticsearchOptions) extends ScioIO[T] {
-
   override type ReadP = Nothing
   override type WriteP = ElasticsearchIO.WriteParam[T]
   override val tapT = EmptyTapOf[T]
 
-  override def read(sc: ScioContext, params: ReadP): SCollection[T] =
-    throw new IllegalStateException("Can't read from ElasticSearch")
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[T] =
+    throw new UnsupportedOperationException("Can't read from ElasticSearch")
 
   /**
    * Save this SCollection into Elasticsearch.
    */
-  override def write(data: SCollection[T], params: WriteP): Tap[Nothing] = {
+  override protected def write(data: SCollection[T], params: WriteP): Tap[Nothing] = {
     val shards =
       if (params.numOfShards > 0) params.numOfShards else esOptions.servers.size
     data.applyInternal(
@@ -56,10 +56,13 @@ final case class ElasticsearchIO[T](esOptions: ElasticsearchOptions) extends Sci
         .withFlushInterval(params.flushInterval)
         .withNumOfShard(shards)
         .withMaxBulkRequestSize(params.maxBulkRequestSize)
+        .withMaxRetries(params.retry.maxRetries)
+        .withRetryPause(params.retry.retryPause)
         .withError(new beam.ThrowingConsumer[BulkExecutionException] {
           override def accept(t: BulkExecutionException): Unit =
             params.errorFn(t)
-        }))
+        })
+    )
     EmptyTap
   }
 
@@ -68,12 +71,18 @@ final case class ElasticsearchIO[T](esOptions: ElasticsearchOptions) extends Sci
 }
 
 object ElasticsearchIO {
-
   object WriteParam {
     private[elasticsearch] val DefaultErrorFn: BulkExecutionException => Unit = m => throw m
     private[elasticsearch] val DefaultFlushInterval = Duration.standardSeconds(1)
     private[elasticsearch] val DefaultNumShards = 0
     private[elasticsearch] val DefaultMaxBulkRequestSize = 3000
+    private[elasticsearch] val DefaultMaxRetries = 3
+    private[elasticsearch] val DefaultRetryPause = Duration.millis(35000)
+    private[elasticsearch] val DefaultRetryConfig =
+      RetryConfig(
+        maxRetries = WriteParam.DefaultMaxRetries,
+        retryPause = WriteParam.DefaultRetryPause
+      )
   }
 
   final case class WriteParam[T] private (
@@ -81,5 +90,9 @@ object ElasticsearchIO {
     errorFn: BulkExecutionException => Unit = WriteParam.DefaultErrorFn,
     flushInterval: Duration = WriteParam.DefaultFlushInterval,
     numOfShards: Long = WriteParam.DefaultNumShards,
-    maxBulkRequestSize: Int = WriteParam.DefaultMaxBulkRequestSize)
+    maxBulkRequestSize: Int = WriteParam.DefaultMaxBulkRequestSize,
+    retry: RetryConfig = WriteParam.DefaultRetryConfig
+  )
+
+  final case class RetryConfig(maxRetries: Int, retryPause: Duration)
 }

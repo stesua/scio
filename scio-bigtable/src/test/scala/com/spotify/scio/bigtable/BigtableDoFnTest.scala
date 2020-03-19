@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,13 +23,12 @@ import com.google.cloud.bigtable.grpc.BigtableSession
 import com.google.common.cache.{Cache, CacheBuilder}
 import com.google.common.util.concurrent.{Futures, ListenableFuture}
 import com.spotify.scio.testing._
-import com.spotify.scio.transforms.AsyncLookupDoFn.CacheSupplier
+import com.spotify.scio.transforms.BaseAsyncLookupDoFn.CacheSupplier
 
 import scala.collection.JavaConverters._
 import scala.util.{Failure, Success}
 
 class BigtableDoFnTest extends PipelineSpec {
-
   "BigtableDoFn" should "work" in {
     val fn = new TestBigtableDoFn
     val output = runWithData(1 to 10)(_.parDo(fn))

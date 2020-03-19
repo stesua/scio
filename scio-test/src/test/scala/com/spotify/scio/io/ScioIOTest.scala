@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,26 @@
 package com.spotify.scio.io
 
 import java.nio.ByteBuffer
+import java.nio.file.Files
 
 import com.google.datastore.v1.Entity
 import com.google.datastore.v1.client.DatastoreHelper
+import com.spotify.scio.ScioContext
+import com.spotify.scio.avro.AvroUtils.schema
 import com.spotify.scio.avro._
-import com.spotify.scio.coders.Coder
 import com.spotify.scio.bigquery._
+import com.spotify.scio.coders.Coder
 import com.spotify.scio.proto.Track.TrackPB
 import com.spotify.scio.testing._
+import org.apache.avro.generic.GenericRecord
+import org.apache.beam.sdk.Pipeline.PipelineVisitor
+import org.apache.beam.sdk.io.Read
+import org.apache.beam.sdk.runners.TransformHierarchy
+import org.apache.beam.sdk.values.PValue
+import org.apache.commons.io.FileUtils
+
+import scala.collection.mutable
+import scala.collection.JavaConverters._
 
 object ScioIOTest {
   @AvroType.toSchema
@@ -36,13 +48,12 @@ object ScioIOTest {
 }
 
 class ScioIOTest extends ScioIOSpec {
-
   import ScioIOTest._
 
   "AvroIO" should "work with SpecificRecord" in {
     val xs = (1 to 100).map(AvroUtils.newSpecificRecord)
     testTap(xs)(_.saveAsAvroFile(_))(".avro")
-    testJobTest(xs)(AvroIO(_))(_.avroFile(_))(_.saveAsAvroFile(_))
+    testJobTest(xs)(AvroIO[TestRecord](_))(_.avroFile(_))(_.saveAsAvroFile(_))
   }
 
   it should "work with GenericRecord" in {
@@ -60,11 +71,24 @@ class ScioIOTest extends ScioIOSpec {
     testJobTest(xs)(io)(_.typedAvroFile[AvroRecord](_))(_.saveAsTypedAvroFile(_))
   }
 
+  it should "work with GenericRecord and a parseFn" in {
+    import GenericParseFnAvroFileJob.PartialFieldsAvro
+    val xs = (1 to 100).map(PartialFieldsAvro)
+    // No test for saveAsAvroFile because parseFn is only for i/p
+    testJobTest(xs)(AvroIO(_))(
+      _.parseAvroFile[PartialFieldsAvro](_)((gr: GenericRecord) =>
+        PartialFieldsAvro(gr.get("int_field").asInstanceOf[Int])
+      )
+    )(_.saveAsAvroFile(_, schema = schema))
+  }
+
   "ObjectFileIO" should "work" in {
     import ScioIOTest._
     val xs = (1 to 100).map(x => AvroRecord(x, x.toString, (1 to x).map(_.toString).toList))
     testTap(xs)(_.saveAsObjectFile(_))(".obj.avro")
-    testJobTest[AvroRecord](xs)(ObjectFileIO(_))(_.objectFile(_))(_.saveAsObjectFile(_))
+    testJobTest[AvroRecord](xs)(ObjectFileIO[AvroRecord](_))(_.objectFile[AvroRecord](_))(
+      _.saveAsObjectFile(_)
+    )
   }
 
   "ProtobufIO" should "work" in {
@@ -77,12 +101,94 @@ class ScioIOTest extends ScioIOSpec {
 
   "BigQueryIO" should "work with TableRow" in {
     val xs = (1 to 100).map(x => TableRow("x" -> x.toString))
-    testJobTest(xs)(BigQueryIO(_))(_.bigQueryTable(_))(_.saveAsBigQuery(_))
+    testJobTest(xs, in = "project:dataset.in_table", out = "project:dataset.out_table")(
+      BigQueryIO(_)
+    )((sc, s) => sc.bigQueryTable(Table.Spec(s)))((coll, s) =>
+      coll.saveAsBigQueryTable(Table.Spec(s))
+    )
   }
 
   it should "work with typed BigQuery" in {
     val xs = (1 to 100).map(x => BQRecord(x, x.toString, (1 to x).map(_.toString).toList))
-    testJobTest(xs)(BigQueryIO(_))(_.typedBigQuery(_))(_.saveAsTypedBigQuery(_))
+    testJobTest(xs, in = "project:dataset.in_table", out = "project:dataset.out_table")(
+      BigQueryIO(_)
+    )((sc, s) => sc.typedBigQueryTable[BQRecord](Table.Spec(s)))((coll, s) =>
+      coll.saveAsTypedBigQueryTable(Table.Spec(s))
+    )
+  }
+
+  /**
+   * The `BigQueryIO`'s write, runs Beam's BQ IO which creates a `Read` Transform to return the
+   * insert errors.
+   *
+   * The `saveAsBigQuery` or `saveAsTypedBigQuery` in Scio is designed to return a `ClosedTap`
+   * and by default drops insert errors.
+   *
+   * The following tests make sure that the dropped insert errors do not appear as an unconsumed
+   * read outside the transform writing to Big Query.
+   */
+  it should "not have unconsumed errors with saveAsBigQuery" in {
+    val xs = (1 to 100).map(x => TableRow("x" -> x.toString))
+
+    val context = ScioContext()
+    context
+      .parallelize(xs)
+      .saveAsBigQueryTable(Table.Spec("project:dataset.dummy"), createDisposition = CREATE_NEVER)
+    // We want to validate on the job graph, and we need not actually execute the pipeline.
+
+    verifyAllReadsConsumed(context)
+  }
+
+  it should "not have unconsumed errors with saveAsTypedBigQuery" in {
+    val xs = (1 to 100).map(x => BQRecord(x, x.toString, (1 to x).map(_.toString).toList))
+
+    val context = ScioContext()
+    context
+      .parallelize(xs)
+      .saveAsTypedBigQueryTable(
+        Table.Spec("project:dataset.dummy"),
+        createDisposition = CREATE_NEVER
+      )
+    // We want to validate on the job graph, and we need not actually execute the pipeline.
+
+    verifyAllReadsConsumed(context)
+  }
+
+  /**
+   * Verify that there are no `Read` Transforms that do not have another transform using it as an
+   * input.
+   *
+   * To do this, we visit all PTransforms, and find the inputs at each stage, and mark those inputs
+   * as consumed by putting them in `consumedOutputs`. We also check if each transform is a `Read`
+   * and if so we extract them as well.
+   *
+   * This is copied from Beam's test for UnconsumedReads.
+   */
+  private def verifyAllReadsConsumed(context: ScioContext): Unit = {
+    val consumedOutputs = mutable.HashSet[PValue]()
+    val allReads = mutable.HashSet[PValue]()
+
+    context.pipeline.traverseTopologically(
+      new PipelineVisitor.Defaults {
+        override def visitPrimitiveTransform(node: TransformHierarchy#Node): Unit =
+          consumedOutputs ++= node.getInputs.values().asScala
+
+        override def visitValue(
+          value: PValue,
+          producer: TransformHierarchy#Node
+        ): Unit =
+          producer.getTransform match {
+            case _: Read.Bounded[_] | _: Read.Unbounded[_] =>
+              allReads += value
+            case _ =>
+          }
+      }
+    )
+
+    val unconsumedReads = allReads -- consumedOutputs
+
+    unconsumedReads shouldBe empty
+    ()
   }
 
   "TableRowJsonIO" should "work" in {
@@ -100,6 +206,24 @@ class ScioIOTest extends ScioIOSpec {
   "BinaryIO" should "work" in {
     val xs = (1 to 100).map(i => ByteBuffer.allocate(4).putInt(i).array)
     testJobTestOutput(xs)(BinaryIO(_))(_.saveAsBinaryFile(_))
+  }
+
+  "BinaryIO" should "output files to $prefix/part-*" in {
+    val tmpDir = Files.createTempDirectory("binary-io-")
+
+    val sc = ScioContext()
+    sc.parallelize(Seq(ByteBuffer.allocate(4).putInt(1).array)).saveAsBinaryFile(tmpDir.toString)
+    sc.run()
+
+    Files
+      .list(tmpDir)
+      .iterator()
+      .asScala
+      .filterNot(_.toFile.getName.startsWith("."))
+      .map(_.toFile.getName)
+      .toSet shouldBe Set("part-00000-of-00001.bin")
+
+    FileUtils.deleteDirectory(tmpDir.toFile)
   }
 
   "DatastoreIO" should "work" in {
@@ -126,7 +250,8 @@ class ScioIOTest extends ScioIOSpec {
     val xs = (1 to 100).map(x => (x.toString, Map.empty[String, String]))
     val io = (s: String) => PubsubIO[(String, Map[String, String])](s)
     testJobTest(xs)(io)(_.pubsubSubscriptionWithAttributes(_))(
-      _.saveAsPubsubWithAttributes[String](_))
+      _.saveAsPubsubWithAttributes[String](_)
+    )
   }
 
   it should "work with topic and attributes" in {
@@ -134,5 +259,4 @@ class ScioIOTest extends ScioIOSpec {
     val io = (s: String) => PubsubIO[(String, Map[String, String])](s)
     testJobTest(xs)(io)(_.pubsubTopicWithAttributes(_))(_.saveAsPubsubWithAttributes[String](_))
   }
-
 }

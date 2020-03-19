@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,6 @@ object MockBigQuery {
 
   /** Create a new MockBigQuery instance with the given BigQueryClient. */
   def apply(bq: BigQuery): MockBigQuery = new MockBigQuery(bq)
-
 }
 
 /**
@@ -46,7 +45,6 @@ object MockBigQuery {
  * [[queryResult]] to query them.
  */
 class MockBigQuery private (private val bq: BigQuery) {
-
   private val mapping = MMap.empty[TableReference, TableReference]
 
   /**
@@ -59,8 +57,10 @@ class MockBigQuery private (private val bq: BigQuery) {
    * Mock a BigQuery table. Each table can be mocked only once in a test class.
    */
   def mockTable(original: TableReference): MockTable = {
-    require(!mapping.contains(original),
-            s"Table ${BigQueryHelpers.toTableSpec(original)} already registered for mocking")
+    require(
+      !mapping.contains(original),
+      s"Table ${BigQueryHelpers.toTableSpec(original)} already registered for mocking"
+    )
 
     val t = bq.tables.table(original)
     val temp = bq.tables.createTemporary(t.getLocation)
@@ -84,7 +84,8 @@ class MockBigQuery private (private val bq: BigQuery) {
       case e: GoogleJsonResponseException if ApiErrorExtractor.INSTANCE.itemNotFound(e) =>
         throw new RuntimeException(
           "404 Not Found, this is most likely caused by missing source table or mock data",
-          e)
+          e
+        )
     }
   }
 
@@ -94,7 +95,8 @@ class MockBigQuery private (private val bq: BigQuery) {
    */
   def typedQueryResult[T <: HasAnnotation: ClassTag: TypeTag](
     sqlQuery: String,
-    flattenResults: Boolean = false): Seq[T] = {
+    flattenResults: Boolean = false
+  ): Seq[T] = {
     val bqt = BigQueryType[T]
     queryResult(sqlQuery, flattenResults).map(bqt.fromTableRow)
   }
@@ -105,26 +107,28 @@ class MockBigQuery private (private val bq: BigQuery) {
     } else {
       s"`${table.getProjectId}.${table.getDatasetId}.${table.getTableId}`"
     }
-
 }
 
 /**
  * A BigQuery table being mocked for test.
  */
-class MockTable(private val bq: BigQuery,
-                private val schema: TableSchema,
-                private val original: TableReference,
-                private val temp: TableReference) {
-
+class MockTable(
+  private val bq: BigQuery,
+  private val schema: TableSchema,
+  private val original: TableReference,
+  private val temp: TableReference
+) {
   private var mocked: Boolean = false
 
   private def ensureUnique(): Unit = {
-    require(!mocked,
-            s"Table ${BigQueryHelpers.toTableSpec(original)} already populated with mock data")
+    require(
+      !mocked,
+      s"Table ${BigQueryHelpers.toTableSpec(original)} already populated with mock data"
+    )
     this.mocked = true
   }
 
-  private def writeRows(rows: Seq[TableRow]): Unit =
+  private def writeRows(rows: Seq[TableRow]): Long =
     bq.tables.writeRows(temp, rows.toList, schema, WRITE_EMPTY, CREATE_IF_NEEDED)
 
   /**
@@ -133,6 +137,7 @@ class MockTable(private val bq: BigQuery,
   def withData(rows: Seq[TableRow]): Unit = {
     ensureUnique()
     writeRows(rows)
+    ()
   }
 
   /**
@@ -149,9 +154,10 @@ class MockTable(private val bq: BigQuery,
    */
   def withSample(numRows: Int): Unit = {
     ensureUnique()
-    val rows = bq.tables.rows(original).take(numRows).toList
+    val rows = bq.tables.rows(Table.Ref(original)).take(numRows).toList
     require(rows.length == numRows, s"Sample size ${rows.length} != requested $numRows")
     writeRows(rows)
+    ()
   }
 
   /**
@@ -160,10 +166,12 @@ class MockTable(private val bq: BigQuery,
    */
   def withSample(minNumRows: Int, maxNumRows: Int): Unit = {
     ensureUnique()
-    val rows = bq.tables.rows(original).take(maxNumRows).toList
-    require(rows.length >= minNumRows && rows.length <= maxNumRows,
-            s"Sample size ${rows.length} < requested minimal $minNumRows")
+    val rows = bq.tables.rows(Table.Ref(original)).take(maxNumRows).toList
+    require(
+      rows.length >= minNumRows && rows.length <= maxNumRows,
+      s"Sample size ${rows.length} < requested minimal $minNumRows"
+    )
     writeRows(rows)
+    ()
   }
-
 }

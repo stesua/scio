@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,29 +21,45 @@ import com.google.api.services.bigquery.model.{TableFieldSchema, TableSchema}
 import com.google.protobuf.ByteString
 import com.spotify.scio.bigquery.types.MacroUtil._
 import com.spotify.scio.bigquery.validation.{OverrideTypeProvider, OverrideTypeProviderFinder}
+import org.apache.avro.Schema
+import org.apache.beam.sdk.io.gcp.bigquery.BigQueryUtils
 import org.joda.time.{Instant, LocalDate, LocalDateTime, LocalTime}
 
 import scala.collection.JavaConverters._
 import scala.reflect.runtime.universe._
+import com.spotify.scio.util.Cache
 
 private[types] object SchemaProvider {
+  private[this] val AvroSchemaCache = Cache.concurrentHashMap[String, Schema]
+  private[this] val TableSchemaCache = Cache.concurrentHashMap[Type, TableSchema]
 
-  def schemaOf[T: TypeTag]: TableSchema = {
-    val fields = typeOf[T].erasure match {
-      case t if isCaseClass(t) => toFields(t)
-      case t                   => throw new RuntimeException(s"Unsupported type $t")
-    }
-    val r = new TableSchema().setFields(fields.toList.asJava)
-    debug(s"SchemaProvider.schemaOf[${typeOf[T]}]:")
-    debug(r)
-    r
-  }
+  def avroSchemaOf[T: TypeTag]: Schema =
+    AvroSchemaCache.get(
+      typeTag[T].tpe.toString,
+      BigQueryUtils.toGenericAvroSchema(typeTag[T].tpe.toString, schemaOf[T].getFields)
+    )
 
-  private def field(mode: String,
-                    name: String,
-                    tpe: String,
-                    desc: Option[String],
-                    nested: Iterable[TableFieldSchema]): TableFieldSchema = {
+  def schemaOf[T: TypeTag]: TableSchema =
+    TableSchemaCache.get(
+      typeOf[T].erasure, {
+        val fields = typeOf[T].erasure match {
+          case t if isCaseClass(t) => toFields(t)
+          case t                   => throw new RuntimeException(s"Unsupported type $t")
+        }
+        val r = new TableSchema().setFields(fields.toList.asJava)
+        debug(s"SchemaProvider.schemaOf[${typeOf[T]}]:")
+        debug(r)
+        r
+      }
+    )
+
+  private def field(
+    mode: String,
+    name: String,
+    tpe: String,
+    desc: Option[String],
+    nested: Iterable[TableFieldSchema]
+  ): TableFieldSchema = {
     val s = new TableFieldSchema().setMode(mode).setName(name).setType(tpe)
     if (nested.nonEmpty) {
       s.setFields(nested.toList.asJava)
@@ -54,7 +70,6 @@ private[types] object SchemaProvider {
 
   val provider: OverrideTypeProvider = OverrideTypeProviderFinder.getProvider
 
-  // scalastyle:off cyclomatic.complexity
   private def rawType(tpe: Type): (String, Iterable[TableFieldSchema]) =
     tpe match {
       case t if provider.shouldOverrideType(t) =>
@@ -74,11 +89,11 @@ private[types] object SchemaProvider {
       case t if t =:= typeOf[LocalDate]     => ("DATE", Iterable.empty)
       case t if t =:= typeOf[LocalTime]     => ("TIME", Iterable.empty)
       case t if t =:= typeOf[LocalDateTime] => ("DATETIME", Iterable.empty)
+      case t if t =:= typeOf[Geography]     => ("GEOGRAPHY", Iterable.empty)
 
       case t if isCaseClass(t) => ("RECORD", toFields(t))
       case _                   => throw new RuntimeException(s"Unsupported type: $tpe")
     }
-  // scalastyle:on cyclomatic.complexity
 
   private def toField(f: (Symbol, Option[String])): TableFieldSchema = {
     val (symbol, desc) = f
@@ -114,5 +129,4 @@ private[types] object SchemaProvider {
         }
     }
   }
-
 }

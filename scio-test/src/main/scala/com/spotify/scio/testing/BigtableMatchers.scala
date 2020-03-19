@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ import com.spotify.scio.coders.Coder
 
 import org.scalatest.matchers.{MatchResult, Matcher}
 
-import scala.language.implicitConversions
 import scala.reflect.ClassTag
 
 /**
@@ -58,7 +57,7 @@ trait BigtableMatchers extends SCollectionMatchers {
     new Matcher[BTCollection] {
       override def apply(left: BTCollection): MatchResult = {
         val foundCFs = left.flatMap {
-          case (key, cells) =>
+          case (_, cells) =>
             cells.map(_.getSetCell.getFamilyName)
         }
 
@@ -71,7 +70,8 @@ trait BigtableMatchers extends SCollectionMatchers {
    * deserialized cell value. Column qualifier defaults to the same as column family.
    */
   def containSetCellValue[V: ClassTag](key: ByteString, cf: String, value: V)(
-    implicit ser: V => ByteString): Matcher[BTCollection] =
+    implicit ser: V => ByteString
+  ): Matcher[BTCollection] =
     containSetCellValue(key, cf, cf, value)
 
   /**
@@ -85,7 +85,8 @@ trait BigtableMatchers extends SCollectionMatchers {
    * @tparam V Class of expected value
    */
   def containSetCellValue[V: ClassTag](key: ByteString, cf: String, cq: String, value: V)(
-    implicit ser: V => ByteString): Matcher[BTCollection] =
+    implicit ser: V => ByteString
+  ): Matcher[BTCollection] =
     new Matcher[BTCollection] {
       override def apply(left: BTCollection): MatchResult = {
         val flattenedRows = left.flatMap {
@@ -106,7 +107,8 @@ trait BigtableMatchers extends SCollectionMatchers {
             cf,
             ByteString.copyFromUtf8(cq),
             ser.apply(value)
-          )).apply(flattenedRows)
+          )
+        ).apply(flattenedRows)
       }
     }
 
@@ -114,8 +116,10 @@ trait BigtableMatchers extends SCollectionMatchers {
    * Check that the BT collection contains a cell with the given row key and enumerated
    * MutationCase, making no assumptions about the contents of the rest of the collection.
    */
-  def containCellMutationCase[V: ClassTag](key: ByteString,
-                                           mutation: MutationCase): Matcher[BTCollection] =
+  def containCellMutationCase[V: ClassTag](
+    key: ByteString,
+    mutation: MutationCase
+  ): Matcher[BTCollection] =
     new Matcher[BTCollection] {
       override def apply(left: BTCollection): MatchResult = {
         val flattenedRows = left.flatMap {

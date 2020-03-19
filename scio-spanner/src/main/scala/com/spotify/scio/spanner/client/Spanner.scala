@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,14 +25,14 @@ object Spanner {
     SpannerOptions.newBuilder().build().getService
   }
 
-  def databaseClient(config: SpannerConfig, instance: Spanner = defaultInstance): DatabaseClient = {
+  def databaseClient(config: SpannerConfig, instance: Spanner = defaultInstance): DatabaseClient =
     instance.getDatabaseClient(
       DatabaseId.of(
         config.getProjectId.get(),
         config.getInstanceId.get(),
         config.getDatabaseId.get()
-      ))
-  }
+      )
+    )
 
   def adminClient(project: String, instance: Spanner = defaultInstance): DatabaseAdminClient =
     SpannerOptions.newBuilder().setProjectId(project).build().getService.getDatabaseAdminClient

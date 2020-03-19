@@ -15,34 +15,39 @@
  * under the License.
  */
 
-
 package com.spotify.scio.bigtable;
 
 import com.google.cloud.bigtable.config.BigtableOptions;
 import com.google.cloud.bigtable.grpc.BigtableSession;
 import com.google.cloud.bigtable.grpc.io.ChannelPool;
 import com.google.cloud.bigtable.grpc.io.CredentialInterceptorCache;
-import com.google.common.collect.ImmutableList;
 import io.grpc.ClientInterceptor;
 
 import java.io.IOException;
-import java.util.List;
 
 public class ChannelPoolCreator {
-  public static final BigtableOptions options = new BigtableOptions.Builder().build();
-  public static ClientInterceptor interceptor;
+  private static final BigtableOptions options = BigtableOptions.builder().build();
+  private static ClientInterceptor[] interceptors;
 
   static {
     try {
-      interceptor = CredentialInterceptorCache.getInstance()
+      final ClientInterceptor interceptor =
+          CredentialInterceptorCache.getInstance()
               .getCredentialsInterceptor(options.getCredentialOptions(), options.getRetryOptions());
+
+      // If credentials are unset (i.e. via local emulator), CredentialsInterceptor will return null
+      if (interceptor == null) {
+        interceptors = new ClientInterceptor[] {};
+      } else {
+        interceptors = new ClientInterceptor[] {interceptor};
+      }
     } catch (Exception e) {
       e.printStackTrace();
     }
   }
 
-  public static ChannelPool createPool(final String host) throws IOException {
-    return new ChannelPool(() -> BigtableSession.createNettyChannel(host, options, interceptor),
-        1);
+  public static ChannelPool createPool(final BigtableOptions options) throws IOException {
+    return new ChannelPool(
+        () -> BigtableSession.createNettyChannel(options.getAdminHost(), options, interceptors), 1);
   }
 }

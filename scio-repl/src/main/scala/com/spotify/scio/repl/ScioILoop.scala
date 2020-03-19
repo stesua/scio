@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import org.apache.beam.sdk.options.PipelineOptionsFactory
 import com.spotify.scio.bigquery.BigQuerySysProps
 import com.spotify.scio.BuildInfo
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions.DefaultProjectFactory
-import org.apache.commons.lang.StringEscapeUtils
+import org.apache.commons.text.StringEscapeUtils
 
 import scala.tools.nsc.GenericRunnerSettings
 import scala.tools.nsc.interpreter.{IR, JPrintWriter}
@@ -33,12 +33,12 @@ import scala.tools.nsc.interpreter.{IR, JPrintWriter}
  * @param scioClassLoader [[ScioReplClassLoader]] used for runtime/in-memory classloading
  * @param args user arguments for Scio REPL
  */
-class ScioILoop(scioClassLoader: ScioReplClassLoader,
-                args: List[String],
-                reader: Option[BufferedReader],
-                out: JPrintWriter)
-    extends ILoopCompat(reader, out) {
-
+class ScioILoop(
+  scioClassLoader: ScioReplClassLoader,
+  args: List[String],
+  reader: Option[BufferedReader],
+  out: JPrintWriter
+) extends ILoopCompat(reader, out) {
   private var scioIsInitialized = false
 
   welcome()
@@ -76,14 +76,18 @@ class ScioILoop(scioClassLoader: ScioReplClassLoader,
   // Hidden magics/helpers for REPL session jars.
 
   private val createJarCmd =
-    LoopCommand.nullary("createJar", "create a Scio REPL runtime jar", () => {
-      Result.resultFromString(scioClassLoader.createReplCodeJar)
-    })
+    LoopCommand.nullary(
+      "createJar",
+      "create a Scio REPL runtime jar",
+      () => Result.resultFromString(scioClassLoader.createReplCodeJar)
+    )
 
   private val getNextJarCmd =
-    LoopCommand.nullary("nextJar", "get the path of the next Scio REPL runtime jar", () => {
-      Result.resultFromString(scioClassLoader.getNextReplCodeJarPath)
-    })
+    LoopCommand.nullary(
+      "nextJar",
+      "get the path of the next Scio REPL runtime jar",
+      () => Result.resultFromString(scioClassLoader.getNextReplCodeJarPath)
+    )
 
   /**
    * REPL magic to get a new Scio context using arguments from the command line or :scioOpts.
@@ -119,10 +123,12 @@ class ScioILoop(scioClassLoader: ScioReplClassLoader,
     Result.default
   }
 
-  private val newLocalScioCmd = LoopCommand.cmd("newLocalScio",
-                                                "<[context-name] | sc>",
-                                                "get a new local Scio context",
-                                                newLocalScioCmdImpl)
+  private val newLocalScioCmd = LoopCommand.cmd(
+    "newLocalScio",
+    "<[context-name] | sc>",
+    "get a new local Scio context",
+    newLocalScioCmdImpl
+  )
 
   /** REPL magic to show or update Scio options. */
   private def scioOptsCmdImpl(args: String) = {
@@ -158,7 +164,7 @@ class ScioILoop(scioClassLoader: ScioReplClassLoader,
   private def runScioCmdImpl(name: String) = {
     scioClassLoader.createReplCodeJar
     val sc = if (name.nonEmpty) name else "sc"
-    intp.interpret(s"$sc.close()")
+    intp.interpret(s"$sc.run()")
     Result.default
   }
 
@@ -177,9 +183,12 @@ class ScioILoop(scioClassLoader: ScioReplClassLoader,
   // =======================================================================
 
   private def optsFromArgs(args: Seq[String]): String = {
+    val options = args ++ args
+      .find(_.startsWith("--appName"))
+      .fold(Option("--appName=sciorepl"))(_ => Option.empty[String])
     val factory = "org.apache.beam.sdk.options.PipelineOptionsFactory"
-    val argsStr = args.mkString("\"", "\", \"", "\"")
-    s"""$factory.fromArgs($argsStr).create()"""
+    val optionsAsStr = options.mkString("\"", "\", \"", "\"")
+    s"""$factory.fromArgs($optionsAsStr).create()"""
   }
 
   private def welcome(): Unit = {
@@ -195,7 +204,8 @@ class ScioILoop(scioClassLoader: ScioReplClassLoader,
     val p = scala.util.Properties
     echo(
       "Using Scala version %s (%s, Java %s)"
-        .format(BuildInfo.scalaVersion, p.javaVmName, p.javaVersion))
+        .format(BuildInfo.scalaVersion, p.javaVmName, p.javaVersion)
+    )
 
     echo("""
         |Type in expressions to have them evaluated.
@@ -237,12 +247,11 @@ class ScioILoop(scioClassLoader: ScioReplClassLoader,
     }
   }
 
-  private def loadIoCommands(): IR.Result = {
+  private def loadIoCommands(): IR.Result =
     intp.interpret("""
         |val _ioCommands = new com.spotify.scio.repl.IoCommands(sc.options)
         |import _ioCommands._
       """.stripMargin)
-  }
 
   override def createInterpreter(): Unit = {
     super.createInterpreter()
@@ -256,11 +265,11 @@ class ScioILoop(scioClassLoader: ScioReplClassLoader,
       sys.error(
         "Could not initialize Scio interpreter - abort." +
           "One possible reason is inconsistent Scala versions. " +
-          "Please use the exact same version of Scala as scio-repl.")
+          "Please use the exact same version of Scala as scio-repl."
+      )
     }
     scioIsInitialized = true
     out.print(prompt)
     out.flush()
   }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,38 +27,44 @@ import org.joda.time.{Instant, LocalDate, LocalDateTime, LocalTime}
 import scala.reflect.macros._
 
 private[types] object ConverterProvider {
-
   def fromAvroImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[GenericRecord => T] = {
     import c.universe._
-    val tpe = implicitly[c.WeakTypeTag[T]].tpe
+    val tpe = weakTypeOf[T]
     val r = fromAvroInternal(c)(tpe)
-    debug(s"ConverterProvider.fromAvroImpl[${weakTypeOf[T]}]:")
+    debug(s"ConverterProvider.fromAvroImpl[$tpe]:")
     debug(r)
     c.Expr[GenericRecord => T](r)
   }
 
+  def toAvroImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[T => GenericRecord] = {
+    import c.universe._
+    val tpe = weakTypeOf[T]
+    val r = toAvroInternal(c)(tpe)
+    debug(s"ConverterProvider.toAvroInternal[$tpe]:")
+    debug(r)
+    c.Expr[T => GenericRecord](r)
+  }
+
   def fromTableRowImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[TableRow => T] = {
     import c.universe._
-    val tpe = implicitly[c.WeakTypeTag[T]].tpe
+    val tpe = weakTypeOf[T]
     val r = fromTableRowInternal(c)(tpe)
-    debug(s"ConverterProvider.fromTableRowImpl[${weakTypeOf[T]}]:")
+    debug(s"ConverterProvider.fromTableRowImpl[$tpe]:")
     debug(r)
     c.Expr[TableRow => T](r)
   }
 
   def toTableRowImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[T => TableRow] = {
     import c.universe._
-    val tpe = implicitly[c.WeakTypeTag[T]].tpe
+    val tpe = weakTypeOf[T]
     val r = toTableRowInternal(c)(tpe)
-    debug(s"ConverterProvider.toTableRowImpl[${weakTypeOf[T]}]:")
+    debug(s"ConverterProvider.toTableRowImpl[$tpe]:")
     debug(r)
     c.Expr[T => TableRow](r)
   }
 
   // =======================================================================
 
-  // scalastyle:off cyclomatic.complexity
-  // scalastyle:off method.length
   private def fromAvroInternal(c: blackbox.Context)(tpe: c.Type): c.Tree = {
     import c.universe._
 
@@ -79,7 +85,7 @@ private[types] object ConverterProvider {
         case t if t =:= typeOf[Double]  => q"$tree.asInstanceOf[Double]"
         case t if t =:= typeOf[String]  => q"$tree.toString"
         case t if t =:= typeOf[BigDecimal] =>
-          q"_root_.com.spotify.scio.bigquery.Numeric($tree.toString)"
+          q"_root_.com.spotify.scio.bigquery.Numeric.parse($tree)"
 
         case t if t =:= typeOf[ByteString] =>
           val b = q"$tree.asInstanceOf[_root_.java.nio.ByteBuffer]"
@@ -89,13 +95,15 @@ private[types] object ConverterProvider {
           q"_root_.java.util.Arrays.copyOfRange($b.array(), $b.position(), $b.limit())"
 
         case t if t =:= typeOf[Instant] =>
-          q"new _root_.org.joda.time.Instant($tree.asInstanceOf[Long] / 1000)"
+          q"_root_.com.spotify.scio.bigquery.Timestamp.parse($tree)"
         case t if t =:= typeOf[LocalDate] =>
-          q"_root_.com.spotify.scio.bigquery.Date.parse($tree.toString)"
+          q"_root_.com.spotify.scio.bigquery.Date.parse($tree)"
         case t if t =:= typeOf[LocalTime] =>
-          q"_root_.com.spotify.scio.bigquery.Time.parse($tree.toString)"
+          q"_root_.com.spotify.scio.bigquery.Time.parse($tree)"
         case t if t =:= typeOf[LocalDateTime] =>
           q"_root_.com.spotify.scio.bigquery.DateTime.parse($tree.toString)"
+        case t if t =:= typeOf[Geography] =>
+          q"_root_.com.spotify.scio.bigquery.types.Geography($tree.toString)"
 
         case t if isCaseClass(c)(t) =>
           val fn = TermName("r" + t.typeSymbol.name)
@@ -112,7 +120,7 @@ private[types] object ConverterProvider {
       q"if ($tree == null) None else Some(${cast(tree, tpe)})"
 
     def list(tree: Tree, tpe: Type): Tree = {
-      val jl = tq"_root_.org.apache.avro.generic.GenericData.Array[AnyRef]"
+      val jl = tq"_root_.java.util.List[AnyRef]"
       val bo = q"_root_.scala.collection.breakOut"
       q"$tree.asInstanceOf[$jl].asScala.map(x => ${cast(q"x", tpe)})($bo)"
     }
@@ -135,7 +143,7 @@ private[types] object ConverterProvider {
       val companion = tpe.typeSymbol.companion
       val gets = tpe.erasure match {
         case t if isCaseClass(c)(t) => getFields(c)(t).map(s => field(s, fn))
-        case t                      => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
+        case _                      => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
       }
       q"$companion(..$gets)"
     }
@@ -151,13 +159,103 @@ private[types] object ConverterProvider {
         }
     """
   }
-  // scalastyle:on cyclomatic.complexity
-  // scalastyle:on method.length
+
+  private def toAvroInternal(c: blackbox.Context)(tpe: c.Type): c.Tree = {
+    import c.universe._
+
+    // =======================================================================
+    // Converter helpers
+    // =======================================================================
+
+    def cast(tree: Tree, tpe: Type): Tree = {
+      val provider: OverrideTypeProvider =
+        OverrideTypeProviderFinder.getProvider
+      tpe match {
+        case t if provider.shouldOverrideType(c)(t) => q"$tree.toString"
+        case t if t =:= typeOf[Boolean]             => tree
+        case t if t =:= typeOf[Int]                 => q"$tree.toLong"
+        case t if t =:= typeOf[Long]                => tree
+        case t if t =:= typeOf[Float]               => q"$tree.toDouble"
+        case t if t =:= typeOf[Double]              => tree
+        case t if t =:= typeOf[String]              => tree
+
+        case t if t =:= typeOf[BigDecimal] =>
+          q"_root_.com.spotify.scio.bigquery.Numeric($tree).toString"
+        case t if t =:= typeOf[ByteString]  => q"_root_.java.nio.ByteBuffer.wrap($tree.toByteArray)"
+        case t if t =:= typeOf[Array[Byte]] => q"_root_.java.nio.ByteBuffer.wrap($tree)"
+
+        case t if t =:= typeOf[Instant] => q"$tree.getMillis * 1000"
+        case t if t =:= typeOf[LocalDate] =>
+          q"_root_.com.spotify.scio.bigquery.Date($tree)"
+        case t if t =:= typeOf[LocalTime] =>
+          q"_root_.com.spotify.scio.bigquery.Time($tree)"
+        case t if t =:= typeOf[LocalDateTime] =>
+          q"_root_.com.spotify.scio.bigquery.DateTime($tree)"
+
+        case t if t =:= typeOf[Geography] =>
+          // different than nested record match below, even though this is a case class
+          q"$tree.wkt"
+
+        case t if isCaseClass(c)(t) => // nested records
+          val fn = TermName("r" + t.typeSymbol.name)
+          q"""{
+                val $fn = $tree
+                ${constructor(t, fn)}
+              }
+          """
+        case _ => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
+      }
+    }
+
+    def option(tree: Tree, tpe: Type): Tree =
+      q"if ($tree.isDefined) ${cast(q"$tree.get", tpe)} else null"
+
+    def list(tree: Tree, tpe: Type): Tree =
+      q"$tree.map(x => ${cast(q"x", tpe)}).asJava"
+
+    def field(symbol: Symbol, fn: TermName): (String, Tree) = {
+      val name = symbol.name.toString
+      val tpe = symbol.asMethod.returnType
+
+      val tree = q"$fn.${TermName(name)}"
+      if (tpe.erasure =:= typeOf[Option[_]].erasure) {
+        (name, option(tree, tpe.typeArgs.head))
+      } else if (tpe.erasure =:= typeOf[List[_]].erasure) {
+        (name, list(tree, tpe.typeArgs.head))
+      } else {
+        (name, cast(tree, tpe))
+      }
+    }
+
+    def constructor(tpe: Type, fn: TermName): Tree = {
+      val sets = tpe.erasure match {
+        case t if isCaseClass(c)(t) => getFields(c)(t).map(s => field(s, fn))
+        case _                      => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
+      }
+
+      val header =
+        q"val result = new _root_.org.apache.avro.generic.GenericRecordBuilder(${p(c, SType)}.avroSchemaOf[$tpe])"
+      val body = sets.map {
+        case (name, value) => q"result.set($name, $value)"
+      }
+      val footer = q"result.build()"
+      q"{$header; ..$body; $footer}"
+    }
+
+    // =======================================================================
+    // Entry point
+    // =======================================================================
+
+    val tn = TermName("r")
+    q"""(r: $tpe) => {
+          import _root_.scala.collection.JavaConverters._
+          ${constructor(tpe, tn)}
+        }
+    """
+  }
 
   // =======================================================================
 
-  // scalastyle:off cyclomatic.complexity
-  // scalastyle:off method.length
   private def fromTableRowInternal(c: blackbox.Context)(tpe: c.Type): c.Tree = {
     import c.universe._
 
@@ -196,7 +294,11 @@ private[types] object ConverterProvider {
         case t if t =:= typeOf[LocalDateTime] =>
           q"_root_.com.spotify.scio.bigquery.DateTime.parse($s)"
 
-        case t if isCaseClass(c)(t) =>
+        case t if t =:= typeOf[Geography] =>
+          // different than nested record match below, even though this is a case class
+          q"_root_.com.spotify.scio.bigquery.types.Geography($s)"
+
+        case t if isCaseClass(c)(t) => // nested records
           val fn = TermName("r" + t.typeSymbol.name)
           q"""{
                 val $fn = $tree.asInstanceOf[_root_.java.util.Map[String, AnyRef]]
@@ -242,7 +344,7 @@ private[types] object ConverterProvider {
       val companion = tpe.typeSymbol.companion
       val gets = tpe.erasure match {
         case t if isCaseClass(c)(t) => getFields(c)(t).map(s => field(s, fn))
-        case t                      => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
+        case _                      => c.abort(c.enclosingPosition, s"Unsupported type: $tpe")
       }
       q"$companion(..$gets)"
     }
@@ -258,13 +360,9 @@ private[types] object ConverterProvider {
         }
     """
   }
-  // scalastyle:on cyclomatic.complexity
-  // scalastyle:on method.length
 
   // =======================================================================
 
-  // scalastyle:off cyclomatic.complexity
-  // scalastyle:off method.length
   private def toTableRowInternal(c: blackbox.Context)(tpe: c.Type): c.Tree = {
     import c.universe._
 
@@ -300,7 +398,11 @@ private[types] object ConverterProvider {
         case t if t =:= typeOf[LocalDateTime] =>
           q"_root_.com.spotify.scio.bigquery.DateTime($tree)"
 
-        case t if isCaseClass(c)(t) =>
+        case t if t =:= typeOf[Geography] =>
+          // different than nested record match below, even though this is a case class
+          q"$tree.wkt"
+
+        case t if isCaseClass(c)(t) => // nested records
           val fn = TermName("r" + t.typeSymbol.name)
           q"""{
                 val $fn = $tree
@@ -356,9 +458,6 @@ private[types] object ConverterProvider {
         }
     """
   }
-  // scalastyle:on cyclomatic.complexity
-  // scalastyle:on method.length
-
 }
 
 object ConverterUtil {

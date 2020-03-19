@@ -7,3 +7,7 @@ target
 *.jfr
 
 .bloop
+.metals
+metals.sbt
+.vscode
+.java-version

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,12 +19,12 @@ package com.spotify.scio.bigquery
 
 import com.google.api.client.json.jackson2.JacksonFactory
 import com.google.api.services.bigquery.model.{TableFieldSchema, TableSchema}
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
 
 import scala.collection.JavaConverters._
 
-class BigQueryUtilTest extends FlatSpec with Matchers {
-
+class BigQueryUtilTest extends AnyFlatSpec with Matchers {
   "parseSchema" should "work" in {
     val schema = new TableSchema().setFields(
       List(
@@ -43,23 +43,25 @@ class BigQueryUtilTest extends FlatSpec with Matchers {
         new TableFieldSchema()
           .setName("f4")
           .setMode("RECORD")
-          .setFields(List(
-            new TableFieldSchema()
-              .setName("f5")
-              .setType("BOOLEAN")
-              .setMode("REQUIRED"),
-            new TableFieldSchema()
-              .setName("f6")
-              .setType("STRING")
-              .setMode("NULLABLE"),
-            new TableFieldSchema()
-              .setName("f6")
-              .setType("STRING")
-              .setMode("REPEATED")
-          ).asJava)
-      ).asJava)
+          .setFields(
+            List(
+              new TableFieldSchema()
+                .setName("f5")
+                .setType("BOOLEAN")
+                .setMode("REQUIRED"),
+              new TableFieldSchema()
+                .setName("f6")
+                .setType("STRING")
+                .setMode("NULLABLE"),
+              new TableFieldSchema()
+                .setName("f6")
+                .setType("STRING")
+                .setMode("REPEATED")
+            ).asJava
+          )
+      ).asJava
+    )
     schema.setFactory(new JacksonFactory)
     BigQueryUtil.parseSchema(schema.toString) shouldBe schema
   }
-
 }

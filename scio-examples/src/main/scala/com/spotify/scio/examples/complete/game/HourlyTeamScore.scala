@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.complete.game.HourlyTeamScore
+// `sbt "runMain com.spotify.scio.examples.complete.game.HourlyTeamScore
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --windowDuration=60
 // --startMin=2018-05-13-00-00
@@ -38,7 +38,6 @@ import org.joda.time.{DateTimeZone, Duration, Instant}
 import org.joda.time.format.DateTimeFormat
 
 object HourlyTeamScore {
-
   // The schema for the BigQuery table to write output to is defined as an annotated case class
   @BigQueryType.toTable
   case class TeamScoreSums(user: String, total_score: Int, window_start: String)
@@ -65,7 +64,8 @@ object HourlyTeamScore {
     val stopMin =
       new Instant(
         minFmt
-          .parseMillis(args.getOrElse("stopMin", "2100-01-01-00-00"))).getMillis
+          .parseMillis(args.getOrElse("stopMin", "2100-01-01-00-00"))
+      ).getMillis
     // Minutes to group events by - defaults to 60 minutes if not passed in
     val windowDuration = args.long("windowDuration", 60L)
     // A text file containing data on events
@@ -92,10 +92,10 @@ object HourlyTeamScore {
           TeamScoreSums(team, score, start)
       }
       // Save to the BigQuery table defined by "output" in the arguments passed in
-      .saveAsTypedBigQuery(args("output"))
+      .saveAsTypedBigQueryTable(Table.Spec(args("output")))
 
-    // Close context and execute the pipeline
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
-
 }

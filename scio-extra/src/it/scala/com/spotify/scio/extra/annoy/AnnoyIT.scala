@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ import scala.collection.JavaConverters._
 import scala.util.Random
 
 class AnnoyIT extends PipelineSpec {
-
   val dim = 40
   val seed = 42
   val r = new Random(seed)
@@ -50,7 +49,7 @@ class AnnoyIT extends PipelineSpec {
         s should containInAnyOrder(sideData.map(_._2))
       } finally {
         val files = FileSystems
-          .`match`(s"${tempLocation}/annoy-*")
+          .`match`(s"$tempLocation/annoy-*")
           .metadata()
           .asScala
           .map(_.resourceId())
@@ -69,11 +68,10 @@ class AnnoyIT extends PipelineSpec {
         val f = FileSystems.create(resourceId, MimeTypes.BINARY)
         f.write(ByteBuffer.wrap("test-data".getBytes))
         f.close()
-        // scalastyle:off no.whitespace.before.left.bracket
+
         the[IllegalArgumentException] thrownBy {
           sc.parallelize(sideData).asAnnoy(path, Angular, dim, 10)
         } should have message s"requirement failed: Annoy URI $path already exists"
-        // scalastyle:on no.whitespace.before.left.bracket
       } finally {
         FileSystems.delete(Seq(resourceId).asJava)
       }

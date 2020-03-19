@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 
 package com.spotify.scio.coders
 
-import scala.annotation.StaticAnnotation
+import scala.annotation.{compileTimeOnly, StaticAnnotation}
 import scala.language.experimental.macros
 import scala.reflect.macros._
 
@@ -26,6 +26,7 @@ import scala.reflect.macros._
  *
  * Annotated class must extend `IKryoRegistrar` and has name that ends with "KryoRegistrar".
  */
+@compileTimeOnly("enable macro paradise to expand macro annotations")
 class KryoRegistrar extends StaticAnnotation {
   def macroTransform(annottees: Any*): Any = macro KryoRegistrarMacro.impl
 }

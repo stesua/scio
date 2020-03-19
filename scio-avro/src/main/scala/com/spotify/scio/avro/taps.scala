@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,15 +35,35 @@ import scala.reflect.runtime.universe._
 /**
  * Tap for [[org.apache.avro.generic.GenericRecord GenericRecord]] Avro files.
  */
-final case class GenericRecordTap[T: ClassTag: Coder](path: String,
-                                                      @transient private val
-                                                      schema: Schema)
-    extends Tap[T] {
+final case class ReflectiveRecordTap[T: Coder](
+  path: String,
+  @transient private val
+  schema: Schema
+) extends Tap[T] {
   private lazy val s = Externalizer(schema)
 
   override def value: Iterator[T] = FileStorage(path).avroFile[T](s.get)
 
-  override def open(sc: ScioContext): SCollection[T] = sc.avroFile[T](path, s.get)
+  override def open(sc: ScioContext): SCollection[T] =
+    sc.read(ReflectiveRecordIO[T](path, s.get))
+}
+
+/**
+ * Tap for [[org.apache.avro.generic.GenericRecord GenericRecord]] Avro files.
+ */
+final case class GenericRecordTap(
+  path: String,
+  @transient private val
+  schema: Schema
+) extends Tap[GenericRecord] {
+  private lazy val s = Externalizer(schema)
+
+  override def value: Iterator[GenericRecord] = FileStorage(path).avroFile[GenericRecord](s.get)
+
+  override def open(sc: ScioContext): SCollection[GenericRecord] = {
+    implicit val coder = Coder.avroGenericRecordCoder(s.get)
+    sc.read(GenericRecordIO(path, s.get))
+  }
 }
 
 /**
@@ -51,10 +71,26 @@ final case class GenericRecordTap[T: ClassTag: Coder](path: String,
  */
 final case class SpecificRecordTap[T <: SpecificRecord: ClassTag: Coder](path: String)
     extends Tap[T] {
-
   override def value: Iterator[T] = FileStorage(path).avroFile[T]()
 
   override def open(sc: ScioContext): SCollection[T] = sc.avroFile[T](path)
+}
+
+/**
+ * Tap for reading [[org.apache.avro.generic.GenericRecord GenericRecord]] Avro files and applying
+ * a parseFn to parse it to the given type [[T]]
+ * */
+final case class GenericRecordParseTap[T: Coder](
+  path: String,
+  parseFn: GenericRecord => T
+) extends Tap[T] {
+  override def value: Iterator[T] =
+    FileStorage(path)
+    // Read Avro GenericRecords, with the writer specified schema
+      .avroFile[GenericRecord](schema = null)
+      .map(parseFn)
+
+  override def open(sc: ScioContext): SCollection[T] = sc.parseAvroFile(path)(parseFn)
 }
 
 /**
@@ -85,7 +121,11 @@ final case class AvroTaps(self: Taps) {
    * file.
    */
   def avroFile[T: ClassTag: Coder](path: String, schema: Schema): Future[Tap[T]] =
-    self.mkTap(s"Avro: $path", () => self.isPathDone(path), () => GenericRecordTap[T](path, schema))
+    self.mkTap(
+      s"Avro: $path",
+      () => self.isPathDone(path),
+      () => ReflectiveRecordTap[T](path, schema)
+    )
 
   /** Get a `Future[Tap[T]]` for
    * [[org.apache.avro.specific.SpecificRecord SpecificRecord]] Avro file.
@@ -95,7 +135,8 @@ final case class AvroTaps(self: Taps) {
 
   /** Get a `Future[Tap[T]]` for typed Avro source. */
   def typedAvroFile[T <: HasAvroAnnotation: TypeTag: ClassTag: Coder](
-    path: String): Future[Tap[T]] = {
+    path: String
+  ): Future[Tap[T]] = {
     val avroT = AvroType[T]
 
     import scala.concurrent.ExecutionContext.Implicits.global

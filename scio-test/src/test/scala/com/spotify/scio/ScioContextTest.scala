@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,26 +19,24 @@ package com.spotify.scio
 
 import java.io.PrintWriter
 import java.nio.file.Files
-
-import com.google.common.collect.Lists
 import com.spotify.scio.io.TextIO
 import com.spotify.scio.metrics.Metrics
 import com.spotify.scio.options.ScioOptions
 import com.spotify.scio.testing.{PipelineSpec, TestValidationOptions}
 import com.spotify.scio.util.ScioUtil
+import java.nio.charset.StandardCharsets
 import org.apache.beam.runners.direct.DirectRunner
 import org.apache.beam.sdk.options.{PipelineOptions, PipelineOptionsFactory}
 import org.apache.beam.sdk.testing.PAssert
 import org.apache.beam.sdk.transforms.Create
-
 import scala.concurrent.duration.Duration
+import scala.collection.JavaConverters._
 
 class ScioContextTest extends PipelineSpec {
-
   "ScioContext" should "support pipeline" in {
     val pipeline = ScioContext().pipeline
-    val p = pipeline.apply(Create.of(Lists.newArrayList(1, 2, 3)))
-    PAssert.that(p).containsInAnyOrder(Lists.newArrayList(1, 2, 3))
+    val p = pipeline.apply(Create.of(List(1, 2, 3).asJava))
+    PAssert.that(p).containsInAnyOrder(List(1, 2, 3).asJava)
     pipeline.run()
   }
 
@@ -96,7 +94,7 @@ class ScioContextTest extends PipelineSpec {
     sc.parallelize(Seq("a", "b", "c")).saveAsTextFile(output.toString)
     output.exists() shouldBe false
 
-    sc.close()
+    sc.run()
     output.exists() shouldBe true
     output.delete()
   }
@@ -110,7 +108,7 @@ class ScioContextTest extends PipelineSpec {
     sc.parallelize(Seq("a", "b", "c")).write(textIO)(TextIO.WriteParam())
     output.exists() shouldBe false
 
-    sc.close()
+    sc.run()
     output.exists() shouldBe true
     output.delete()
   }
@@ -121,7 +119,7 @@ class ScioContextTest extends PipelineSpec {
     opts.setRunner(classOf[DirectRunner])
     opts.as(classOf[ScioOptions]).setMetricsLocation(metricsFile.toString)
     val sc = ScioContext(opts)
-    sc.close().waitUntilFinish() // block non-test runner
+    sc.run().waitUntilFinish() // block non-test runner
 
     val mapper = ScioUtil.getScalaJsonMapper
 
@@ -129,15 +127,13 @@ class ScioContextTest extends PipelineSpec {
     metrics.version shouldBe BuildInfo.version
   }
 
-  // scalastyle:off no.whitespace.before.left.bracket
-  it should "fail to close() on closed context" in {
+  it should "fail to run() on closed context" in {
     val sc = ScioContext()
-    sc.close()
+    sc.run()
     the[IllegalArgumentException] thrownBy {
-      sc.close()
-    } should have message "requirement failed: ScioContext already closed"
+      sc.run()
+    } should have message "requirement failed: Pipeline cannot be modified once ScioContext has been executed"
   }
-  // scalastyle:on no.whitespace.before.left.bracket
 
   it should "support options from optionsFile" in {
     val optionsFile = Files.createTempFile("scio-options-", ".txt").toFile
@@ -149,7 +145,8 @@ class ScioContextTest extends PipelineSpec {
       pw.close()
     }
     val (_, arg) = ScioContext.parseArguments[PipelineOptions](
-      Array(s"--optionsFile=${optionsFile.getAbsolutePath}"))
+      Array(s"--optionsFile=${optionsFile.getAbsolutePath}")
+    )
     arg("foo") shouldBe "bar"
   }
 
@@ -162,17 +159,73 @@ class ScioContextTest extends PipelineSpec {
   it should "parse valid, invalid, and missing blockFor argument passed from command line" in {
     val (validOpts, _) =
       ScioContext.parseArguments[PipelineOptions](Array(s"--blockFor=1h"))
-    ScioContext.apply(validOpts).close().getAwaitDuration shouldBe Duration("1h")
+    ScioContext.apply(validOpts).awaitDuration shouldBe Duration("1h")
 
     val (missingOpts, _) = ScioContext.parseArguments[PipelineOptions](Array())
-    ScioContext
-      .apply(missingOpts)
-      .close()
-      .getAwaitDuration shouldBe Duration.Inf
+    ScioContext.apply(missingOpts).awaitDuration shouldBe Duration.Inf
 
     val (invalidOpts, _) =
       ScioContext.parseArguments[PipelineOptions](Array(s"--blockFor=foo"))
     the[IllegalArgumentException] thrownBy { ScioContext.apply(invalidOpts) } should have message
       s"blockFor param foo cannot be cast to type scala.concurrent.duration.Duration"
+  }
+
+  it should "truncate app arguments when they are overly long" in {
+    val longArg = "--argument=" + ("a" * 55000)
+    val (opts, _) = ScioContext.parseArguments[ScioOptions](Array(longArg))
+    def numBytes(s: String): Int = s.getBytes(StandardCharsets.UTF_8.name).length
+    val expectedNumBytes = 50000 + numBytes(" [...]")
+
+    numBytes(opts.getAppArguments) shouldBe expectedNumBytes
+  }
+
+  behavior of "Counter initialization in ScioContext"
+  it should "initialize Counters which are registered by name" in {
+    val sc = ScioContext()
+    sc.initCounter(name = "named-counter")
+    val res = sc.run().waitUntilDone()
+
+    val actualCommitedCounterValue = res
+      .counter(ScioMetrics.counter(name = "named-counter"))
+      .committed
+
+    actualCommitedCounterValue shouldBe Some(0)
+  }
+
+  it should "initialize Counters which are registered by name and namespace" in {
+    val sc = ScioContext()
+    sc.initCounter(namespace = "ns", name = "name-spaced-counter")
+    val res = sc.run().waitUntilDone()
+
+    val actualCommitedCounterValue = res
+      .counter(ScioMetrics.counter(namespace = "ns", name = "name-spaced-counter"))
+      .committed
+
+    actualCommitedCounterValue shouldBe Some(0)
+  }
+
+  it should "initialize Counters which are registered" in {
+    val scioCounter = ScioMetrics.counter(name = "some-counter")
+    val sc = ScioContext()
+    sc.initCounter(scioCounter)
+    val res = sc.run().waitUntilDone()
+
+    val actualCommitedCounterValue = res
+      .counter(scioCounter)
+      .committed
+
+    actualCommitedCounterValue shouldBe Some(0)
+  }
+
+  it should "#1323: generate unique SCollection names" in {
+    val options = PipelineOptionsFactory.create()
+    options.setStableUniqueNames(PipelineOptions.CheckEnabled.ERROR)
+    val sc = ScioContext(options)
+
+    val s1 = sc.empty[(String, Int)]()
+    val s2 = sc.empty[(String, Double)]()
+    s1.join(s2)
+
+    noException shouldBe thrownBy(sc.run())
   }
 }

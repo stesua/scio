@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ import org.slf4j.LoggerFactory
 import scala.collection.JavaConverters._
 
 private[client] object JobOps {
-
   private val Logger = LoggerFactory.getLogger(this.getClass)
 
   private val PeriodFormatter = new PeriodFormatterBuilder()
@@ -58,7 +57,8 @@ private[client] object JobOps {
         val outputRows = stats.getLoad.getOutputRows
         Logger.info(
           s"Input file bytes: $inputFileBytes, output bytes: $outputBytes, " +
-            s"output rows: $outputRows")
+            s"output rows: $outputRows"
+        )
 
       case queryJob: QueryJob =>
         Logger.info(s"Query: `${queryJob.query}`")
@@ -72,10 +72,9 @@ private[client] object JobOps {
     val execution = PeriodFormatter.print(new Period(stats.getEndTime - stats.getStartTime))
     Logger.info(s"Elapsed: $elapsed, pending: $pending, execution: $execution")
   }
-
 }
 
-private[client] final class JobOps(client: Client) {
+final private[client] class JobOps(client: Client) {
   import JobOps._
 
   /** Wait for all jobs to finish. */
@@ -93,7 +92,11 @@ private[client] final class JobOps(client: Client) {
         case (bqJob, jobReference) =>
           val jobId = jobReference.getJobId
           try {
-            val poll = client.underlying.jobs().get(client.project, jobId).execute()
+            val poll = client.underlying
+              .jobs()
+              .get(client.project, jobId)
+              .setLocation(jobReference.getLocation)
+              .execute()
             val error = poll.getStatus.getErrorResult
             if (error != null) {
               throw new RuntimeException(s"${bqJob.show} failed with error: $error")

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,9 +22,6 @@ import java.net.URL
 import java.nio.channels.Channels
 import java.nio.file.{Path, Paths}
 
-import com.google.common.base.Charsets
-import com.google.common.hash.Hashing
-import com.google.common.io.Files
 import com.spotify.scio.CoreSysProps
 import com.spotify.scio.avro.AvroSysProps
 import com.spotify.scio.avro.types.MacroUtil._
@@ -36,19 +33,21 @@ import org.apache.beam.sdk.io.FileSystems
 import org.apache.beam.sdk.io.fs.MatchResult.Status
 import org.apache.beam.sdk.io.fs.{MatchResult, ResourceId}
 import org.apache.beam.sdk.options.PipelineOptionsFactory
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Charsets
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.hash.Hashing
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.io.Files
 import org.slf4j.LoggerFactory
 
 import scala.collection.JavaConverters._
 import scala.reflect.macros._
 import scala.util.Try
 
-// scalastyle:off line.size.limit
 private[types] object TypeProvider {
   private val logger = LoggerFactory.getLogger(this.getClass)
 
   // In order to use FileSystems functions we first need to register all FileSystemRegistrars
   // located on our class path.
-  registerFileSystemRegistrars
+  registerFileSystemRegistrars()
 
   def schemaImpl(c: blackbox.Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
     val schemaString = extractStrings(c, "Missing schema").head
@@ -69,9 +68,11 @@ private[types] object TypeProvider {
 
   private def readFromFileSystem(file: String): InputStream = {
     val files = FileSystems.`match`(file)
-    assume(files.metadata().size() == 1,
-           s"File argument '$file' must match exactly one file. " +
-             s"We've matched ${files.metadata().size()} files.")
+    assume(
+      files.metadata().size() == 1,
+      s"File argument '$file' must match exactly one file. " +
+        s"We've matched ${files.metadata().size()} files."
+    )
     Channels.newInputStream(FileSystems.open(files.metadata().get(0).resourceId()))
   }
 
@@ -84,20 +85,18 @@ private[types] object TypeProvider {
     schemaToType(c)(schema, annottees)
   }
 
-  // scalastyle:off
   private def schemaFromGcsFolder(path: String): Schema = {
     val p = path.trim.replaceAll("\n", "")
     emitWarningIfGcsGlobPath(p)
 
     val avroFile = {
-      def matchResult(r: MatchResult): Option[ResourceId] = {
+      def matchResult(r: MatchResult): Option[ResourceId] =
         if (r.status() != Status.OK || r.metadata().isEmpty) {
           None
         } else {
           val last = r.metadata().asScala.maxBy(_.resourceId().toString)
           if (last.sizeBytes() > 0) Some(last.resourceId()) else None
         }
-      }
       val r = matchResult(FileSystems.`match`(p)) match {
         case Some(x) => Some(x)
         case None =>
@@ -111,8 +110,10 @@ private[types] object TypeProvider {
 
     var reader: DataFileStream[Void] = null
     try {
-      reader = new DataFileStream(Channels.newInputStream(FileSystems.open(avroFile)),
-                                  new GenericDatumReader[Void]())
+      reader = new DataFileStream(
+        Channels.newInputStream(FileSystems.open(avroFile)),
+        new GenericDatumReader[Void]()
+      )
       reader.getSchema
     } finally {
       if (reader != null) {
@@ -127,10 +128,12 @@ private[types] object TypeProvider {
       case gcsGlobPathPattern(pathPrefix) =>
         logger.warn(
           "Matching GCS wildcards may be inefficient if there are many files that " +
-            s"share the prefix '$pathPrefix'.")
+            s"share the prefix '$pathPrefix'."
+        )
         logger.warn(
           s"Macro expansion will be slow and might not even finish before hitting " +
-            "compiler GC limit.")
+            "compiler GC limit."
+        )
         logger.warn("Consider using a more specific path glob.")
       case _ =>
     }
@@ -142,8 +145,8 @@ private[types] object TypeProvider {
 
     val r = annottees.map(_.tree) match {
       case l @ List(
-            q"$mods class $name[..$tparams] $ctorMods(..$fields) extends { ..$earlydefns } with ..$parents { $self => ..$body }")
-          if mods.asInstanceOf[Modifiers].hasFlag(Flag.CASE) =>
+            q"$mods class $name[..$tparams] $ctorMods(..$fields) extends { ..$earlydefns } with ..$parents { $self => ..$body }"
+          ) if mods.asInstanceOf[Modifiers].hasFlag(Flag.CASE) =>
         if (parents.map(_.toString()).toSet != Set("scala.Product", "scala.Serializable")) {
           c.abort(c.enclosingPosition, s"Invalid annotation, don't extend the case class $l")
         }
@@ -169,10 +172,12 @@ private[types] object TypeProvider {
         }
 
         q"""$caseClassTree
-            ${companion(c)(name,
-                           docTrait ++ fnTrait,
-                           schemaMethod ++ docMethod,
-                           fields.asInstanceOf[Seq[c.Tree]])}
+            ${companion(c)(
+          name,
+          docTrait ++ fnTrait,
+          schemaMethod ++ docMethod,
+          fields.asInstanceOf[Seq[c.Tree]]
+        )}
         """
       case t =>
         val error =
@@ -190,27 +195,30 @@ private[types] object TypeProvider {
     c.Expr[Any](r)
   }
 
-  // scalastyle:off cyclomatic.complexity
-  // scalastyle:off method.length
-  private def schemaToType(c: blackbox.Context)(schema: Schema,
-                                                annottees: Seq[c.Expr[Any]]): c.Expr[Any] = {
+  private def schemaToType(
+    c: blackbox.Context
+  )(schema: Schema, annottees: Seq[c.Expr[Any]]): c.Expr[Any] = {
     import c.universe._
     checkMacroEnclosed(c)
 
     // Returns: (raw type, e.g. Int, String, NestedRecord, nested case class definitions)
-    def getField(className: String, fieldName: String, fieldSchema: Schema): (Tree, Seq[Tree]) = {
+    def getField(className: String, fieldName: String, fieldSchema: Schema): (Tree, Seq[Tree]) =
       fieldSchema.getType match {
         case UNION =>
           val unionTypes = fieldSchema.getTypes.asScala.map(_.getType).distinct
           if (unionTypes.size != 2 || !unionTypes.contains(NULL)) {
-            c.abort(c.enclosingPosition,
-                    s"type: ${fieldSchema.getType} is not supported. " +
-                      s"Union type needs to contain exactly one 'null' type and one non null type.")
+            c.abort(
+              c.enclosingPosition,
+              s"type: ${fieldSchema.getType} is not supported. " +
+                s"Union type needs to contain exactly one 'null' type and one non null type."
+            )
           }
           val (field, recordClasses) =
-            getField(className,
-                     fieldName,
-                     fieldSchema.getTypes.asScala.filter(_.getType != NULL).head)
+            getField(
+              className,
+              fieldName,
+              fieldSchema.getTypes.asScala.filter(_.getType != NULL).head
+            )
           (tq"_root_.scala.Option[$field]", recordClasses)
         case BOOLEAN =>
           (tq"_root_.scala.Boolean", Nil)
@@ -238,17 +246,20 @@ private[types] object TypeProvider {
           val nestedClassName = s"$className$$${fieldSchema.getName}"
           val (fields, recordClasses) =
             extractFields(nestedClassName, fieldSchema)
-          (q"${Ident(TypeName(nestedClassName))}",
-           Seq(q"case class ${TypeName(nestedClassName)}(..$fields)") ++ recordClasses)
+          (
+            q"${Ident(TypeName(nestedClassName))}",
+            Seq(q"case class ${TypeName(nestedClassName)}(..$fields)") ++ recordClasses
+          )
         case t =>
           c.abort(c.enclosingPosition, s"type: $t not supported")
       }
-    }
 
     // Returns: ("fieldName: fieldType", nested case class definitions)
-    def extractField(className: String,
-                     fieldName: String,
-                     fieldSchema: Schema): (Tree, Seq[Tree]) = {
+    def extractField(
+      className: String,
+      fieldName: String,
+      fieldSchema: Schema
+    ): (Tree, Seq[Tree]) = {
       val (fieldType, recordClasses) =
         getField(className, SchemaUtil.unescapeNameIfReserved(fieldName), fieldSchema)
       fieldSchema.getType match {
@@ -262,13 +273,24 @@ private[types] object TypeProvider {
     def extractFields(className: String, schema: Schema): (Seq[Tree], Seq[Tree]) = {
       val f = schema.getFields.asScala
         .map(f => extractField(className, f.name, f.schema))
-      (f.map(_._1), f.flatMap(_._2))
+
+      val fields = f.map(_._1)
+
+      val recordClasses = f
+        .flatMap(_._2)
+        .groupBy(_.asInstanceOf[ClassDef].name)
+        // note that if there are conflicting definitions of a nested record type, the Avro schema
+        // parser itself will catch it before getting to this step.
+        .map { case (_, cDefs) => cDefs.head } // Don't generate duplicate case classes
+        .toSeq
+
+      (fields, recordClasses)
     }
 
     val r = annottees.map(_.tree) match {
       case l @ List(
-            q"$mods class $name[..$tparams] $ctorMods(..$cfields) extends { ..$earlydefns } with ..$parents { $self => ..$body }")
-          if mods.asInstanceOf[Modifiers].flags == NoFlags =>
+            q"$mods class $name[..$tparams] $ctorMods(..$cfields) extends { ..$earlydefns } with ..$parents { $self => ..$body }"
+          ) if mods.asInstanceOf[Modifiers].flags == NoFlags =>
         if (parents.map(_.toString()).toSet != Set("scala.AnyRef")) {
           c.abort(c.enclosingPosition, s"Invalid annotation, don't extend the case class $l")
         }
@@ -305,20 +327,18 @@ private[types] object TypeProvider {
   }
 
   /** Generate a case class. */
-  private def caseClass(c: blackbox.Context)(mods: c.Modifiers,
-                                             name: c.TypeName,
-                                             fields: Seq[c.Tree],
-                                             body: Seq[c.Tree]): c.Tree = {
+  private def caseClass(
+    c: blackbox.Context
+  )(mods: c.Modifiers, name: c.TypeName, fields: Seq[c.Tree], body: Seq[c.Tree]): c.Tree = {
     import c.universe._
     val caseMods = Modifiers(Flag.CASE, typeNames.EMPTY, mods.annotations)
     q"$caseMods class $name(..$fields) extends ${p(c, ScioAvroType)}.HasAvroAnnotation { ..$body }"
   }
 
   /** Generate a companion object. */
-  private def companion(c: blackbox.Context)(name: c.TypeName,
-                                             traits: Seq[c.Tree],
-                                             methods: Seq[c.Tree],
-                                             fields: Seq[c.Tree]): c.Tree = {
+  private def companion(
+    c: blackbox.Context
+  )(name: c.TypeName, traits: Seq[c.Tree], methods: Seq[c.Tree], fields: Seq[c.Tree]): c.Tree = {
     import c.universe._
 
     val tupledMethod =
@@ -369,14 +389,14 @@ private[types] object TypeProvider {
   }
 
   /** Enforce that the macro is not enclosed by a package, but a class or object instead. */
-  private def checkMacroEnclosed(c: blackbox.Context): Unit = {
+  private def checkMacroEnclosed(c: blackbox.Context): Unit =
     if (!c.internal.enclosingOwner.isClass) {
       c.abort(c.enclosingPosition, s"@AvroType declaration must be inside a class or object.")
     }
-  }
 
-  private def getRecordDocs(c: blackbox.Context)(
-    tree: Seq[c.universe.Tree]): List[c.universe.Tree] = {
+  private def getRecordDocs(
+    c: blackbox.Context
+  )(tree: Seq[c.universe.Tree]): List[c.universe.Tree] = {
     import c.universe._
     tree.head
       .asInstanceOf[ClassDef]
@@ -394,7 +414,7 @@ private[types] object TypeProvider {
   private def shouldDumpClassesForPlugin =
     !AvroSysProps.DisableDump.value(default = "false").toBoolean
 
-  private def getBQClassCacheDir: Path = {
+  private def getBQClassCacheDir: Path =
     // TODO: add this as key/value settings with default etc
     AvroSysProps.ClassCacheDirectory.valueOption.map(Paths.get(_)).getOrElse {
       Paths
@@ -402,10 +422,10 @@ private[types] object TypeProvider {
         .resolve(CoreSysProps.User.value)
         .resolve("generated-classes")
     }
-  }
 
-  private def pShowCode(c: blackbox.Context)(records: Seq[c.Tree],
-                                             caseClass: c.Tree): Seq[String] = {
+  private def pShowCode(
+    c: blackbox.Context
+  )(records: Seq[c.Tree], caseClass: c.Tree): Seq[String] = {
     // print only records and case class and do it nicely so that we can just inject those
     // in scala plugin.
     import c.universe._
@@ -428,7 +448,7 @@ private[types] object TypeProvider {
     }
   }
 
-  private def genHashForMacro(owner: String, srcFile: String): String = {
+  private def genHashForMacro(owner: String, srcFile: String): String =
     Hashing
       .murmur3_32()
       .newHasher()
@@ -436,11 +456,10 @@ private[types] object TypeProvider {
       .putString(srcFile, Charsets.UTF_8)
       .hash()
       .toString
-  }
 
-  private def dumpCodeForScalaPlugin(c: blackbox.Context)(records: Seq[c.universe.Tree],
-                                                          caseClassTree: c.universe.Tree,
-                                                          name: String): Unit = {
+  private def dumpCodeForScalaPlugin(
+    c: blackbox.Context
+  )(records: Seq[c.universe.Tree], caseClassTree: c.universe.Tree, name: String): Unit = {
     val owner = c.internal.enclosingOwner.fullName
     val srcFile = c.macroApplication.pos.source.file.canonicalPath
     val hash = genHashForMacro(owner, srcFile)
@@ -454,7 +473,7 @@ private[types] object TypeProvider {
     Files.asCharSink(genSrcFile, Charsets.UTF_8).write(prettyCode)
   }
 
-  private def registerFileSystemRegistrars: Unit = {
+  private def registerFileSystemRegistrars(): Unit = {
     // In order to find all the FileSystemRegistrars on the path we need to change
     // ContextClassLoader to be the same as our ClassLoader.
     java.lang.Thread
@@ -462,6 +481,4 @@ private[types] object TypeProvider {
       .setContextClassLoader(getClass.getClassLoader)
     FileSystems.setDefaultPipelineOptions(PipelineOptionsFactory.create())
   }
-
 }
-// scalastyle:on line.size.limit

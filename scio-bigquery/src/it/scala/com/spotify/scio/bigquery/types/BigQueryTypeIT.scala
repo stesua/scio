@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@
 package com.spotify.scio.bigquery.types
 
 import com.spotify.scio.bigquery.client.BigQuery
-import org.scalatest.{Assertion, FlatSpec, Matchers}
+import org.scalatest.Assertion
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.annotation.StaticAnnotation
 import scala.collection.JavaConverters._
@@ -26,44 +28,43 @@ import scala.reflect.runtime.universe._
 
 object BigQueryTypeIT {
   @BigQueryType.fromQuery(
-    "SELECT word, word_count FROM [bigquery-public-data:samples.shakespeare] WHERE word = 'Romeo'")
+    "SELECT word, word_count FROM [bigquery-public-data:samples.shakespeare] WHERE word = 'Romeo'"
+  )
   class LegacyT
 
   @BigQueryType.fromQuery(
-    "SELECT word, word_count FROM `bigquery-public-data.samples.shakespeare` WHERE word = 'Romeo'")
+    "SELECT word, word_count FROM `bigquery-public-data.samples.shakespeare` WHERE word = 'Romeo'"
+  )
   class SqlT
 
   @BigQueryType.fromTable("bigquery-public-data:samples.shakespeare")
   class FromTableT
 
+  @BigQueryType.toTable
+  case class ToTableT(word: String, word_count: Int)
+
   @BigQueryType.fromQuery(
     "SELECT word, word_count FROM [data-integration-test:partition_a.table_%s]",
-    "$LATEST")
+    "$LATEST"
+  )
   class LegacyLatestT
 
   @BigQueryType.fromQuery(
     "SELECT word, word_count FROM `data-integration-test.partition_a.table_%s`",
-    "$LATEST")
+    "$LATEST"
+  )
   class SqlLatestT
 
-  @BigQueryType.fromQuery(
-    """
+  @BigQueryType.fromQuery("""
       |SELECT word, word_count
       |FROM `data-integration-test.partition_a.table_%s`
       |WHERE word_count > %3$d and word != '%%'
       |LIMIT %d
-    """.stripMargin,
-    "$LATEST",
-    1,
-    1
-  )
+    """.stripMargin, "$LATEST", 1, 1)
   class SqlLatestTWithMultiArgs
 
   @BigQueryType.fromTable("data-integration-test:partition_a.table_%s", "$LATEST")
   class FromTableLatestT
-
-  @BigQueryType.toTable
-  case class ToTableT(word: String, word_count: Int)
 
   class Annotation1 extends StaticAnnotation
   class Annotation2 extends StaticAnnotation
@@ -77,22 +78,10 @@ object BigQueryTypeIT {
   @Annotation1
   @Annotation2
   class ShakespeareWithSequentialAnnotations
-
-  // run this to re-populate tables used for this test and BigQueryPartitionUtilIT
-  def main(args: Array[String]): Unit = {
-    val bq = BigQuery.defaultInstance()
-    val data = List(ToTableT("a", 1), ToTableT("b", 2))
-    bq.writeTypedRows("data-integration-test:partition_a.table_20170101", data)
-    bq.writeTypedRows("data-integration-test:partition_a.table_20170102", data)
-    bq.writeTypedRows("data-integration-test:partition_a.table_20170103", data)
-    bq.writeTypedRows("data-integration-test:partition_b.table_20170101", data)
-    bq.writeTypedRows("data-integration-test:partition_b.table_20170102", data)
-    bq.writeTypedRows("data-integration-test:partition_c.table_20170104", data)
-  }
 }
 
-class BigQueryTypeIT extends FlatSpec with Matchers {
-
+// scio-test/it:runMain PopulateTestData to re-populate data for integration tests
+class BigQueryTypeIT extends AnyFlatSpec with Matchers {
   import BigQueryTypeIT._
 
   val bq = BigQuery.defaultInstance()
@@ -230,5 +219,4 @@ class BigQueryTypeIT extends FlatSpec with Matchers {
     fields.map(_.getType) shouldBe Seq("STRING", "INTEGER")
     fields.map(_.getMode) shouldBe Seq("REQUIRED", "REQUIRED")
   }
-
 }

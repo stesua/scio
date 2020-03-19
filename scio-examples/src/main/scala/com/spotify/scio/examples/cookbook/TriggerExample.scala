@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Trigger example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.cookbook.TriggerExample
+// `sbt "runMain com.spotify.scio.examples.cookbook.TriggerExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/traffic_sensor/Freeways-5Minaa2010-01-01_to_2010-02-15_test2.csv
 // --output=[DATASET].trigger_example"`
@@ -37,20 +37,20 @@ import org.joda.time.{DateTimeConstants, Duration, Instant}
 import scala.util.Try
 
 object TriggerExample {
-
   @BigQueryType.toTable
-  case class Record(trigger_type: String,
-                    freeway: String,
-                    total_flow: Long,
-                    number_of_records: Long,
-                    window: String,
-                    is_first: Boolean,
-                    is_last: Boolean,
-                    timing: String,
-                    event_time: Instant,
-                    processing_time: Instant)
+  case class Record(
+    trigger_type: String,
+    freeway: String,
+    total_flow: Long,
+    number_of_records: Long,
+    window: String,
+    is_first: Boolean,
+    is_last: Boolean,
+    timing: String,
+    event_time: Instant,
+    processing_time: Instant
+  )
 
-  // scalastyle:off method.length
   def main(cmdlineArgs: Array[String]): Unit = {
     // set up example wiring
     val (opts, args) = ScioContext.parseArguments[ExampleOptions](cmdlineArgs)
@@ -77,16 +77,20 @@ object TriggerExample {
 
     val defaultTriggerResults = compute(
       "default",
-      WindowOptions(allowedLateness = Duration.ZERO,
-                    trigger = Repeatedly.forever(AfterWatermark.pastEndOfWindow()),
-                    accumulationMode = DISCARDING_FIRED_PANES)
+      WindowOptions(
+        allowedLateness = Duration.ZERO,
+        trigger = Repeatedly.forever(AfterWatermark.pastEndOfWindow()),
+        accumulationMode = DISCARDING_FIRED_PANES
+      )
     )
 
     val withAllowedLatenessResults = compute(
       "withAllowedLateness",
-      WindowOptions(allowedLateness = ONE_DAY,
-                    trigger = Repeatedly.forever(AfterWatermark.pastEndOfWindow()),
-                    accumulationMode = DISCARDING_FIRED_PANES)
+      WindowOptions(
+        allowedLateness = ONE_DAY,
+        trigger = Repeatedly.forever(AfterWatermark.pastEndOfWindow()),
+        accumulationMode = DISCARDING_FIRED_PANES
+      )
     )
 
     val speculativeResults = compute(
@@ -96,7 +100,8 @@ object TriggerExample {
         trigger = Repeatedly.forever(
           AfterProcessingTime
             .pastFirstElementInPane()
-            .plusDelayOf(ONE_MINUTE)),
+            .plusDelayOf(ONE_MINUTE)
+        ),
         accumulationMode = ACCUMULATING_FIRED_PANES
       )
     )
@@ -110,12 +115,14 @@ object TriggerExample {
             .forever(
               AfterProcessingTime
                 .pastFirstElementInPane()
-                .plusDelayOf(ONE_MINUTE))
+                .plusDelayOf(ONE_MINUTE)
+            )
             .orFinally(AfterWatermark.pastEndOfWindow()),
           Repeatedly.forever(
             AfterProcessingTime
               .pastFirstElementInPane()
-              .plusDelayOf(FIVE_MINUTES))
+              .plusDelayOf(FIVE_MINUTES)
+          )
         ),
         accumulationMode = ACCUMULATING_FIRED_PANES
       )
@@ -123,16 +130,18 @@ object TriggerExample {
 
     SCollection
       .unionAll(
-        Seq(defaultTriggerResults,
-            withAllowedLatenessResults,
-            speculativeResults,
-            sequentialResults))
-      .saveAsTypedBigQuery(args("output"))
+        Seq(
+          defaultTriggerResults,
+          withAllowedLatenessResults,
+          speculativeResults,
+          sequentialResults
+        )
+      )
+      .saveAsTypedBigQueryTable(Table.Spec(args("output")))
 
-    val result = sc.close()
+    val result = sc.run()
     exampleUtils.waitToFinish(result.pipelineResult)
   }
-  // scalastyle:on method.length
 
   private val THRESHOLD = 0.001
   private val MIN_DELAY = 1
@@ -180,17 +189,18 @@ object TriggerExample {
         sum += v
         numberOfRecords += 1
       }
-      val newValue = Record(triggerType,
-                            key,
-                            sum,
-                            numberOfRecords,
-                            wv.window.toString,
-                            wv.pane.isFirst,
-                            wv.pane.isLast,
-                            wv.pane.getTiming.toString,
-                            wv.timestamp,
-                            Instant.now())
+      val newValue = Record(
+        triggerType,
+        key,
+        sum,
+        numberOfRecords,
+        wv.window.toString,
+        wv.pane.isFirst,
+        wv.pane.isLast,
+        wv.pane.getTiming.toString,
+        wv.timestamp,
+        Instant.now()
+      )
       wv.withValue(newValue)
     }.toSCollection
-
 }

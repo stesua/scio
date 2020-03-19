@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.spotify.scio.examples.common.ExampleData
 import com.spotify.scio.testing._
 
 class MaxPerKeyExamplesTest extends PipelineSpec {
-
   val input =
     Seq((1, 10.0), (1, 20.0), (2, 18.0), (3, 19.0), (3, 21.0), (3, 23.0))
       .map(kv => TableRow("month" -> kv._1, "mean_temp" -> kv._2))
@@ -34,8 +33,9 @@ class MaxPerKeyExamplesTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.cookbook.MaxPerKeyExamples.type]
       .args("--output=dataset.table")
       .input(BigQueryIO(ExampleData.WEATHER_SAMPLES_TABLE), input)
-      .output(BigQueryIO[TableRow]("dataset.table"))(_ should containInAnyOrder(expected))
+      .output(BigQueryIO[TableRow]("dataset.table")) { coll =>
+        coll should containInAnyOrder(expected)
+      }
       .run()
   }
-
 }

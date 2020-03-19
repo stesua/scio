@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,10 +28,9 @@ import org.apache.beam.sdk.transforms.DoFn.ProcessElement
  * Utility class to limit the number of parallel doFns
  * @param maxDoFns Max number of doFns
  */
-private[scio] abstract class ParallelLimitedFn[T, U](maxDoFns: Int)
+abstract private[scio] class ParallelLimitedFn[T, U](maxDoFns: Int)
     extends DoFnWithResource[T, U, Semaphore]
     with NamedFn {
-
   def getResourceType: ResourceType = ResourceType.PER_CLASS
 
   def createResource: Semaphore = new Semaphore(maxDoFns, true)

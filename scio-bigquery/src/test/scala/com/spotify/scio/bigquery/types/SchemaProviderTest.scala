@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ package com.spotify.scio.bigquery.types
 
 import com.spotify.scio.bigquery.BigQueryUtil.parseSchema
 import org.apache.beam.sdk.util.SerializableUtils
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
 
-class SchemaProviderTest extends FlatSpec with Matchers {
-
+class SchemaProviderTest extends AnyFlatSpec with Matchers {
   import Schemas._
 
   private def basicFields(mode: String) =
@@ -40,7 +40,8 @@ class SchemaProviderTest extends FlatSpec with Matchers {
        |  {"mode": "$mode", "name": "dateF", "type": "DATE"},
        |  {"mode": "$mode", "name": "timeF", "type": "TIME"},
        |  {"mode": "$mode", "name": "datetimeF", "type": "DATETIME"},
-       |  {"mode": "$mode", "name": "bigDecimalF", "type": "NUMERIC"}
+       |  {"mode": "$mode", "name": "bigDecimalF", "type": "NUMERIC"},
+       |  {"mode": "$mode", "name": "geographyF", "type": "GEOGRAPHY"}
        |]
        |""".stripMargin
 
@@ -107,5 +108,4 @@ class SchemaProviderTest extends FlatSpec with Matchers {
     // The description annotation should be serializable.
     SerializableUtils.ensureSerializable(new description(value = "this a field description"))
   }
-
 }

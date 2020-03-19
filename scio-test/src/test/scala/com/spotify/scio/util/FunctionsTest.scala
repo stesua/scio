@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,15 @@
 
 package com.spotify.scio.util
 
+import com.spotify.scio.ScioContext
 import com.twitter.algebird.{Monoid, Semigroup}
 import org.apache.beam.sdk.transforms.Combine.CombineFn
-import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.collection.JavaConverters._
 
-class FunctionsTest extends FlatSpec with Matchers {
-
+class FunctionsTest extends AnyFlatSpec with Matchers {
   private def testFn[VA](fn: CombineFn[Int, VA, Int]) = {
     var a1 = fn.createAccumulator()
     var a2 = fn.createAccumulator()
@@ -36,17 +37,16 @@ class FunctionsTest extends FlatSpec with Matchers {
   }
 
   "Functions" should "work with aggregateFn" in {
-    testFn(Functions.aggregateFn[Int, Int](0)(_ + _, _ + _))
+    testFn(Functions.aggregateFn[Int, Int](ScioContext(), 0)(_ + _, _ + _))
   }
 
   it should "work with combineFn" in {
-    testFn(Functions.combineFn[Int, Int](identity, _ + _, _ + _))
+    testFn(Functions.combineFn[Int, Int](ScioContext(), identity, _ + _, _ + _))
   }
 
   it should "work with reduceFn" in {
-    testFn(Functions.reduceFn(Semigroup.intSemigroup.plus _))
-    testFn(Functions.reduceFn(Semigroup.intSemigroup))
-    testFn(Functions.reduceFn(Monoid.intMonoid))
+    testFn(Functions.reduceFn(ScioContext(), Semigroup.intSemigroup.plus _))
+    testFn(Functions.reduceFn(ScioContext(), Semigroup.intSemigroup))
+    testFn(Functions.reduceFn(ScioContext(), Monoid.intMonoid))
   }
-
 }

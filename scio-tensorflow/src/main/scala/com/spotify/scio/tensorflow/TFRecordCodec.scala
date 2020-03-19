@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,16 +22,13 @@ import java.nio.channels.Channels
 import java.nio.{ByteBuffer, ByteOrder}
 import java.util.zip.GZIPInputStream
 
-import com.google.common.hash.Hashing
-import com.google.common.primitives.Ints
-// scalastyle:off line.size.limit
-import org.apache.beam.repackaged.beam_sdks_java_core.org.apache.commons.compress.compressors.deflate._
-// scalastyle:on line.size.limit
 import org.apache.beam.sdk.io.Compression
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.hash.Hashing
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.primitives.Ints
+import org.apache.commons.compress.compressors.deflate._
 import org.apache.commons.compress.compressors.gzip._
 
 private object TFRecordCodec {
-
   private val headerLength: Int =
     (java.lang.Long.SIZE + java.lang.Integer.SIZE) / java.lang.Byte.SIZE
   private val footerLength: Int = java.lang.Integer.SIZE / java.lang.Byte.SIZE
@@ -115,5 +112,4 @@ private object TFRecordCodec {
     if (b1 != -1) pushback.unread(b1)
     (b1 != -1 && b2 != -1) && (b1 == 0x78 && (b1 * 256 + b2) % 31 == 0)
   }
-
 }

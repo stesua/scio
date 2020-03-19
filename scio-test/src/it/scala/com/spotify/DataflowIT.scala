@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,8 @@ package com.spotify
 
 import com.spotify.scio._
 import com.spotify.scio.runners.dataflow._
-import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 import org.scalatest.tagobjects.Slow
 
 import scala.collection.JavaConverters._
@@ -35,16 +36,15 @@ object DataflowIT {
         c.inc()
         x
       }
-      .filter { x =>
+      .filter { _ =>
         c.inc()
         true
       }
-    sc.close().waitUntilDone()
+    sc.run().waitUntilDone()
   }
 }
 
-class DataflowIT extends FlatSpec with Matchers {
-
+class DataflowIT extends AnyFlatSpec with Matchers {
   private lazy val scioResult = DataflowIT.run()
   private lazy val dfResult = scioResult.as[DataflowResult]
 
@@ -62,14 +62,15 @@ class DataflowIT extends FlatSpec with Matchers {
   }
 
   it should "work independently" taggedAs Slow in {
-    val r = DataflowResult(dfResult.internal.getProjectId,
-                           dfResult.internal.getRegion,
-                           dfResult.internal.getJobId)
+    val r = DataflowResult(
+      dfResult.internal.getProjectId,
+      dfResult.internal.getRegion,
+      dfResult.internal.getJobId
+    )
     r.getJob.getProjectId shouldBe dfResult.internal.getProjectId
     r.getJobMetrics.getMetrics.asScala should not be empty
     r.asScioResult.state shouldBe scioResult.state
     r.asScioResult.getMetrics shouldBe scioResult.getMetrics
     r.asScioResult.allCountersAtSteps shouldBe scioResult.allCountersAtSteps
   }
-
 }

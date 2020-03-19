@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Java converters for various output formats
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.JavaConvertersExample
+// `sbt "runMain com.spotify.scio.examples.extra.JavaConvertersExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --output=gs://[OUTPUT] --converter=[CONVERTER]"`
 package com.spotify.scio.examples.extra
@@ -48,7 +48,7 @@ object JavaConvertersExample {
     sc.parallelize(1 to 10)
       .map(_.toString)
       .saveAsCustomOutput(output, transform)
-    sc.close()
+    sc.run()
+    ()
   }
-
 }

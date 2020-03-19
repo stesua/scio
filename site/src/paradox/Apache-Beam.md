@@ -12,8 +12,11 @@ Scio 0.3.x depends on Beam 0.6.0 (last pre-stable release) and Scio 0.4.x depend
 
 Early Scio releases depend on Google Cloud [Dataflow Java SDK](https://github.com/GoogleCloudPlatform/DataflowJavaSDK) while later ones depend on [Apache Beam](https://github.com/apache/beam). Check out the [[Changelog]] page for migration guides.
 
+Also check out the [SDK Version Support Status](https://cloud.google.com/dataflow/docs/support/sdk-version-support-status) page. Since a Beam release depends on specific version of Dataflow API, a deprecated Beam version is not guaranteed to work correctly or at all. We strongly recommend upgrading before the deprecation date.
+
 | **Scio** | **SDK Dependency** | **Description**     |
 |:--------:|:------------------:|:--------------------|
+| 0.8.x    | Apache Beam 2.x.x  | Beam SQL, BigQuery storage API, ScioExecutionContext, Async `DoFn`s |
 | 0.7.x    | Apache Beam 2.x.x  | Static coders, new ScioIO |
 | 0.6.x    | Apache Beam 2.x.x  | Cassandra 2.2       |
 | 0.5.x    | Apache Beam 2.x.x  | Better type-safe Avro and BigQuery IO |
@@ -22,21 +25,24 @@ Early Scio releases depend on Google Cloud [Dataflow Java SDK](https://github.co
 | 0.2.x    | Dataflow Java SDK  | SQL-2011 support    |
 | 0.1.x    | Dataflow Java SDK  | First releases      |
 
-| **Scio Version** | **Beam Version** |
-|:----------------:|:----------------:|
-| 0.7.4            | 2.11.0           |
-| 0.7.3            | 2.10.0           |
-| 0.7.2            | 2.10.0           |
-| 0.7.0+           | 2.9.0            |
-| 0.6.0            | 2.6.0            |
-| 0.5.7            | 2.6.0            |
-| 0.5.6            | 2.5.0            |
-| 0.5.1+           | 2.4.0            |
-| 0.5.0            | 2.2.0            |
-| 0.4.6+           | 2.2.0            |
-| 0.4.1+           | 2.1.0            |
-| 0.4.0            | 2.0.0            |
-| 0.3.0+           | 0.6.0            |
+| **Scio Version** | **Beam Version** | **Details** |
+|:----------------:|:----------------:|:------------|
+| 0.8.2            | 2.19.0           | This version will be deprecated on February 4, 2021. |
+| 0.8.1            | 2.18.0           | This version will be deprecated on January 23, 2021. |
+| 0.8.0            | 2.17.0           | This version will be deprecated on January 6, 2021. |
+| 0.7.4            | 2.11.0           | This version will be deprecated on March 1, 2020. |
+| 0.7.3            | 2.10.0           | This version will be deprecated on February 11, 2020. |
+| 0.7.2            | 2.10.0           | |
+| 0.7.0+           | 2.9.0            | This version will be deprecated on December 13, 2019. |
+| 0.6.0            | 2.6.0            | This version will be deprecated on August 8, 2019. |
+| 0.5.7            | 2.6.0            | |
+| 0.5.6            | 2.5.0            | This version will be deprecated on June 6, 2019. |
+| 0.5.1+           | 2.4.0            | Deprecated as of March 20, 2019. |
+| 0.5.0            | 2.2.0            | Deprecated as of December 2, 2018. |
+| 0.4.6+           | 2.2.0            | |
+| 0.4.1+           | 2.1.0            | Deprecated as of August 23, 2018. |
+| 0.4.0            | 2.0.0            | Deprecated as of May 17, 2018. |
+| 0.3.0+           | 0.6.0            | Unsupported |
 
 ## Release cycle and backport procedures
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,8 +29,7 @@ import org.apache.beam.sdk.util.common.ElementByteSizeObserver
 
 import scala.reflect.{classTag, ClassTag}
 
-private final class SlowGenericRecordCoder extends AtomicCoder[GenericRecord] {
-
+final private class SlowGenericRecordCoder extends AtomicCoder[GenericRecord] {
   // TODO: can we find something more efficient than String ?
   private[this] val sc = StringUtf8Coder.of()
 
@@ -50,8 +49,10 @@ private final class SlowGenericRecordCoder extends AtomicCoder[GenericRecord] {
 
   // delegate methods for determinism and equality checks
   override def verifyDeterministic(): Unit =
-    throw new NonDeterministicException(this,
-                                        "Coder[GenericRecord] without schema is non-deterministic")
+    throw new NonDeterministicException(
+      this,
+      "Coder[GenericRecord] without schema is non-deterministic"
+    )
   override def consistentWithEquals(): Boolean = false
   override def structuralValue(value: GenericRecord): AnyRef =
     AvroCoder.of(value.getSchema).structuralValue(value)
@@ -59,14 +60,16 @@ private final class SlowGenericRecordCoder extends AtomicCoder[GenericRecord] {
   // delegate methods for byte size estimation
   override def isRegisterByteSizeObserverCheap(value: GenericRecord): Boolean =
     AvroCoder.of(value.getSchema).isRegisterByteSizeObserverCheap(value)
-  override def registerByteSizeObserver(value: GenericRecord,
-                                        observer: ElementByteSizeObserver): Unit =
+  override def registerByteSizeObserver(
+    value: GenericRecord,
+    observer: ElementByteSizeObserver
+  ): Unit =
     AvroCoder.of(value.getSchema).registerByteSizeObserver(value, observer)
 }
 
 /** Implementation is legit only for SpecificFixed, not GenericFixed
  * @see [[org.apache.beam.sdk.coders.AvroCoder]] */
-private final class SpecificFixedCoder[A <: SpecificFixed](cls: Class[A]) extends AtomicCoder[A] {
+final private class SpecificFixedCoder[A <: SpecificFixed](cls: Class[A]) extends AtomicCoder[A] {
   // lazy because AVRO Schema isn't serializable
   @transient private[this] lazy val schema: Schema = SpecificData.get().getSchema(cls)
   private[this] val size = SpecificData.get().getSchema(cls).getFixedSize
@@ -100,7 +103,13 @@ private object SpecificFixedCoder {
 }
 
 trait AvroCoders {
-  import language.experimental.macros
+
+  /**
+   * Create a Coder for Avro GenericRecord given the schema of the GenericRecord.
+   *
+   * @param schema AvroSchema for the Coder.
+   * @return Coder[GenericRecord]
+   */
   // TODO: Use a coder that does not serialize the schema
   def avroGenericRecordCoder(schema: Schema): Coder[GenericRecord] =
     Coder.beam(AvroCoder.of(schema))

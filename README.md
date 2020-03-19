@@ -4,12 +4,14 @@ Scio
 [![Build Status](https://img.shields.io/circleci/project/github/spotify/scio/master.svg)](https://circleci.com/gh/spotify/scio)
 [![codecov.io](https://codecov.io/github/spotify/scio/coverage.svg?branch=master)](https://codecov.io/github/spotify/scio?branch=master)
 [![GitHub license](https://img.shields.io/github/license/spotify/scio.svg)](./LICENSE)
-[![Maven Central](https://img.shields.io/maven-central/v/com.spotify/scio-core_2.11.svg)](https://maven-badges.herokuapp.com/maven-central/com.spotify/scio-core_2.11)
+[![Maven Central](https://img.shields.io/maven-central/v/com.spotify/scio-core_2.12.svg)](https://maven-badges.herokuapp.com/maven-central/com.spotify/scio-core_2.12)
+[![Scaladoc](https://img.shields.io/badge/scaladoc-latest-blue.svg)](https://spotify.github.io/scio/api/com/spotify/scio/index.html)
 [![Join the chat at https://gitter.im/spotify/scio](https://badges.gitter.im/spotify/scio.svg)](https://gitter.im/spotify/scio)
+[![Scala Steward badge](https://img.shields.io/badge/Scala_Steward-helping-brightgreen.svg?style=flat&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA4AAAAQCAMAAAARSr4IAAAAVFBMVEUAAACHjojlOy5NWlrKzcYRKjGFjIbp293YycuLa3pYY2LSqql4f3pCUFTgSjNodYRmcXUsPD/NTTbjRS+2jomhgnzNc223cGvZS0HaSD0XLjbaSjElhIr+AAAAAXRSTlMAQObYZgAAAHlJREFUCNdNyosOwyAIhWHAQS1Vt7a77/3fcxxdmv0xwmckutAR1nkm4ggbyEcg/wWmlGLDAA3oL50xi6fk5ffZ3E2E3QfZDCcCN2YtbEWZt+Drc6u6rlqv7Uk0LdKqqr5rk2UCRXOk0vmQKGfc94nOJyQjouF9H/wCc9gECEYfONoAAAAASUVORK5CYII=)](https://scala-steward.org)
 
 <img src="https://raw.github.com/spotify/scio/master/site/src/paradox/images/scio.png" alt="Scio Logo" width="250"/>
 
-> Ecclesiastical Latin IPA: /ˈʃi.o/, [ˈʃiː.o], [ˈʃi.i̯o]  
+> Ecclesiastical Latin IPA: /ˈʃi.o/, [ˈʃiː.o], [ˈʃi.i̯o]
 > Verb: I can, know, understand, have knowledge.
 
 Scio is a Scala API for [Apache Beam](http://beam.incubator.apache.org/) and [Google Cloud Dataflow](https://github.com/GoogleCloudPlatform/DataflowJavaSDK) inspired by [Apache Spark](http://spark.apache.org/) and [Scalding](https://github.com/twitter/scalding).
@@ -22,7 +24,7 @@ Scio 0.3.0 and future versions depend on Apache Beam (`org.apache.beam`) while e
 - Unified batch and streaming programming model
 - Fully managed service<sup>*</sup>
 - Integration with Google Cloud products: Cloud Storage, BigQuery, Pub/Sub, Datastore, Bigtable
-- HDFS, JDBC, [TensorFlow](http://tensorflow.org/) TFRecords, Cassandra, Elasticsearch and Parquet I/O
+- JDBC, [TensorFlow](http://tensorflow.org/) TFRecords, Cassandra, Elasticsearch and Parquet I/O
 - Interactive mode with Scio REPL
 - Type safe BigQuery
 - Integration with [Algebird](https://github.com/twitter/algebird) and [Breeze](https://github.com/scalanlp/breeze)
@@ -33,21 +35,29 @@ Scio 0.3.0 and future versions depend on Apache Beam (`org.apache.beam`) while e
 
 # Quick Start
 
-Use our [giter8 template](https://github.com/spotify/scio.g8) to quickly setup a project:
+Download and install the [Java Development Kit (JDK)](https://adoptopenjdk.net/index.html) version 8.
+
+Use our [giter8 template](https://github.com/spotify/scio.g8) to quickly create a new Scio job repository:
 
 `sbt new spotify/scio.g8`
 
-Compile it:
+Switch to the new repo (default `scio-job`) and build it:
 
-`sbt pack`
+```
+cd scio-job
+sbt pack
+```
 
 Run the included word count example:
 
 `target/pack/bin/word-count --output=wc`
 
-Inspect the results:
+List result files and inspect content:
 
-`cat wc/part-00000-of-00001.txt`
+```
+ls -l wc
+cat wc/part-00000-of-00001.txt
+```
 
 # Documentation
 
@@ -65,16 +75,12 @@ Scio includes the following artifacts:
 
 - `scio-core`: core library
 - `scio-test`: test utilities, add to your project as a "test" dependency
-- `scio-avro`: add-on for Avro, included in `scio-core` but can also be used standalone
-- `scio-bigquery`: add-on for BigQuery, included in `scio-core` but can also be used standalone
+- `scio-avro`: add-on for Avro, can also be used standalone
+- `scio-bigquery`: add-on for BigQuery, can also be used standalone
 - `scio-bigtable`: add-on for Bigtable
-- `scio-cassandra2`: add-on for Cassandra 2.x
-- `scio-cassandra3`: add-on for Cassandra 3.x
-- `scio-elasticsearch2`: add-on for Elasticsearch 2.x
-- `scio-elasticsearch5`: add-on for Elasticsearch 5.x
-- `scio-elasticsearch6`: add-on for Elasticsearch 6.x
-- `scio-extra`: extra utilities for working with collections, Breeze, etc.
-- `scio-hdfs`: add-on for HDFS IO
+- `scio-cassandra*`: add-ons for Cassandra
+- `scio-elasticsearch*`: add-ons for Elasticsearch
+- `scio-extra`: extra utilities for working with collections, Breeze, etc., best effort support
 - `scio-jdbc`: add-on for JDBC IO
 - `scio-parquet`: add-on for Parquet
 - `scio-tensorflow`: add-on for TensorFlow TFRecords IO and prediction

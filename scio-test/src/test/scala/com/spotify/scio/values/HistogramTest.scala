@@ -1,4 +1,3 @@
-// scalastyle:off header.matches
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -15,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// scalastyle:on header.matches
+
 /* Ported from org.apache.spark.rdd.DoubleRDDSuite */
 
 package com.spotify.scio.values
@@ -23,7 +22,6 @@ package com.spotify.scio.values
 import com.spotify.scio.testing.PipelineSpec
 
 class HistogramTest extends PipelineSpec {
-
   "DoubleSCollectionFunctions.histogram" should "work on empty input" in {
     runWithContext { sc =>
       val p = sc.parallelize[Double](Seq.empty)
@@ -107,7 +105,8 @@ class HistogramTest extends PipelineSpec {
   it should "work mixed range with four uneven buckets and NaN" in {
     runWithContext { sc =>
       val p = sc.parallelize(
-        Seq(-0.01, 0.0, 1.0, 2.0, 3.0, 5.0, 6.0, 11.1, 12.0, 199.0, 200.0, 200.1, Double.NaN))
+        Seq(-0.01, 0.0, 1.0, 2.0, 3.0, 5.0, 6.0, 11.1, 12.0, 199.0, 200.0, 200.1, Double.NaN)
+      )
       p.histogram(Array(0.0, 5.0, 11.0, 12.0, 200.0)) should
         containSingleValue(Array(4L, 2L, 1L, 3L))
     }
@@ -116,7 +115,8 @@ class HistogramTest extends PipelineSpec {
   it should "work mixed range with four uneven buckets, NaN and NaN range" in {
     runWithContext { sc =>
       val p = sc.parallelize(
-        Seq(-0.01, 0.0, 1.0, 2.0, 3.0, 5.0, 6.0, 11.1, 12.0, 199.0, 200.0, 200.1, Double.NaN))
+        Seq(-0.01, 0.0, 1.0, 2.0, 3.0, 5.0, 6.0, 11.1, 12.0, 199.0, 200.0, 200.1, Double.NaN)
+      )
       val buckets = Array(0.0, 5.0, 11.0, 12.0, 200.0, Double.NaN)
       p.histogram(buckets) should containSingleValue(Array(4L, 2L, 1L, 2L, 3L))
     }
@@ -125,21 +125,24 @@ class HistogramTest extends PipelineSpec {
   it should "work mixed range with four uneven buckets, NaN, NaN range and infinity" in {
     runWithContext { sc =>
       val p = sc.parallelize(
-        Seq(-0.01,
-            0.0,
-            1.0,
-            2.0,
-            3.0,
-            5.0,
-            6.0,
-            11.1,
-            12.0,
-            199.0,
-            200.0,
-            200.1,
-            Double.PositiveInfinity,
-            Double.NegativeInfinity,
-            Double.NaN))
+        Seq(
+          -0.01,
+          0.0,
+          1.0,
+          2.0,
+          3.0,
+          5.0,
+          6.0,
+          11.1,
+          12.0,
+          199.0,
+          200.0,
+          200.1,
+          Double.PositiveInfinity,
+          Double.NegativeInfinity,
+          Double.NaN
+        )
+      )
       val buckets = Array(0.0, 5.0, 11.0, 12.0, 200.0, Double.NaN)
       p.histogram(buckets) should containSingleValue(Array(4L, 2L, 1L, 2L, 4L))
     }
@@ -153,19 +156,17 @@ class HistogramTest extends PipelineSpec {
     }
   }
 
-  // scalastyle:off no.whitespace.before.left.bracket
   it should "fail on invalid bucket array" in {
     val msg = "java.lang.IllegalArgumentException: requirement failed: " +
       "buckets array must have at least two elements"
     the[RuntimeException] thrownBy {
-      runWithContext { _.parallelize(Seq(1.0)).histogram(Array.empty[Double]) }
+      runWithContext(_.parallelize(Seq(1.0)).histogram(Array.empty[Double]))
     } should have message msg
 
     the[RuntimeException] thrownBy {
-      runWithContext { _.parallelize(Seq(1.0)).histogram(Array(1.0)) }
+      runWithContext(_.parallelize(Seq(1.0)).histogram(Array(1.0)))
     } should have message msg
   }
-  // scalastyle:on no.whitespace.before.left.bracket
 
   it should "work without buckets, basic" in {
     runWithContext { sc =>
@@ -253,7 +254,6 @@ class HistogramTest extends PipelineSpec {
     }
   }
 
-  // scalastyle:off no.whitespace.before.left.bracket
   it should "fail on invalid SCollections" in {
     val msg = "java.lang.UnsupportedOperationException: " +
       "Histogram on either an empty SCollection or SCollection containing +/-infinity or NaN"
@@ -264,14 +264,11 @@ class HistogramTest extends PipelineSpec {
     } should have message msg
 
     the[RuntimeException] thrownBy {
-      runWithContext { _.parallelize(Seq(1.0, Double.NaN)).histogram(1) }
+      runWithContext(_.parallelize(Seq(1.0, Double.NaN)).histogram(1))
     } should have message msg
 
     the[RuntimeException] thrownBy {
-      runWithContext { _.parallelize[Double](Seq.empty).histogram(1) }
-    } should have message
-      "java.util.NoSuchElementException: Empty PCollection accessed as a singleton view."
+      runWithContext(_.parallelize[Double](Seq.empty).histogram(1))
+    } should have message msg
   }
-  // scalastyle:on no.whitespace.before.left.bracket
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,12 @@
 
 package com.spotify.scio.avro
 
-import com.google.common.io.Files
 import com.spotify.scio._
-import org.scalatest._
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.io.Files
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
-class TypedAvroIT extends FlatSpec with Matchers {
+class TypedAvroIT extends AnyFlatSpec with Matchers {
   "Typed Avro IO" should "not throw exception" in {
     noException should be thrownBy {
       val tempDir = Files.createTempDir()
@@ -37,7 +38,8 @@ object TypedAvroJob {
     sc.parallelize(Seq("a", "b", "c"))
       .map(Record(_))
       .saveAsTypedAvroFile(args("output"))
-    sc.close().waitUntilDone()
+    sc.run().waitUntilDone()
+    ()
   }
 
   @AvroType.toSchema

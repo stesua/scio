@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,6 @@
 
 val readme = sc.textFile("README.md")
 val wc = readme.flatMap(_.split("[^a-zA-Z]+")).filter(_.nonEmpty).map(_.toLowerCase).countByValue.materialize
-val scioResult = sc.close().waitUntilDone()
+val scioResult = sc.run().waitUntilDone()
 val w = scioResult.tap(wc).value.maxBy(_._2)._1
 println(s"SUCCESS: [$w]")

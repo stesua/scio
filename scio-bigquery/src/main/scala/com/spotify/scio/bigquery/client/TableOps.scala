@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,12 +19,18 @@ package com.spotify.scio.bigquery.client
 
 import com.google.api.client.googleapis.json.GoogleJsonResponseException
 import com.google.api.services.bigquery.model._
+import com.google.cloud.bigquery.storage.v1beta1.ReadOptions.TableReadOptions
+import com.google.cloud.bigquery.storage.v1beta1.Storage._
+import com.google.cloud.bigquery.storage.v1beta1.TableReferenceProto
 import com.google.cloud.hadoop.util.ApiErrorExtractor
-import com.spotify.scio.bigquery.TableRow
 import com.spotify.scio.bigquery.client.BigQuery.Client
+import com.spotify.scio.bigquery.{StorageUtil, TableRow, Table => STable}
+import org.apache.avro.Schema
+import org.apache.avro.generic.{GenericDatumReader, GenericRecord}
+import org.apache.avro.io.{BinaryDecoder, DecoderFactory}
 import org.apache.beam.sdk.extensions.gcp.options.GcsOptions
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO.Write.{CreateDisposition, WriteDisposition}
-import org.apache.beam.sdk.io.gcp.bigquery.BigQueryOptions
+import org.apache.beam.sdk.io.gcp.bigquery.{BigQueryAvroUtilsWrapper, BigQueryOptions}
 import org.apache.beam.sdk.io.gcp.{bigquery => bq}
 import org.apache.beam.sdk.options.PipelineOptionsFactory
 import org.joda.time.Instant
@@ -32,6 +38,7 @@ import org.joda.time.format.DateTimeFormat
 import org.slf4j.LoggerFactory
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import scala.util.control.NonFatal
 
@@ -45,42 +52,69 @@ private[client] object TableOps {
   private val StagingDatasetDescription = "Staging dataset for temporary tables"
 }
 
-private[client] final class TableOps(client: Client) {
+final private[client] class TableOps(client: Client) {
   import TableOps._
 
   /** Get rows from a table. */
-  def rows(tableSpec: String): Iterator[TableRow] =
-    rows(bq.BigQueryHelpers.parseTableSpec(tableSpec))
+  def rows(table: STable): Iterator[TableRow] =
+    storageRows(table, TableReadOptions.getDefaultInstance)
 
-  /** Get rows from a table. */
-  def rows(table: TableReference): Iterator[TableRow] =
-    new Iterator[TableRow] {
-      private val iterator = bq.PatchedBigQueryTableRowIterator.fromTable(table, client.underlying)
-      private var _isOpen = false
-      private var _hasNext = false
+  def avroRows(table: STable): Iterator[GenericRecord] =
+    storageAvroRows(table, TableReadOptions.getDefaultInstance)
 
-      private def init(): Unit = if (!_isOpen) {
-        iterator.open()
-        _isOpen = true
-        _hasNext = iterator.advance()
-      }
-
-      override def hasNext: Boolean = {
-        init()
-        _hasNext
-      }
-
-      override def next(): TableRow = {
-        init()
-        if (_hasNext) {
-          val r = iterator.getCurrent
-          _hasNext = iterator.advance()
-          r
-        } else {
-          throw new NoSuchElementException
-        }
+  def storageRows(table: STable, readOptions: TableReadOptions): Iterator[TableRow] =
+    withBigQueryService { bqServices =>
+      val tb = bqServices.getTable(table.ref, readOptions.getSelectedFieldsList)
+      storageAvroRows(table, readOptions).map { gr =>
+        BigQueryAvroUtilsWrapper.convertGenericRecordToTableRow(gr, tb.getSchema)
       }
     }
+
+  def storageAvroRows(table: STable, readOptions: TableReadOptions): Iterator[GenericRecord] = {
+    val tableRefProto = TableReferenceProto.TableReference
+      .newBuilder()
+      .setDatasetId(table.ref.getDatasetId)
+      .setTableId(table.ref.getTableId)
+    if (table.ref.getProjectId != null) {
+      tableRefProto.setProjectId(table.ref.getProjectId)
+    }
+
+    val request = CreateReadSessionRequest
+      .newBuilder()
+      .setTableReference(tableRefProto)
+      .setReadOptions(readOptions)
+      .setParent(s"projects/${client.project}")
+      .setRequestedStreams(1)
+      .setFormat(DataFormat.AVRO)
+      .build()
+
+    val session = client.storage.createReadSession(request)
+    val readRowsRequest = ReadRowsRequest
+      .newBuilder()
+      .setReadPosition(
+        StreamPosition
+          .newBuilder()
+          .setStream(session.getStreams(0))
+      )
+      .build()
+
+    val schema = new Schema.Parser().parse(session.getAvroSchema.getSchema)
+    val reader = new GenericDatumReader[GenericRecord](schema)
+    val responses = client.storage.readRowsCallable().call(readRowsRequest).asScala
+
+    var decoder: BinaryDecoder = null
+    responses.iterator.flatMap { resp =>
+      val bytes = resp.getAvroRows.getSerializedBinaryRows.toByteArray
+      decoder = DecoderFactory.get().binaryDecoder(bytes, decoder)
+
+      val res = ArrayBuffer.empty[GenericRecord]
+      while (!decoder.isEnd) {
+        res += reader.read(null, decoder)
+      }
+
+      res.toIterator
+    }
+  }
 
   /** Get schema from a table. */
   def schema(tableSpec: String): TableSchema =
@@ -88,7 +122,37 @@ private[client] final class TableOps(client: Client) {
 
   /** Get schema from a table. */
   def schema(tableRef: TableReference): TableSchema =
-    Cache.withCacheKey(bq.BigQueryHelpers.toTableSpec(tableRef))(table(tableRef).getSchema)
+    Cache.getOrElse(bq.BigQueryHelpers.toTableSpec(tableRef), Cache.SchemaCache)(
+      table(tableRef).getSchema
+    )
+
+  /** Get schema from a table using the storage API. */
+  def storageReadSchema(
+    tableSpec: String,
+    selectedFields: List[String] = Nil,
+    rowRestriction: Option[String] = None
+  ): Schema =
+    Cache.getOrElse(s"""$tableSpec;${selectedFields
+      .mkString(",")};$rowRestriction""", Cache.SchemaCache) {
+      val tableRef = bq.BigQueryHelpers.parseTableSpec(tableSpec)
+      val tableRefProto = TableReferenceProto.TableReference.newBuilder()
+      if (tableRef.getProjectId != null) {
+        tableRefProto.setProjectId(tableRef.getProjectId)
+      }
+      tableRefProto
+        .setDatasetId(tableRef.getDatasetId)
+        .setTableId(tableRef.getTableId)
+        .build()
+
+      val request = CreateReadSessionRequest
+        .newBuilder()
+        .setTableReference(tableRefProto.build())
+        .setReadOptions(StorageUtil.tableReadOptions(selectedFields, rowRestriction))
+        .setParent(s"projects/${client.project}")
+        .build()
+      val session = client.storage.createReadSession(request)
+      new Schema.Parser().parse(session.getAvroSchema.getSchema)
+    }
 
   /** Get table metadata. */
   def table(tableSpec: String): Table =
@@ -145,11 +209,13 @@ private[client] final class TableOps(client: Client) {
     exists(bq.BigQueryHelpers.parseTableSpec(tableSpec))
 
   /** Write rows to a table. */
-  def writeRows(tableReference: TableReference,
-                rows: List[TableRow],
-                schema: TableSchema,
-                writeDisposition: WriteDisposition,
-                createDisposition: CreateDisposition): Unit = withBigQueryService { service =>
+  def writeRows(
+    tableReference: TableReference,
+    rows: List[TableRow],
+    schema: TableSchema,
+    writeDisposition: WriteDisposition,
+    createDisposition: CreateDisposition
+  ): Long = withBigQueryService { service =>
     val table = new Table().setTableReference(tableReference).setSchema(schema)
     if (createDisposition == CreateDisposition.CREATE_IF_NEEDED) {
       service.createTable(table)
@@ -168,16 +234,20 @@ private[client] final class TableOps(client: Client) {
   }
 
   /** Write rows to a table. */
-  def writeRows(tableSpec: String,
-                rows: List[TableRow],
-                schema: TableSchema = null,
-                writeDisposition: WriteDisposition = WriteDisposition.WRITE_APPEND,
-                createDisposition: CreateDisposition = CreateDisposition.CREATE_IF_NEEDED): Unit =
-    writeRows(bq.BigQueryHelpers.parseTableSpec(tableSpec),
-              rows,
-              schema,
-              writeDisposition,
-              createDisposition)
+  def writeRows(
+    tableSpec: String,
+    rows: List[TableRow],
+    schema: TableSchema = null,
+    writeDisposition: WriteDisposition = WriteDisposition.WRITE_APPEND,
+    createDisposition: CreateDisposition = CreateDisposition.CREATE_IF_NEEDED
+  ): Long =
+    writeRows(
+      bq.BigQueryHelpers.parseTableSpec(tableSpec),
+      rows,
+      schema,
+      writeDisposition,
+      createDisposition
+    )
 
   private[bigquery] def withBigQueryService[T](f: bq.BigQueryServicesWrapper => T): T = {
     val options = PipelineOptionsFactory
@@ -195,15 +265,17 @@ private[client] final class TableOps(client: Client) {
   }
 
   /** Delete table */
-  private[bigquery] def delete(table: TableReference): Unit =
+  private[bigquery] def delete(table: TableReference): Unit = {
     client.underlying
       .tables()
       .delete(table.getProjectId, table.getDatasetId, table.getTableId)
       .execute()
+    ()
+  }
 
   /* Create a staging dataset at a specified location, e.g US */
   private[bigquery] def prepareStagingDataset(location: String): Unit = {
-    val datasetId = StagingDatasetPrefix + location.toLowerCase
+    val datasetId = stagingDatasetId(location)
     try {
       client.underlying.datasets().get(client.project, datasetId).execute()
       Logger.info(s"Staging dataset ${client.project}:$datasetId already exists")
@@ -220,6 +292,7 @@ private[client] final class TableOps(client: Client) {
           .datasets()
           .insert(client.project, ds)
           .execute()
+        ()
       case NonFatal(e) => throw e
     }
   }
@@ -230,8 +303,10 @@ private[client] final class TableOps(client: Client) {
     val tableId = TablePrefix + "_" + now + "_" + Random.nextInt(Int.MaxValue)
     new TableReference()
       .setProjectId(client.project)
-      .setDatasetId(StagingDatasetPrefix + location.toLowerCase)
+      .setDatasetId(stagingDatasetId(location))
       .setTableId(tableId)
   }
 
+  private def stagingDatasetId(location: String): String =
+    StagingDatasetPrefix + location.toLowerCase.replaceAll("-", "_")
 }

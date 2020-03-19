@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,16 +19,17 @@ package com.spotify.scio.coders.instances.kryo
 import com.esotericsoftware.kryo.io.{Input, Output}
 import com.google.protobuf.ByteString
 import com.twitter.chill.{Kryo, KryoSerializer}
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
-class ByteStringSerializerTest extends FlatSpec with Matchers {
-
+class ByteStringSerializerTest extends AnyFlatSpec with Matchers {
   private def testRoundTrip(ser: ByteStringSerializer, bs: ByteString): Unit = {
     val k: Kryo = KryoSerializer.registered.newKryo()
     val o = new Array[Byte](bs.size() * 2)
     ser.write(k, new Output(o), bs)
     val back = ser.read(k, new Input(o), null)
     bs shouldEqual back
+    ()
   }
 
   "ByteStringSerializer" should "roundtrip large ByteString" in {

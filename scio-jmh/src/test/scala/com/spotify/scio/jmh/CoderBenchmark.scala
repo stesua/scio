@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ import com.spotify.scio.coders._
 import com.spotify.scio.schemas._
 import com.twitter.chill.IKryoRegistrar
 import org.apache.beam.sdk.coders.{
-  CoderRegistry,
   AtomicCoder,
   ByteArrayCoder,
   SerializableCoder,
@@ -35,7 +34,7 @@ import org.apache.beam.sdk.coders.{
 }
 import org.apache.beam.sdk.util.CoderUtils
 import org.apache.beam.sdk.schemas.SchemaCoder
-import org.apache.beam.sdk.options.PipelineOptionsFactory
+import org.apache.beam.sdk.values.TypeDescriptor
 import org.openjdk.jmh.annotations._
 
 final case class UserId(bytes: Array[Byte])
@@ -49,7 +48,6 @@ final case class SpecializedUserForDerived(id: UserId, username: String, email: 
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Thread)
 class CoderBenchmark {
-
   // please don't use arrays outside of benchmarks
   val userId = UserId(Array[Byte](1, 2, 3, 4))
 
@@ -63,9 +61,11 @@ class CoderBenchmark {
     SpecializedUserForDerived(userId, "johndoe", "johndoe@spotify.com")
 
   val javaUser =
-    new j.User(new j.UserId(Array[Byte](1, 2, 3, 4).map(x => x: java.lang.Byte)),
-               "johndoe",
-               "johndoe@spotify.com")
+    new j.User(
+      new j.UserId(Array[Byte](1, 2, 3, 4).map(x => x: java.lang.Byte)),
+      "johndoe",
+      "johndoe@spotify.com"
+    )
 
   val tenTimes = List.fill(10)(specializedUserForDerived)
 
@@ -81,15 +81,11 @@ class CoderBenchmark {
 
   val specializedMapKryoCoder = new KryoAtomicCoder[Map[String, Long]](KryoOptions())
   val derivedMapCoder = CoderMaterializer.beamWithDefault(Coder[Map[String, Long]])
-  val mapExample = (1 to 1000).map { x =>
-    (s"stringvalue$x", x.toLong)
-  }.toMap
+  val mapExample = (1 to 1000).map(x => (s"stringvalue$x", x.toLong)).toMap
 
   val specializedStringListKryoCoder = new KryoAtomicCoder[List[String]](KryoOptions())
   val derivedStringListCoder = CoderMaterializer.beamWithDefault(Coder[List[String]])
-  val stringListExample = (1 to 1000).map { x =>
-    s"stringvalue$x"
-  }.toList
+  val stringListExample = (1 to 1000).map(x => s"stringvalue$x").toList
 
   @Benchmark
   def kryoEncode(o: SerializedOutputSize): Array[Byte] =
@@ -205,12 +201,17 @@ class CoderBenchmark {
   // Compare the performance of Schema Coders vs compile time derived Coder. Run with:
   // jmh:run -f1 -wi 10 -i 20 com.spotify.scio.jmh.CoderBenchmark.(derived|schemaCoder)(De|En)code
   val (specializedUserSchema, specializedTo, specializedFrom) =
-    SchemaMaterializer.materialize(CoderRegistry.createDefault(),
-                                   PipelineOptionsFactory.create(),
-                                   Schema[SpecializedUserForDerived])
+    SchemaMaterializer.materialize(
+      Schema[SpecializedUserForDerived]
+    )
 
   val specializedSchemaCoder: BCoder[SpecializedUserForDerived] =
-    SchemaCoder.of(specializedUserSchema, specializedTo, specializedFrom)
+    SchemaCoder.of(
+      specializedUserSchema,
+      TypeDescriptor.of(classOf[SpecializedUserForDerived]),
+      specializedTo,
+      specializedFrom
+    )
 
   @Benchmark
   def schemaCoderEncode(o: SerializedOutputSize): Array[Byte] =
@@ -227,12 +228,12 @@ class CoderBenchmark {
   // Compare the performance of Schema Coders vs Kryo coder for java class run with:
   // jmh:run -f1 -wi 10 -i 20 com.spotify.scio.jmh.CoderBenchmark.java(Kryo|Schema)CoderEncode
   val (javaUserSchema, javaTo, javaFrom) =
-    SchemaMaterializer.materialize(CoderRegistry.createDefault(),
-                                   PipelineOptionsFactory.create(),
-                                   Schema[j.User])
+    SchemaMaterializer.materialize(
+      Schema[j.User]
+    )
 
   val javaSchemaCoder: BCoder[j.User] =
-    SchemaCoder.of(javaUserSchema, javaTo, javaFrom)
+    SchemaCoder.of(javaUserSchema, TypeDescriptor.of(classOf[j.User]), javaTo, javaFrom)
 
   @Benchmark
   def javaSchemaCoderEncode(o: SerializedOutputSize): Array[Byte] =
@@ -284,13 +285,12 @@ final class SpecializedCoder extends AtomicCoder[SpecializedUser] {
     StringUtf8Coder.of().encode(value.email, os)
   }
 
-  def decode(is: InputStream): SpecializedUser = {
+  def decode(is: InputStream): SpecializedUser =
     SpecializedUser(
       UserId(ByteArrayCoder.of().decode(is)),
       StringUtf8Coder.of().decode(is),
       StringUtf8Coder.of().decode(is)
     )
-  }
 }
 
 final class SpecializedKryoSerializer extends Serializer[SpecializedUser] {

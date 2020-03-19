@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,13 +25,13 @@ import org.apache.beam.sdk.options.PipelineOptions
 import org.apache.beam.sdk.transforms.windowing.{BoundedWindow, PaneInfo}
 import org.apache.beam.sdk.values.{PCollectionView, TupleTag}
 import org.joda.time.Instant
-import org.scalacheck.Prop.BooleanOperators
+import org.scalacheck.Prop.propBoolean
 import org.scalacheck._
 import org.scalacheck.commands.Commands
 
 import scala.collection.mutable.{Buffer => MBuffer}
 import scala.concurrent.{Future, Promise}
-import scala.language.higherKinds
+
 import scala.util.Try
 
 object AsyncDoFnSpec extends Properties("AsyncDoFn") {
@@ -61,9 +61,12 @@ class GuavaAsyncDoFnTester extends AsyncDoFnTester[SettableFuture, ListenableFut
         pending.append((input, p))
         p
       }
-      override def createResource(): Unit = Unit
+      override def createResource(): Unit = ()
     }
-  override def completePromise(p: SettableFuture[String], result: String): Unit = p.set(result)
+  override def completePromise(p: SettableFuture[String], result: String): Unit = {
+    p.set(result)
+    ()
+  }
 }
 
 class JavaAsyncDoFnTester extends AsyncDoFnTester[CompletableFuture, CompletableFuture] {
@@ -75,10 +78,12 @@ class JavaAsyncDoFnTester extends AsyncDoFnTester[CompletableFuture, Completable
         pending.append((input, p))
         p
       }
-      override def createResource(): Unit = Unit
+      override def createResource(): Unit = ()
     }
-  override def completePromise(p: CompletableFuture[String], result: String): Unit =
+  override def completePromise(p: CompletableFuture[String], result: String): Unit = {
     p.complete(result)
+    ()
+  }
 }
 
 class ScalaAsyncDoFnTester extends AsyncDoFnTester[Promise, Future] {
@@ -90,22 +95,23 @@ class ScalaAsyncDoFnTester extends AsyncDoFnTester[Promise, Future] {
         pending.append((input, p))
         p.future
       }
-      override def createResource(): Unit = Unit
+      override def createResource(): Unit = ()
     }
   override def completePromise(p: Promise[String], result: String): Unit =
     p.success(result)
 }
 
 trait AsyncDoFnCommands extends Commands {
-
   case class AsyncDoFnState(total: Int, pending: Int)
 
   override type State = AsyncDoFnState
   override type Sut = BaseDoFnTester
 
-  override def canCreateNewSut(newState: State,
-                               initSuts: Traversable[State],
-                               runningSuts: Traversable[Sut]): Boolean = true
+  override def canCreateNewSut(
+    newState: State,
+    initSuts: Traversable[State],
+    runningSuts: Traversable[Sut]
+  ): Boolean = true
   override def destroySut(sut: Sut): Unit = {}
   override def initialPreCondition(state: State): Boolean =
     state == AsyncDoFnState(0, 0)
@@ -113,9 +119,11 @@ trait AsyncDoFnCommands extends Commands {
 
   override def genCommand(state: State): Gen[Command] =
     if (state.pending > 0) {
-      Gen.frequency((60, Gen.const(Request)),
-                    (30, Gen.chooseNum(0, state.pending - 1).map(Complete)),
-                    (10, Gen.const(NextBundle)))
+      Gen.frequency(
+        (60, Gen.const(Request)),
+        (30, Gen.chooseNum(0, state.pending - 1).map(Complete)),
+        (10, Gen.const(NextBundle))
+      )
     } else {
       Gen.frequency((90, Gen.const(Request)), (10, Gen.const(NextBundle)))
     }
@@ -140,14 +148,15 @@ trait AsyncDoFnCommands extends Commands {
     override type Result = Seq[String]
     override def preCondition(state: State): Boolean = true
     override def postCondition(state: State, result: Try[Result]): Prop =
-      Prop.all("size" |: state.total == result.get.size,
-               "content" |: (0 until state.total)
-                 .map(_.toString)
-                 .toSet == result.get.toSet)
+      Prop.all(
+        "size" |: state.total == result.get.size,
+        "content" |: (0 until state.total)
+          .map(_.toString)
+          .toSet == result.get.toSet
+      )
     override def run(sut: Sut): Result = sut.nextBundle()
     override def nextState(state: State): State = AsyncDoFnState(0, 0)
   }
-
 }
 
 trait BaseDoFnTester {
@@ -157,7 +166,6 @@ trait BaseDoFnTester {
 }
 
 abstract class AsyncDoFnTester[P[_], F[_]] extends BaseDoFnTester {
-
   private var nextElement = 0
   protected val pending: MBuffer[(Int, P[String])] = MBuffer.empty
   private val outputBuffer = MBuffer.empty[String]
@@ -196,10 +204,12 @@ abstract class AsyncDoFnTester[P[_], F[_]] extends BaseDoFnTester {
 
   private val finishBundleContext = new fn.FinishBundleContext {
     override def getPipelineOptions: PipelineOptions = ???
-    override def output[T](tag: TupleTag[T],
-                           output: T,
-                           timestamp: Instant,
-                           window: BoundedWindow): Unit = ???
+    override def output[T](
+      tag: TupleTag[T],
+      output: T,
+      timestamp: Instant,
+      window: BoundedWindow
+    ): Unit = ???
     override def output(output: String, timestamp: Instant, window: BoundedWindow): Unit =
       outputBuffer.append(output)
   }
@@ -215,6 +225,7 @@ abstract class AsyncDoFnTester[P[_], F[_]] extends BaseDoFnTester {
     val (input, promise) = pending(n)
     completePromise(promise, input.toString)
     pending.remove(n)
+    ()
   }
 
   // finish bundle and start new one
@@ -233,5 +244,4 @@ abstract class AsyncDoFnTester[P[_], F[_]] extends BaseDoFnTester {
 
     result
   }
-
 }

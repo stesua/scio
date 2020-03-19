@@ -22,14 +22,14 @@ sbt publishLocal
 
 You can also specify sbt heap size with `-mem`, e.g. `sbt -mem 8192`. Use the `SBT_OPTS` environment variable for more fine grained settings.
 
-```bash 
+```bash
 export SBT_OPTS="-Xmx8G -Xms8G -Xss1M -XX:MaxMetaspaceSize=1G -XX:+CMSClassUnloadingEnabled -XX:ReservedCodeCacheSize=128m"
 ```
 
 To ensure the project loads and builds successfully, run the following sbt command so that all custom tasks are executed
 
 ```bash
-sbt compile test:compile it:compile
+sbt compile test:compile
 ```
 
 ## Running the Examples
@@ -51,7 +51,7 @@ Unlike Hadoop, Scio or Dataflow input should be file patterns and not directorie
 Use the @javadoc[`DataflowRunner`](org.apache.beam.runners.dataflow.DataflowRunner) to execute pipelines on Google Cloud Dataflow service using managed resources in the Google Cloud Platform.
 
 ```
-neville@localhost scio $ sbt -Dbigquery.project=<BILLING_PROJECT>
+neville@localhost scio $ sbt
 [info] ...
 > project scio-examples
 [info] ...
@@ -77,7 +77,7 @@ sbt new spotify/scio-template.g8
 
 Or add the following to your `build.sbt`. Replace the direct and Dataflow runner with ones you wish to use. The compiler plugin dependency is only needed for the type safe BigQuery API.
 
-```scala
+```sbt
 libraryDependencies ++= Seq(
   "com.spotify" %% "scio-core" % "0.6.1",
   "com.spotify" %% "scio-test" % "0.6.1" % "test",
@@ -120,7 +120,7 @@ The defaults should work well for most cases but we sometimes tune the following
 
 More Dataflow pipeline specific options available can be found in @javadoc[`DataflowPipelineOptions`](org.apache.beam.runners.dataflow.options.DataflowPipelineOptions) and super interfaces. Some more useful ones are from @javadoc[`DataflowPipelineWorkerPoolOptions`](org.apache.beam.runners.dataflow.options.DataflowPipelineWorkerPoolOptions).
 
-@javadoc[`DataflowWorkerHarnessOptions#getWorkerCacheMb`](org.apache.beam.runners.dataflow.options.DataflowWorkerHarnessOptions#getWorkerCacheMb--) affects side input performance but needs an extra step to enable. See this @ref[FAQ item](FAQ.md#how-do-i-improve-side-input-performance-).
+@javadoc[`DataflowWorkerHarnessOptions#getWorkerCacheMb`](org.apache.beam.runners.dataflow.options.DataflowWorkerHarnessOptions#getWorkerCacheMb--) affects side input performance but needs an extra step to enable. See this @ref:[FAQ item](FAQ.md#how-do-i-improve-side-input-performance-).
 
 There are a few more experimental settings that might help specific scenarios:
 - `--experiments=shuffle_mode=service` - use external [shuffle service](https://cloud.google.com/dataflow/service/dataflow-service-desc#cloud-dataflow-shuffle) instead of local disk

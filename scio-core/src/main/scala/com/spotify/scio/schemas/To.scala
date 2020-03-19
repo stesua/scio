@@ -18,44 +18,111 @@ package com.spotify.scio.schemas
 
 import com.spotify.scio.values._
 import com.spotify.scio.coders._
+import com.spotify.scio.util.ScioUtil
 import org.apache.beam.sdk.values._
-import org.apache.beam.sdk.schemas.{Schema => BSchema, SchemaCoder}
+import org.apache.beam.sdk.schemas.{SchemaCoder, Schema => BSchema}
+
 import scala.collection.JavaConverters._
 import scala.language.experimental.macros
+import scala.annotation.tailrec
+import scala.reflect.ClassTag
 
-sealed trait To[I, O] extends (SCollection[I] => SCollection[O])
+sealed trait To[I, O] extends (SCollection[I] => SCollection[O]) with Serializable {
+  def coder: Coder[O]
+  def convert(i: I): O
+
+  final def apply(coll: SCollection[I]): SCollection[O] =
+    coll.map(i => convert(i))(coder)
+}
 
 object To {
-  private def areCompatible(t0: BSchema.FieldType, t1: BSchema.FieldType): Boolean = {
+
+  @tailrec @inline
+  private def getBaseType(t: BSchema.FieldType): BSchema.FieldType = {
+    val log = t.getLogicalType()
+    if (log == null) t
+    else getBaseType(log.getBaseType())
+  }
+
+  // Position API
+  private case class Location(p: List[String])
+  private case class Positional[T](location: Location, value: T)
+
+  private def merge(p0: Location, p1: Location): Location =
+    Location(p0.p ++ p1.p)
+
+  sealed trait Nullable
+  case object `NOT NULLABLE` extends Nullable
+  case object NULLABLE extends Nullable
+  private object NullableBuilder {
+    def fromBoolean(isNullable: Boolean): Nullable =
+      if (isNullable) NULLABLE else `NOT NULLABLE`
+  }
+
+  // Error API
+  sealed private trait Error
+  private case class NullableError(got: Nullable, expected: Nullable) extends Error
+  private case class TypeError(got: BSchema.FieldType, expected: BSchema.FieldType) extends Error
+  private case object FieldNotFound extends Error
+
+  private type Errors = List[Positional[Error]]
+
+  /**
+   * Test if Rows with Schema t0 can be safely converted to Rows with Schema t1
+   */
+  private def areCompatible(
+    context: Location
+  )(t0: BSchema.FieldType, t1: BSchema.FieldType): Errors =
     (t0.getTypeName, t1.getTypeName, t0.getNullable == t1.getNullable) match {
       case (_, _, false) =>
-        false
+        val expected = NullableBuilder.fromBoolean(t1.getNullable())
+        val got = NullableBuilder.fromBoolean(t0.getNullable())
+        List(Positional(context, NullableError(got, expected)))
       case (BSchema.TypeName.ROW, BSchema.TypeName.ROW, _) =>
-        areCompatible(t0.getRowSchema, t1.getRowSchema)
+        areCompatible(t0.getRowSchema, t1.getRowSchema).map { e =>
+          Positional(merge(context, e.location), e.value)
+        }
       case (BSchema.TypeName.ARRAY, BSchema.TypeName.ARRAY, _) =>
-        areCompatible(t0.getCollectionElementType, t1.getCollectionElementType)
+        areCompatible(context)(t0.getCollectionElementType, t1.getCollectionElementType)
       case (BSchema.TypeName.MAP, BSchema.TypeName.MAP, _) =>
-        areCompatible(t0.getMapKeyType, t1.getMapKeyType)
-        areCompatible(t0.getMapValueType, t1.getMapValueType)
+        areCompatible(context)(t0.getMapKeyType, t1.getMapKeyType) ++
+          areCompatible(context)(t0.getMapValueType, t1.getMapValueType)
       case (_, _, _) =>
-        t0.equivalent(t1, BSchema.EquivalenceNullablePolicy.SAME)
+        if (t0.equivalent(t1, BSchema.EquivalenceNullablePolicy.SAME)) Nil
+        else List(Positional(context, TypeError(t0, t1)))
     }
-  }
 
-  private def areCompatible(s0: BSchema, s1: BSchema): Boolean = {
-    val s0Fields = s0.getFields.asScala.map { x =>
-      (x.getName, x)
-    }.toMap
-    s1.getFields.asScala.forall { f =>
+  private def areCompatible(s0: BSchema, s1: BSchema): Errors = {
+    val s0Fields =
+      s0.getFields.asScala.map(x => (x.getName, x)).toMap
+
+    s1.getFields.asScala.toList.flatMap { f =>
+      val name = f.getName
+      val loc = Location(List(name))
       s0Fields
-        .get(f.getName)
-        .exists(other => areCompatible(f.getType, other.getType))
+        .get(name)
+        .map(other => areCompatible(loc)(other.getType, f.getType))
+        .getOrElse[Errors](List(Positional(loc, FieldNotFound)))
     }
   }
 
-  private[schemas] def checkCompatibility[T](bsi: BSchema, bso: BSchema)(
-    t: => T): Either[String, T] =
-    if (areCompatible(bsi, bso)) {
+  private def mkPath(p: Location): String = p.p.mkString(".")
+
+  private def messageFor(err: Positional[Error]): String =
+    err match {
+      case Positional(p, NullableError(got, expected)) =>
+        s"⨯ Field ${mkPath(p)} has incompatible NULLABLE. Got: $got expected: $expected"
+      case Positional(p, TypeError(got, expected)) =>
+        s"⨯ Field ${mkPath(p)} has incompatible types." +
+          s" Got: ${got.getTypeName} expected: ${expected.getTypeName}"
+      case Positional(p, FieldNotFound) => s"⨯ Field ${mkPath(p)} was not found"
+    }
+
+  def checkCompatibility[T](bsi: BSchema, bso: BSchema)(
+    t: => T
+  ): Either[String, T] = {
+    val errors = areCompatible(bsi, bso)
+    if (errors.isEmpty) {
       Right(t)
     } else {
       val message =
@@ -65,25 +132,37 @@ object To {
         |FROM schema:
         |${PrettyPrint.prettyPrint(bsi.getFields.asScala.toList)}
         |TO schema:
-        |${PrettyPrint.prettyPrint(bso.getFields.asScala.toList)}""".stripMargin
-      Left(message)
+        |${PrettyPrint.prettyPrint(bso.getFields.asScala.toList)}
+        |""".stripMargin
+      val errorsMsg = errors.map(messageFor).mkString("\n")
+      Left(message ++ errorsMsg)
+    }
+  }
+
+  /**
+   * Builds a function that reads a Row and convert it
+   * to a Row in the given Schema.
+   * The input Row needs to be compatible with the given Schema,
+   * that is, it may have more fields, or use LogicalTypes.
+   */
+  @inline private def transform(schema: BSchema): Row => Row = { t0 =>
+    val iter = schema.getFields.iterator()
+    val builder: Row.Builder = Row.withSchema(schema)
+    while (iter.hasNext) {
+      val f = iter.next()
+      val value = t0.getValue[Object](f.getName) match {
+        case None => null
+        case r: Row if f.getType.getTypeName == BSchema.TypeName.ROW =>
+          transform(f.getType.getRowSchema)(r)
+        case v =>
+          // See comment in `SchemaMaterializer.decode` implementation
+          // for an explanation on why this is required.
+          SchemaMaterializer.decode(Type(f.getType()))(v)
+      }
+      builder.addValue(value)
     }
 
-  @inline private def transform(schema: BSchema): Row => Row = { t0 =>
-    val values =
-      schema.getFields.asScala.map { f =>
-        t0.getValue[Object](f.getName) match {
-          case None => null
-          case r if f.getType.getTypeName == BSchema.TypeName.ROW =>
-            transform(f.getType.getRowSchema)(r.asInstanceOf[Row])
-          case v =>
-            v
-        }
-      }
-    Row
-      .withSchema(schema)
-      .addValues(values: _*)
-      .build()
+    builder.build()
   }
 
   /**
@@ -92,19 +171,17 @@ object To {
    * The compatibility of the 2 schemas is NOT checked at compile time, so the execution may fail.
    * @see To#apply
    */
-  def unsafe[I: Schema, O: Schema]: To[I, O] =
-    new To[I, O] {
-      def apply(coll: SCollection[I]): SCollection[O] = {
-        val (bst, toT, _) = SchemaMaterializer.materialize(coll.context, Schema[I])
-        val (bso, toO, fromO) = SchemaMaterializer.materialize(coll.context, Schema[O])
+  def unsafe[I: Schema, O: Schema: ClassTag]: To[I, O] = unsafe(unchecked)
 
-        checkCompatibility(bst, bso) {
-          val trans = transform(bso)
-          coll.map[O] { t =>
-            fromO(trans(toT(t)))
-          }(Coder.beam(SchemaCoder.of(bso, toO, fromO)))
-        }.fold(message => throw new IllegalArgumentException(message), identity)
-      }
+  private[scio] def unsafe[I: Schema, O: Schema](to: To[I, O]): To[I, O] =
+    new To[I, O] {
+      val (bst, _, _) = SchemaMaterializer.materialize(Schema[I])
+      val (bso, _, _) = SchemaMaterializer.materialize(Schema[O])
+      val underlying: To[I, O] = checkCompatibility(bst, bso)(to)
+        .fold(message => throw new IllegalArgumentException(message), identity)
+
+      val coder = underlying.coder
+      def convert(i: I): O = underlying.convert(i)
     }
 
   /**
@@ -112,16 +189,25 @@ object To {
    * @see To#safe
    * @see To#unsafe
    */
-  def unchecked[I: Schema, O: Schema]: To[I, O] =
+  def unchecked[I: Schema, O: Schema: ClassTag]: To[I, O] =
     new To[I, O] {
-      def apply(coll: SCollection[I]): SCollection[O] = {
-        val (_, toT, _) = SchemaMaterializer.materialize(coll.context, Schema[I])
-        val (bso, toO, fromO) = SchemaMaterializer.materialize(coll.context, Schema[O])
-        val trans = transform(bso)
-        coll.map[O] { t =>
-          fromO(trans(toT(t)))
-        }(Coder.beam(SchemaCoder.of(bso, toO, fromO)))
+      val (_, toT, _) = SchemaMaterializer.materialize(Schema[I])
+      val convertRow: (BSchema, I) => Row = { (s, i) =>
+        val row = toT(i)
+        transform(s)(row)
       }
+      val underlying = unchecked[I, O](convertRow)
+
+      val coder = underlying.coder
+      def convert(i: I): O = underlying.convert(i)
+    }
+
+  private[scio] def unchecked[I, O: Schema: ClassTag](f: (BSchema, I) => Row): To[I, O] =
+    new To[I, O] {
+      val (bso, toO, fromO) = SchemaMaterializer.materialize(Schema[O])
+      val td = TypeDescriptor.of(ScioUtil.classOf[O])
+      val coder = Coder.beam(SchemaCoder.of(bso, td, toO, fromO))
+      def convert(i: I): O = f.curried(bso).andThen(fromO(_))(i)
     }
 
   /**
@@ -135,23 +221,22 @@ object To {
 }
 
 object ToMacro {
-  import scala.reflect.macros.blackbox
-  def safeImpl[I: c.WeakTypeTag, O: c.WeakTypeTag](c: blackbox.Context)(
-    iSchema: c.Expr[Schema[I]],
-    oSchema: c.Expr[Schema[O]]): c.Expr[To[I, O]] = {
+  import scala.reflect.macros._
+  def safeImpl[I: c.WeakTypeTag, O: c.WeakTypeTag](
+    c: blackbox.Context
+  )(iSchema: c.Expr[Schema[I]], oSchema: c.Expr[Schema[O]]): c.Expr[To[I, O]] = {
+    val h = new { val ctx: c.type = c } with SchemaMacroHelpers
+    import h._
     import c.universe._
 
     val tpeI = weakTypeOf[I]
     val tpeO = weakTypeOf[O]
 
-    val sInTree = c.untypecheck(iSchema.tree.duplicate)
-    val sOutTree = c.untypecheck(oSchema.tree.duplicate)
+    val expr = c.Expr[(Schema[I], Schema[O])](q"(${untyped(iSchema)}, ${untyped(oSchema)})")
+    val (sIn, sOut) = c.eval(expr)
 
-    val (sIn, sOut) =
-      c.eval(c.Expr[(Schema[I], Schema[O])](q"($sInTree, $sOutTree)"))
-
-    val schemaIn: BSchema = SchemaMaterializer.fieldType(sIn).getRowSchema()
     val schemaOut: BSchema = SchemaMaterializer.fieldType(sOut).getRowSchema()
+    val schemaIn: BSchema = SchemaMaterializer.fieldType(sIn).getRowSchema()
 
     To.checkCompatibility(schemaIn, schemaOut) {
         q"""_root_.com.spotify.scio.schemas.To.unchecked[$tpeI, $tpeO]"""

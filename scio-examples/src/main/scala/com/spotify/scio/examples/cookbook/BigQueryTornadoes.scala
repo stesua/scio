@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: BigQuery Tornadoes Example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.cookbook.BigQueryTornadoes
+// `sbt "runMain com.spotify.scio.examples.cookbook.BigQueryTornadoes
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=clouddataflow-readonly:samples.weather_stations
 // --output=[DATASET].bigquery_tornadoes"`
@@ -41,10 +41,12 @@ object BigQueryTornadoes {
       List(
         new TableFieldSchema().setName("month").setType("INTEGER"),
         new TableFieldSchema().setName("tornado_count").setType("INTEGER")
-      ).asJava)
+      ).asJava
+    )
 
     // Open a BigQuery table as a `SCollection[TableRow]`
-    sc.bigQueryTable(args.getOrElse("input", ExampleData.WEATHER_SAMPLES_TABLE))
+    val table = Table.Spec(args.getOrElse("input", ExampleData.WEATHER_SAMPLES_TABLE))
+    sc.bigQueryTable(table)
       // Extract months with tornadoes
       .flatMap(r => if (r.getBoolean("tornado")) Some(r.getLong("month")) else None)
       // Count occurrences of each unique month to get `(Long, Long)`
@@ -52,9 +54,10 @@ object BigQueryTornadoes {
       // Map `(Long, Long)` tuples into result `TableRow`s
       .map(kv => TableRow("month" -> kv._1, "tornado_count" -> kv._2))
       // Save result as a BigQuery table
-      .saveAsBigQuery(args("output"), schema, WRITE_TRUNCATE, CREATE_IF_NEEDED)
+      .saveAsBigQueryTable(Table.Spec(args("output")), schema, WRITE_TRUNCATE, CREATE_IF_NEEDED)
 
-    // Close the context and execute the pipeline
-    sc.close()
+    // Execute the pipeline
+    sc.run()
+    ()
   }
 }

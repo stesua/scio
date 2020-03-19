@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,11 +28,13 @@ import org.apache.beam.sdk.values.WindowingStrategy.AccumulationMode
 import org.joda.time.{Duration, Instant}
 
 /** Window options for an [[SCollection]]. */
-case class WindowOptions(trigger: Trigger = null,
-                         accumulationMode: AccumulationMode = null,
-                         allowedLateness: Duration = null,
-                         closingBehavior: ClosingBehavior = null,
-                         timestampCombiner: TimestampCombiner = null)
+case class WindowOptions(
+  trigger: Trigger = null,
+  accumulationMode: AccumulationMode = null,
+  allowedLateness: Duration = null,
+  closingBehavior: ClosingBehavior = null,
+  timestampCombiner: TimestampCombiner = null
+)
 
 /** Value with window information to be used inside a [[WindowedSCollection]]. */
 case class WindowedValue[T](value: T, timestamp: Instant, window: BoundedWindow, pane: PaneInfo) {
@@ -48,13 +50,13 @@ case class WindowedValue[T](value: T, timestamp: Instant, window: BoundedWindow,
 
   /** Make a copy with new pane. */
   def withPane(p: PaneInfo): WindowedValue[T] = this.copy(pane = p)
-
 }
 
 /** An enhanced SCollection that provides access to window information via [[WindowedValue]]. */
-class WindowedSCollection[T: Coder] private[values] (val internal: PCollection[T],
-                                                     val context: ScioContext)
-    extends PCollectionWrapper[T] {
+class WindowedSCollection[T: Coder] private[values] (
+  val internal: PCollection[T],
+  val context: ScioContext
+) extends PCollectionWrapper[T] {
 
   /** [[SCollection.filter]] with access to window information via [[WindowedValue]]. */
   def filter(f: WindowedValue[T] => Boolean): WindowedSCollection[T] =
@@ -62,7 +64,8 @@ class WindowedSCollection[T: Coder] private[values] (val internal: PCollection[T
 
   /** [[SCollection.flatMap]] with access to window information via [[WindowedValue]]. */
   def flatMap[U: Coder](
-    f: WindowedValue[T] => TraversableOnce[WindowedValue[U]]): WindowedSCollection[U] =
+    f: WindowedValue[T] => TraversableOnce[WindowedValue[U]]
+  ): WindowedSCollection[U] =
     new WindowedSCollection(this.parDo(FunctionsWithWindowedValue.flatMapFn(f)).internal, context)
 
   /** [[SCollection.keyBy]] with access to window information via [[WindowedValue]]. */
@@ -75,5 +78,4 @@ class WindowedSCollection[T: Coder] private[values] (val internal: PCollection[T
 
   /** Convert back to a basic SCollection. */
   def toSCollection: SCollection[T] = context.wrap(internal)
-
 }

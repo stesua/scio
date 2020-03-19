@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ package com.spotify.scio.cassandra
 
 import com.datastax.driver.core.DataType
 import org.apache.beam.sdk.util.SerializableUtils
-import org.scalatest._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.flatspec.AnyFlatSpec
 
-class DataTypeExternalizerTest extends FlatSpec with Matchers {
-
+class DataTypeExternalizerTest extends AnyFlatSpec with Matchers {
   "DataTypeExternalizer" should "support ImmutableList" in {
     val dt = DataType.list(DataType.text())
     SerializableUtils
@@ -36,5 +36,4 @@ class DataTypeExternalizerTest extends FlatSpec with Matchers {
       .ensureSerializable(DataTypeExternalizer(dt))
       .get shouldBe dt
   }
-
 }

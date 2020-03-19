@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import org.apache.beam.sdk.transforms.View
 import org.joda.time.{DateTimeConstants, Duration, Instant}
 
 class SCollectionWithSideInputTest extends PipelineSpec {
-
   val sideData = Seq(("a", 1), ("b", 2), ("c", 3))
 
   "SCollectionWithSideInput" should "support asSingletonSideInput" in {
@@ -64,6 +63,15 @@ class SCollectionWithSideInputTest extends PipelineSpec {
     }
   }
 
+  it should "support asSetSingletonSideInput" in {
+    runWithContext { sc =>
+      val p1 = sc.parallelize(Seq(1))
+      val p2 = sc.parallelize(sideData ++ sideData).asSetSingletonSideInput
+      val s = p1.withSideInputs(p2).flatMap((i, s) => s(p2)).toSCollection
+      s should containInAnyOrder(sideData)
+    }
+  }
+
   it should "support asMapSideInput" in {
     runWithContext { sc =>
       val p1 = sc.parallelize(Seq(1))
@@ -78,6 +86,29 @@ class SCollectionWithSideInputTest extends PipelineSpec {
       val p1 = sc.parallelize(Seq(1))
       val p2 =
         sc.parallelize(sideData ++ sideData.map(kv => (kv._1, kv._2 + 10))).asMultiMapSideInput
+      val s = p1
+        .withSideInputs(p2)
+        .flatMap((i, s) => s(p2).mapValues(_.toSet))
+        .toSCollection
+      s should containInAnyOrder(sideData.map(kv => (kv._1, Set(kv._2, kv._2 + 10))))
+    }
+  }
+
+  it should "support asMapSingletonSideInput" in {
+    runWithContext { sc =>
+      val p1 = sc.parallelize(Seq(1))
+      val p2 = sc.parallelize(sideData).asMapSingletonSideInput
+      val s = p1.withSideInputs(p2).flatMap((i, s) => s(p2).toSeq).toSCollection
+      s should containInAnyOrder(sideData)
+    }
+  }
+
+  it should "support asMultiMapSingletonSideInput" in {
+    runWithContext { sc =>
+      val p1 = sc.parallelize(Seq(1))
+      val p2 =
+        sc.parallelize(sideData ++ sideData.map(kv => (kv._1, kv._2 + 10)))
+          .asMultiMapSingletonSideInput
       val s = p1
         .withSideInputs(p2)
         .flatMap((i, s) => s(p2).mapValues(_.toSet))
@@ -207,6 +238,21 @@ class SCollectionWithSideInputTest extends PipelineSpec {
     }
   }
 
+  it should "support windowed asSetSingletonSideInput" in {
+    runWithContext { sc =>
+      val p1 = sc
+        .parallelizeTimestamped(timestampedData)
+        .withFixedWindows(Duration.standardSeconds(1))
+      val p2 = sc
+        .parallelizeTimestamped(timestampedData ++ timestampedData)
+        .withFixedWindows(Duration.standardSeconds(1))
+        .flatMap(x => 1 to x)
+        .asSetSingletonSideInput
+      val s = p1.withSideInputs(p2).map((x, s) => (x, s(p2))).toSCollection
+      s should forAll[(Int, Set[Int])](t => (1 to t._1).toSet == t._2)
+    }
+  }
+
   it should "support windowed asMapSideInput" in {
     runWithContext { sc =>
       val p1 = sc
@@ -296,4 +342,39 @@ class SCollectionWithSideInputTest extends PipelineSpec {
     }
   }
 
+  it should "allow mapping over a SingletonSideInput" in {
+    runWithContext { sc =>
+      val p1 = sc.parallelize(Seq(1))
+      val p2 = sc.parallelize(Seq(sideData)).asSingletonSideInput
+      val p3 = p2.map(seq => seq.map { case (k, v) => (k, v * 2) })
+      val s = p1.withSideInputs(p3).map((i, s) => (i, s(p3))).toSCollection
+      s should containSingleValue((1, sideData.map { case (k, v) => (k, v * 2) }))
+    }
+  }
+
+  it should "allow mapping over a ListSideInput" in {
+    runWithContext { sc =>
+      val p1 = sc.parallelize(Seq(1))
+      val p2 = sc.parallelize(sideData).asListSideInput
+      val p3 = p2.map(seq => seq.map { case (k, v) => (k, v * 2) }.toSet)
+      val s = p1.withSideInputs(p3).map((i, s) => (i, s(p3))).toSCollection
+      s should containSingleValue((1, sideData.map { case (k, v) => (k, v * 2) }.toSet))
+    }
+  }
+
+  it should "support windowed and mapped asListSideInput" in {
+    runWithContext { sc =>
+      val p1 = sc
+        .parallelizeTimestamped(timestampedData)
+        .withFixedWindows(Duration.standardSeconds(1))
+      val p2 = sc
+        .parallelizeTimestamped(timestampedData)
+        .withFixedWindows(Duration.standardSeconds(1))
+        .flatMap(x => 1 to x)
+        .asListSideInput
+        .map(seq => seq.map(_ * 2))
+      val s = p1.withSideInputs(p2).map((x, s) => (x, s(p2))).toSCollection
+      s should forAll[(Int, Seq[Int])](t => (1 to t._1).map(_ * 2).toSet == t._2.toSet)
+    }
+  }
 }

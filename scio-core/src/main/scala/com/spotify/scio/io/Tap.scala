@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,16 +19,15 @@ package com.spotify.scio.io
 
 import java.util.UUID
 
-import com.spotify.scio.ScioContext
-import com.spotify.scio.coders.AvroBytesUtil
+import com.spotify.scio.coders.{AvroBytesUtil, Coder, CoderMaterializer}
 import com.spotify.scio.util.ScioUtil
-import com.spotify.scio.coders.{Coder, CoderMaterializer}
 import com.spotify.scio.values.SCollection
+import com.spotify.scio.{ScioContext, ScioResult}
 import org.apache.avro.generic.GenericRecord
+import org.apache.beam.sdk.coders.{Coder => BCoder}
 import org.apache.beam.sdk.io.AvroIO
 import org.apache.beam.sdk.transforms.DoFn
 import org.apache.beam.sdk.transforms.DoFn.ProcessElement
-import org.apache.beam.sdk.coders.{Coder => BCoder}
 
 /**
  * Placeholder to an external data set that can either be load into memory as an iterator or
@@ -57,12 +56,16 @@ trait Tap[T] extends Serializable { self =>
     /** Open data set as an [[com.spotify.scio.values.SCollection SCollection]]. */
     override def open(sc: ScioContext): SCollection[U] = self.open(sc).map(f)
   }
-
 }
 
 case object EmptyTap extends Tap[Nothing] {
   override def value: Iterator[Nothing] = Iterator.empty
   override def open(sc: ScioContext): SCollection[Nothing] = sc.empty[Nothing]
+}
+
+case class UnsupportedTap[T](msg: String) extends Tap[T] {
+  override def value: Iterator[T] = throw new UnsupportedOperationException(msg)
+  override def open(sc: ScioContext): SCollection[T] = throw new UnsupportedOperationException(msg)
 }
 
 /** Tap for text files on local file system or GCS. */
@@ -72,7 +75,7 @@ final case class TextTap(path: String) extends Tap[String] {
   override def open(sc: ScioContext): SCollection[String] = sc.textFile(path)
 }
 
-private[scio] final class InMemoryTap[T: Coder] extends Tap[T] {
+final private[scio] class InMemoryTap[T: Coder] extends Tap[T] {
   private[scio] val id: String = UUID.randomUUID().toString
   override def value: Iterator[T] = InMemorySink.get(id).iterator
   override def open(sc: ScioContext): SCollection[T] =
@@ -84,9 +87,18 @@ private[scio] class MaterializeTap[T: Coder] private (val path: String, coder: B
   private val _path = ScioUtil.addPartSuffix(path)
 
   override def value: Iterator[T] = {
-    FileStorage(_path)
-      .avroFile[GenericRecord](AvroBytesUtil.schema)
-      .map(AvroBytesUtil.decode(coder, _))
+    val storage = FileStorage(_path)
+
+    if (storage.isDone) {
+      storage
+        .avroFile[GenericRecord](AvroBytesUtil.schema)
+        .map(AvroBytesUtil.decode(coder, _))
+    } else {
+      throw new RuntimeException(
+        "Tap failed to materialize to filesystem. Did you " +
+          "call .materialize before the ScioContext was run?"
+      )
+    }
   }
 
   private def dofn =
@@ -107,4 +119,12 @@ object MaterializeTap {
     new MaterializeTap(path, CoderMaterializer.beam(context, Coder[T]))
 }
 
-final case class ClosedTap[T] private (private[scio] val underlying: Tap[T])
+final case class ClosedTap[T] private (private[scio] val underlying: Tap[T]) {
+
+  /**
+   * Get access to the underlying Tap. The ScioContext has to be ran before.
+   * An instance of ScioResult is returned by ScioContext after the context is run.
+   * @see ScioContext.run
+   */
+  def get(result: ScioResult): Tap[T] = result.tap(this)
+}

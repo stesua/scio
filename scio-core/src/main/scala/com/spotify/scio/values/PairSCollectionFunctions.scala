@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,19 +24,31 @@ import com.spotify.scio.ScioContext
 import com.spotify.scio.coders.{Coder, CoderMaterializer}
 import com.spotify.scio.util._
 import com.spotify.scio.util.random.{BernoulliValueSampler, PoissonValueSampler}
-import com.twitter.algebird._
-import org.apache.beam.sdk.coders.KvCoder
+import com.twitter.algebird.{Aggregator, Hash128, Monoid, Semigroup}
 import org.apache.beam.sdk.transforms._
 import org.apache.beam.sdk.values.{KV, PCollection, PCollectionView}
 import org.slf4j.LoggerFactory
 
 private object PairSCollectionFunctions {
-
   private val logger = LoggerFactory.getLogger(this.getClass)
 
-  case class BFSettings(width: Int, capacity: Int, numBFs: Int)
+  final case class BFSettings(width: Int, capacity: Int, numBFs: Int)
 
-  def optimalBFSettings(numEntries: Long, fpProb: Double): BFSettings = {
+  /*
+   * This function calculates the width and number of bloom filters that would be optimally
+   * required to maintain the given fpProb.
+   *
+   * For sparse transforms, BloomFilters are stored as SideInputs.
+   * For some runners, this side input size might exceed the cache in the worker.
+   * We log an info or a warning (size > 100MB) for the user to take appropriate action.
+   * The side input cache limit for Dataflow Runner is 100 MB and for Spark runner is 10MB.
+   *
+   * This function is only called from `optimalKeysBloomFiltersAsSideInputs` which is used only
+   * by sparse transforms as of now.
+   *
+   * https://github.com/spotify/scio/issues/2040
+   */
+  def optimalBFSettings(tfName: String, numEntries: Long, fpProb: Double): BFSettings = {
     // double to int rounding error happens when numEntries > (1 << 27)
     // set numEntries upper bound to 1 << 27 to avoid high false positive
     def estimateWidth(numEntries: Int, fpProb: Double): Int =
@@ -60,16 +72,34 @@ private object PairSCollectionFunctions {
     val numBFs = (numEntries / capacity).toInt + 1
 
     val totalBytes = width.toLong * numBFs / 8
-    logger.info(s"Optimal Bloom Filter settings for numEntries = $numEntries, fpProb = $fpProb")
-    logger.info(
-      s"BF width = $width, capacity = $capacity, numBFs = $numBFs, total bytes = $totalBytes")
+    val totalSizeMb = totalBytes / 1024.0 / 1024.0
+
+    val sideInputLogMessage = s"""
+     |Estimated size of BloomFilter(s) for $numEntries elements with false positive probability of
+     |$fpProb in step $tfName is $totalSizeMb MB.
+     |
+     |Optimal Width of each BloomFilter: $width bits.
+     |Capacity of each BloomFilter: $capacity elements.
+     |Number of BFs: $numBFs
+    """.stripMargin
+
+    val sideInputWarnMessage = s"""
+     |This might exceed worker caches in some runners.
+     |
+     |Please set runner specific worker memory cache above $totalSizeMb.
+     |More info: https://spotify.github.io/scio/FAQ.html#how-do-i-improve-side-input-performance-
+    """.stripMargin
+
+    if (totalSizeMb > 100) {
+      logger.warn(sideInputLogMessage + sideInputWarnMessage)
+    } else {
+      logger.debug(sideInputLogMessage)
+    }
+
     BFSettings(width, capacity, numBFs)
   }
-
 }
 
-// scalastyle:off number.of.methods
-// scalastyle:off file.size.limit
 /**
  * Extra functions available on SCollections of (key, value) pairs through an implicit conversion.
  *
@@ -79,49 +109,37 @@ private object PairSCollectionFunctions {
  * @groupname transform Transformations
  */
 class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
-
   import TupleFunctions._
 
-  private val context: ScioContext = self.context
+  private[this] val context: ScioContext = self.context
 
-  private val toKvTransform =
-    ParDo.of(Functions.mapFn[(K, V), KV[K, V]](kv => KV.of(kv._1, kv._2)))
+  private[this] val toKvTransform =
+    ParDo.of(Functions.mapFn((kv: (K, V)) => KV.of(kv._1, kv._2)))
 
-  private[scio] def toKV(implicit koder: Coder[K], voder: Coder[V]): SCollection[KV[K, V]] = {
-    val coder = CoderMaterializer.kvCoder[K, V](context)
-    val o = self.applyInternal(toKvTransform).setCoder(coder)
-    context.wrap(o)
-  }
+  private[scio] def toKV(implicit koder: Coder[K], voder: Coder[V]): SCollection[KV[K, V]] =
+    self.applyTransform(toKvTransform).setCoder(CoderMaterializer.kvCoder[K, V](context))
 
   private[values] def applyPerKey[UI: Coder, UO: Coder](
-    t: PTransform[PCollection[KV[K, V]], PCollection[KV[K, UI]]],
-    f: KV[K, UI] => (K, UO))(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, UO)] = {
-    val o = self.applyInternal(new PTransform[PCollection[(K, V)], PCollection[(K, UO)]](null) {
-      override def expand(input: PCollection[(K, V)]): PCollection[(K, UO)] = {
-        var kv = input
-          .apply("TupleToKv", toKvTransform)
-          .setCoder(CoderMaterializer.kvCoder[K, V](context))
-          .apply(t)
-        if (!kv.getCoder.isInstanceOf[KvCoder[_, _]]) {
-          kv = kv.setCoder(CoderMaterializer.kvCoder[K, UI](context))
-        }
-        kv.apply("KvToTuple", ParDo.of(Functions.mapFn[KV[K, UI], (K, UO)](f)))
-          .setCoder(CoderMaterializer.beam(context, Coder[(K, UO)]))
-      }
-    })
-    context.wrap(o)
-  }
+    t: PTransform[_ >: PCollection[KV[K, V]], PCollection[KV[K, UI]]]
+  )(
+    f: KV[K, UI] => (K, UO)
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, UO)] =
+    self.transform(
+      _.withName("TupleToKv").toKV
+        .applyTransform(t)
+        .setCoder(CoderMaterializer.kvCoder[K, UI](context))
+        .withName("KvToTuple")
+        .map(f)
+    )
 
   /**
    * Apply a [[org.apache.beam.sdk.transforms.DoFn DoFn]] that processes [[KV]]s and wrap the
    * output in an [[SCollection]].
    */
   def applyPerKeyDoFn[U: Coder](
-    t: DoFn[KV[K, V], KV[K, U]])(implicit koder: Coder[K], vcoder: Coder[V]): SCollection[(K, U)] =
-    this.applyPerKey(ParDo
-                       .of(t)
-                       .asInstanceOf[PTransform[PCollection[KV[K, V]], PCollection[KV[K, U]]]],
-                     TupleFunctions.kvToTuple[K, U])
+    t: DoFn[KV[K, V], KV[K, U]]
+  )(implicit koder: Coder[K], vcoder: Coder[V]): SCollection[(K, U)] =
+    this.applyPerKey(ParDo.of(t))(kvToTuple)
 
   /**
    * Convert this SCollection to an [[SCollectionWithHotKeyFanout]] that uses an intermediate node
@@ -130,84 +148,94 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * N intermediate nodes for partial combining. If N is less than or equal to 1, this key will
    * not be sent through an intermediate node.
    */
-  def withHotKeyFanout(hotKeyFanout: K => Int)(implicit koder: Coder[K],
-                                               voder: Coder[V]): SCollectionWithHotKeyFanout[K, V] =
-    new SCollectionWithHotKeyFanout(this, Left(hotKeyFanout))
+  def withHotKeyFanout(
+    hotKeyFanout: K => Int
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollectionWithHotKeyFanout[K, V] =
+    new SCollectionWithHotKeyFanout(context, this, Left(hotKeyFanout))
 
   /**
    * Convert this SCollection to an [[SCollectionWithHotKeyFanout]] that uses an intermediate node
    * to combine "hot" keys partially before performing the full combine.
    * @param hotKeyFanout constant value for every key
    */
-  def withHotKeyFanout(hotKeyFanout: Int)(implicit koder: Coder[K],
-                                          voder: Coder[V]): SCollectionWithHotKeyFanout[K, V] =
-    new SCollectionWithHotKeyFanout(this, Right(hotKeyFanout))
+  def withHotKeyFanout(
+    hotKeyFanout: Int
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollectionWithHotKeyFanout[K, V] =
+    new SCollectionWithHotKeyFanout(context, this, Right(hotKeyFanout))
 
   // =======================================================================
   // CoGroups
   // =======================================================================
 
   /**
-   * For each key k in `this` or `that`, return a resulting SCollection that contains a tuple with
-   * the list of values for that key in `this` as well as `that`.
+   * For each key k in `this` or `rhs`, return a resulting SCollection that contains a tuple with
+   * the list of values for that key in `this` as well as `rhs`.
    * @group cogroup
    */
-  def cogroup[W: Coder](that: SCollection[(K, W)])(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (Iterable[V], Iterable[W]))] =
-    ArtisanJoin.cogroup(self.tfName, self, that)
+  def cogroup[W: Coder](
+    rhs: SCollection[(K, W)]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, (Iterable[V], Iterable[W]))] =
+    ArtisanJoin.cogroup(self.tfName, self, rhs)
 
   /**
-   * For each key k in `this` or `that1` or `that2`, return a resulting SCollection that contains
-   * a tuple with the list of values for that key in `this`, `that1` and `that2`.
+   * For each key k in `this` or `rhs1` or `rhs2`, return a resulting SCollection that contains
+   * a tuple with the list of values for that key in `this`, `rhs1` and `rhs2`.
    * @group cogroup
    */
-  def cogroup[W1: Coder, W2: Coder](that1: SCollection[(K, W1)], that2: SCollection[(K, W2)])(
+  def cogroup[W1: Coder, W2: Coder](rhs1: SCollection[(K, W1)], rhs2: SCollection[(K, W2)])(
     implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (Iterable[V], Iterable[W1], Iterable[W2]))] =
-    MultiJoin.withName(self.tfName).cogroup(self, that1, that2)
+    voder: Coder[V]
+  ): SCollection[(K, (Iterable[V], Iterable[W1], Iterable[W2]))] =
+    MultiJoin.withName(self.tfName).cogroup(self, rhs1, rhs2)
 
   /**
-   * For each key k in `this` or `that1` or `that2` or `that3`, return a resulting SCollection
-   * that contains a tuple with the list of values for that key in `this`, `that1`, `that2` and
-   * `that3`.
+   * For each key k in `this` or `rhs1` or `rhs2` or `rhs3`, return a resulting SCollection
+   * that contains a tuple with the list of values for that key in `this`, `rhs1`, `rhs2` and
+   * `rhs3`.
    * @group cogroup
    */
-  def cogroup[W1: Coder, W2: Coder, W3: Coder](that1: SCollection[(K, W1)],
-                                               that2: SCollection[(K, W2)],
-                                               that3: SCollection[(K, W3)])(
+  def cogroup[W1: Coder, W2: Coder, W3: Coder](
+    rhs1: SCollection[(K, W1)],
+    rhs2: SCollection[(K, W2)],
+    rhs3: SCollection[(K, W3)]
+  )(
     implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (Iterable[V], Iterable[W1], Iterable[W2], Iterable[W3]))] =
-    MultiJoin.withName(self.tfName).cogroup(self, that1, that2, that3)
-
-  /**
-   * Alias for `cogroup`.
-   * @group cogroup
-   */
-  def groupWith[W: Coder](that: SCollection[(K, W)])(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (Iterable[V], Iterable[W]))] =
-    this.cogroup(that)
+    voder: Coder[V]
+  ): SCollection[(K, (Iterable[V], Iterable[W1], Iterable[W2], Iterable[W3]))] =
+    MultiJoin.withName(self.tfName).cogroup(self, rhs1, rhs2, rhs3)
 
   /**
    * Alias for `cogroup`.
    * @group cogroup
    */
-  def groupWith[W1: Coder, W2: Coder](that1: SCollection[(K, W1)], that2: SCollection[(K, W2)])(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (Iterable[V], Iterable[W1], Iterable[W2]))] =
-    this.cogroup(that1, that2)
+  def groupWith[W: Coder](
+    rhs: SCollection[(K, W)]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, (Iterable[V], Iterable[W]))] =
+    this.cogroup(rhs)
 
   /**
    * Alias for `cogroup`.
    * @group cogroup
    */
-  def groupWith[W1: Coder, W2: Coder, W3: Coder](that1: SCollection[(K, W1)],
-                                                 that2: SCollection[(K, W2)],
-                                                 that3: SCollection[(K, W3)])(
+  def groupWith[W1: Coder, W2: Coder](rhs1: SCollection[(K, W1)], rhs2: SCollection[(K, W2)])(
     implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (Iterable[V], Iterable[W1], Iterable[W2], Iterable[W3]))] =
-    this.cogroup(that1, that2, that3)
+    voder: Coder[V]
+  ): SCollection[(K, (Iterable[V], Iterable[W1], Iterable[W2]))] =
+    this.cogroup(rhs1, rhs2)
+
+  /**
+   * Alias for `cogroup`.
+   * @group cogroup
+   */
+  def groupWith[W1: Coder, W2: Coder, W3: Coder](
+    rhs1: SCollection[(K, W1)],
+    rhs2: SCollection[(K, W2)],
+    rhs3: SCollection[(K, W3)]
+  )(
+    implicit koder: Coder[K],
+    voder: Coder[V]
+  ): SCollection[(K, (Iterable[V], Iterable[W1], Iterable[W2], Iterable[W3]))] =
+    this.cogroup(rhs1, rhs2, rhs3)
 
   /**
    * Partition this SCollection using K.hashCode() into `n` partitions
@@ -227,139 +255,247 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
   // =======================================================================
 
   /**
-   * Perform a full outer join of `this` and `that`. For each element (k, v) in `this`, the
-   * resulting SCollection will either contain all pairs (k, (Some(v), Some(w))) for w in `that`,
-   * or the pair (k, (Some(v), None)) if no elements in `that` have key k. Similarly, for each
-   * element (k, w) in `that`, the resulting SCollection will either contain all pairs (k,
+   * Perform a full outer join of `this` and `rhs`. For each element (k, v) in `this`, the
+   * resulting SCollection will either contain all pairs (k, (Some(v), Some(w))) for w in `rhs`,
+   * or the pair (k, (Some(v), None)) if no elements in `rhs` have key k. Similarly, for each
+   * element (k, w) in `rhs`, the resulting SCollection will either contain all pairs (k,
    * (Some(v), Some(w))) for v in `this`, or the pair (k, (None, Some(w))) if no elements in
    * `this` have key k.
    * @group join
    */
-  def fullOuterJoin[W: Coder](that: SCollection[(K, W)])(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (Option[V], Option[W]))] =
-    ArtisanJoin.outer(self.tfName, self, that)
+  def fullOuterJoin[W: Coder](
+    rhs: SCollection[(K, W)]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, (Option[V], Option[W]))] =
+    ArtisanJoin.outer(self.tfName, self, rhs)
 
   /**
    * Return an SCollection containing all pairs of elements with matching keys in `this` and
-   * `that`. Each pair of elements will be returned as a (k, (v1, v2)) tuple, where (k, v1) is in
-   * `this` and (k, v2) is in `that`.
+   * `rhs`. Each pair of elements will be returned as a (k, (v1, v2)) tuple, where (k, v1) is in
+   * `this` and (k, v2) is in `rhs`.
    * @group join
    */
-  def join[W: Coder](that: SCollection[(K, W)])(implicit koder: Coder[K],
-                                                voder: Coder[V]): SCollection[(K, (V, W))] =
-    ArtisanJoin(self.tfName, self, that)
+  def join[W: Coder](
+    rhs: SCollection[(K, W)]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, (V, W))] =
+    ArtisanJoin(self.tfName, self, rhs)
 
   /**
-   * Perform a left outer join of `this` and `that`. For each element (k, v) in `this`, the
-   * resulting SCollection will either contain all pairs (k, (v, Some(w))) for w in `that`, or the
-   * pair (k, (v, None)) if no elements in `that` have key k.
+   * Perform a left outer join of `this` and `rhs`. For each element (k, v) in `this`, the
+   * resulting SCollection will either contain all pairs (k, (v, Some(w))) for w in `rhs`, or the
+   * pair (k, (v, None)) if no elements in `rhs` have key k.
    * @group join
    */
-  def leftOuterJoin[W: Coder](that: SCollection[(K, W)])(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (V, Option[W]))] =
-    ArtisanJoin.left(self.tfName, self, that)
+  def leftOuterJoin[W: Coder](
+    rhs: SCollection[(K, W)]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, (V, Option[W]))] =
+    ArtisanJoin.left(self.tfName, self, rhs)
 
   /**
-   * Perform a right outer join of `this` and `that`. For each element (k, w) in `that`, the
+   * Perform a right outer join of `this` and `rhs`. For each element (k, w) in `rhs`, the
    * resulting SCollection will either contain all pairs (k, (Some(v), w)) for v in `this`, or the
    * pair (k, (None, w)) if no elements in `this` have key k.
    * @group join
    */
-  def rightOuterJoin[W: Coder](that: SCollection[(K, W)])(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (Option[V], W))] =
-    ArtisanJoin.right(self.tfName, self, that)
+  def rightOuterJoin[W: Coder](
+    rhs: SCollection[(K, W)]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, (Option[V], W))] =
+    ArtisanJoin.right(self.tfName, self, rhs)
 
   /**
-   * Full outer join for cases when `this` is much larger than `that` which cannot fit in memory,
-   * but contains a mostly overlapping set of keys as `this`, i.e. when the intersection of keys
-   * is sparse in `this`. A Bloom Filter of keys in `that` is used to split `this` into 2
+   * Full outer join for cases when the left collection (`this`) is much larger than the right
+   * collection (`rhs`) which cannot fit in memory, but contains a mostly overlapping set of keys
+   * as the left collection, i.e. when the intersection of keys is sparse in the left collection.
+   * A Bloom Filter of keys from the right collection (`rhs`) is used to split `this` into 2
    * partitions. Only those with keys in the filter go through the join and the rest are
    * concatenated. This is useful for joining historical aggregates with incremental updates.
    * Read more about Bloom Filter: [[com.twitter.algebird.BloomFilter]].
    * @group join
-   * @param thatNumKeys estimated number of keys in `that`
-   * @param fpProb false positive probability when computing the overlap
+   * @param rhsNumKeys An estimate of the number of keys in the right collection `rhs`.
+   *                    This estimate is used to find the size and number of BloomFilters rhs Scio
+   *                    would use to split the left collection (`this`) into overlap and
+   *                    intersection in a "map" step before an exact join.
+   *                    Having a value close to the actual number improves the false positives
+   *                    in intermediate steps which means less shuffle.
+   * @param fpProb A fraction in range (0, 1) which would be the accepted false positive
+   *               probability when computing the overlap.
+   *               Note: having fpProb = 0 doesn't mean that Scio would calculate an exact overlap.
    */
-  def sparseOuterJoin[W: Coder](that: SCollection[(K, W)],
-                                thatNumKeys: Long,
-                                fpProb: Double = 0.01)(
+  def sparseFullOuterJoin[W: Coder](
+    rhs: SCollection[(K, W)],
+    rhsNumKeys: Long,
+    fpProb: Double = 0.01
+  )(
     implicit hash: Hash128[K],
     koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (Option[V], Option[W]))] =
+    voder: Coder[V]
+  ): SCollection[(K, (Option[V], Option[W]))] = self.transform { me =>
     SCollection.unionAll(
-      splitSelfUsing(that, thatNumKeys, fpProb).map {
+      split(me, rhs, rhsNumKeys, fpProb).map {
         case (lhsUnique, lhsOverlap, rhs) =>
           val unique = lhsUnique.map(kv => (kv._1, (Option(kv._2), Option.empty[W])))
           unique ++ lhsOverlap.fullOuterJoin(rhs)
       }
     )
+  }
 
   /**
-   * Left outer join for cases when `this` is much larger than `that` which cannot fit in memory,
-   * but contains a mostly overlapping set of keys as `this`, i.e. when the intersection of keys
-   * is sparse in `this`. A Bloom Filter of keys in `that` is used to split `this` into 2
+   * Full outer join for cases when the left collection (`this`) is much larger than the right
+   * collection (`rhs`) which cannot fit in memory, but contains a mostly overlapping set of keys
+   * as the left collection, i.e. when the intersection of keys is sparse in the left collection.
+   * A Bloom Filter of keys from the right collection (`rhs`) is used to split `this` into 2
    * partitions. Only those with keys in the filter go through the join and the rest are
    * concatenated. This is useful for joining historical aggregates with incremental updates.
    * Read more about Bloom Filter: [[com.twitter.algebird.BloomFilter]].
    * @group join
-   * @param thatNumKeys estimated number of keys in `that`
-   * @param fpProb false positive probability when computing the overlap
+   * @param rhsNumKeys An estimate of the number of keys in the right collection `rhs`.
+   *                    This estimate is used to find the size and number of BloomFilters that Scio
+   *                    would use to split the left collection (`this`) into overlap and
+   *                    intersection in a "map" step before an exact join.
+   *                    Having a value close to the actual number improves the false positives
+   *                    in intermediate steps which means less shuffle.
+   * @param fpProb A fraction in range (0, 1) which would be the accepted false positive
+   *               probability when computing the overlap.
+   *               Note: having fpProb = 0 doesn't mean that Scio would calculate an exact overlap.
    */
-  def sparseLeftOuterJoin[W: Coder](that: SCollection[(K, W)],
-                                    thatNumKeys: Long,
-                                    fpProb: Double = 0.01)(
+  @deprecated("use SCollection[(K, V)]#sparseFullOuterJoin(right, rightNumKeys) instead", "0.8.0")
+  def sparseOuterJoin[W: Coder](
+    rhs: SCollection[(K, W)],
+    rhsNumKeys: Long,
+    fpProb: Double = 0.01
+  )(
     implicit hash: Hash128[K],
     koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (V, Option[W]))] =
-    SCollection.unionAll(
-      splitSelfUsing(that, thatNumKeys, fpProb).map {
-        case (lhsUnique, lhsOverlap, rhs) =>
-          val unique = lhsUnique.map(kv => (kv._1, (kv._2, Option.empty[W])))
-          unique ++ lhsOverlap.leftOuterJoin(rhs)
-      }
-    )
+    voder: Coder[V]
+  ): SCollection[(K, (Option[V], Option[W]))] =
+    sparseFullOuterJoin(rhs, rhsNumKeys, fpProb)
 
   /**
-   * Right outer join for cases when `this` is much larger than `that` which cannot fit in memory,
-   * but contains a mostly overlapping set of keys as `this`, i.e. when the intersection of keys
-   * is sparse in `this`. A Bloom Filter of keys in `that` is used to split `this` into 2
+   * Inner join for cases when the left collection (`this`) is much larger than the right
+   * collection (`rhs`) which cannot fit in memory, but contains a mostly overlapping set of keys
+   * as the left collection, i.e. when the intersection of keys is sparse in the left collection.
+   * A Bloom Filter of keys from the right collection (`rhs`) is used to split `this` into 2
+   * partitions. Only those with keys in the filter go through the join and the rest are filtered
+   * out before the join.
+   * Read more about Bloom Filter: [[com.twitter.algebird.BloomFilter]].
+   * @group join
+   * @param rhsNumKeys An estimate of the number of keys in the right collection `rhs`.
+   *                    This estimate is used to find the size and number of BloomFilters that Scio
+   *                    would use to split the left collection (`this`) into overlap and
+   *                    intersection in a "map" step before an exact join.
+   *                    Having a value close to the actual number improves the false positives
+   *                    in intermediate steps which means less shuffle.
+   * @param fpProb A fraction in range (0, 1) which would be the accepted false positive
+   *               probability when computing the overlap.
+   *               Note: having fpProb = 0 doesn't mean that Scio would calculate an exact overlap.
+   */
+  def sparseJoin[W: Coder](
+    rhs: SCollection[(K, W)],
+    rhsNumKeys: Long,
+    fpProb: Double = 0.01
+  )(implicit hash: Hash128[K], koder: Coder[K], voder: Coder[V]): SCollection[(K, (V, W))] =
+    self.transform { me =>
+      SCollection.unionAll(
+        split(me, rhs, rhsNumKeys, fpProb).map {
+          case (_, lhsOverlap, rhs) =>
+            lhsOverlap.join(rhs)
+        }
+      )
+    }
+
+  /**
+   * Left outer join for cases when the left collection (`this`) is much larger than the right
+   * collection (`rhs`) which cannot fit in memory, but contains a mostly overlapping set of keys
+   * as the left collection, i.e. when the intersection of keys is sparse in the left collection.
+   * A Bloom Filter of keys from the right collection (`rhs`) is used to split `this` into 2
    * partitions. Only those with keys in the filter go through the join and the rest are
    * concatenated. This is useful for joining historical aggregates with incremental updates.
    * Read more about Bloom Filter: [[com.twitter.algebird.BloomFilter]].
    * @group join
-   * @param thatNumKeys estimated number of keys in `that`
-   * @param fpProb false positive probability when computing the overlap
+   * @param rhsNumKeys An estimate of the number of keys in the right collection `rhs`.
+   *                    This estimate is used to find the size and number of BloomFilters that Scio
+   *                    would use to split the left collection (`this`) into overlap and
+   *                    intersection in a "map" step before an exact join.
+   *                    Having a value close to the actual number improves the false positives
+   *                    in intermediate steps which means less shuffle.
+   * @param fpProb A fraction in range (0, 1) which would be the accepted false positive
+   *               probability when computing the overlap.
+   *               Note: having fpProb = 0 doesn't mean that Scio would calculate an exact overlap.
    */
-  def sparseRightOuterJoin[W: Coder](that: SCollection[(K, W)],
-                                     thatNumKeys: Long,
-                                     fpProb: Double = 0.01)(
+  def sparseLeftOuterJoin[W: Coder](
+    rhs: SCollection[(K, W)],
+    rhsNumKeys: Long,
+    fpProb: Double = 0.01
+  )(implicit hash: Hash128[K], koder: Coder[K], voder: Coder[V]): SCollection[(K, (V, Option[W]))] =
+    self.transform { me =>
+      SCollection.unionAll(
+        split(me, rhs, rhsNumKeys, fpProb).map {
+          case (lhsUnique, lhsOverlap, rhs) =>
+            val unique = lhsUnique.map(kv => (kv._1, (kv._2, Option.empty[W])))
+            unique ++ lhsOverlap.leftOuterJoin(rhs)
+        }
+      )
+    }
+
+  /**
+   * Right outer join for cases when the left collection (`this`) is much larger than the right
+   * collection (`rhs`) which cannot fit in memory, but contains a mostly overlapping set of keys
+   * as the left collection, i.e. when the intersection of keys is sparse in the left collection.
+   * A Bloom Filter of keys from the right collection (`rhs`) is used to split `this` into 2
+   * partitions. Only those with keys in the filter go through the join and the rest are
+   * concatenated. This is useful for joining historical aggregates with incremental updates.
+   * Read more about Bloom Filter: [[com.twitter.algebird.BloomFilter]].
+   * @group join
+   * @param rhsNumKeys An estimate of the number of keys in the right collection `rhs`.
+   *                    This estimate is used to find the size and number of BloomFilters that Scio
+   *                    would use to split the left collection (`this`) into overlap and
+   *                    intersection in a "map" step before an exact join.
+   *                    Having a value close to the actual number improves the false positives
+   *                    in intermediate steps which means less shuffle.
+   * @param fpProb A fraction in range (0, 1) which would be the accepted false positive
+   *               probability when computing the overlap.
+   *               Note: having fpProb = 0 doesn't mean that Scio would calculate an exact overlap.
+   */
+  def sparseRightOuterJoin[W: Coder](
+    rhs: SCollection[(K, W)],
+    rhsNumKeys: Long,
+    fpProb: Double = 0.01
+  )(implicit hash: Hash128[K], koder: Coder[K], voder: Coder[V]): SCollection[(K, (Option[V], W))] =
+    self.transform { me =>
+      SCollection.unionAll(
+        split(me, rhs, rhsNumKeys, fpProb).map {
+          case (_, lhsOverlap, rhs) =>
+            lhsOverlap.rightOuterJoin(rhs)
+        }
+      )
+    }
+
+  /*
+   Internal to PairSCollectionFunctions
+   Split up parameter `thisSColl` into
+   Seq(
+     (KeysUniqueInSelf, KeysOverlappingWith`rhsSColl`, PartOfRHSSColl)
+   )
+   The number of SCollection tuples in the Seq is based on the number of BloomFilters required to
+   maintain the given false positive probability for the split of `thisSColl` into Unique and
+   Overlap. This function is used by Sparse Join transforms.
+   */
+  private def split[W: Coder](
+    thisSColl: SCollection[(K, V)],
+    rhsSColl: SCollection[(K, W)],
+    rhsNumKeys: Long,
+    fpProb: Double
+  )(
     implicit hash: Hash128[K],
     koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (Option[V], W))] =
-    SCollection.unionAll(
-      splitSelfUsing(that, thatNumKeys, fpProb).map {
-        case (_, lhsOverlap, rhs) =>
-          lhsOverlap.rightOuterJoin(rhs)
-      }
-    )
+    voder: Coder[V]
+  ): Seq[(SCollection[(K, V)], SCollection[(K, V)], SCollection[(K, W)])] = {
+    val rhsBfSIs = rhsSColl.optimalKeysBloomFiltersAsSideInputs(rhsNumKeys, fpProb)
+    val n = rhsBfSIs.size
 
-  private def splitSelfUsing[W: Coder](that: SCollection[(K, W)],
-                                       thatNumKeys: Long,
-                                       fpProb: Double)(
-    implicit hash: Hash128[K],
-    koder: Coder[K],
-    voder: Coder[V]): Seq[(SCollection[(K, V)], SCollection[(K, V)], SCollection[(K, W)])] = {
+    val thisParts = thisSColl.hashPartitionByKey(n)
+    val rhsParts = rhsSColl.hashPartitionByKey(n)
 
-    val thatBfSIs = that.optimalKeysBloomFiltersAsSideInputs(thatNumKeys, fpProb)
-    val n = thatBfSIs.size
-
-    val thisParts = self.hashPartitionByKey(n)
-    val thatParts = that.hashPartitionByKey(n)
-
-    thisParts.zip(thatParts).zip(thatBfSIs).map {
+    thisParts.zip(rhsParts).zip(rhsBfSIs).map {
       case ((lhs, rhs), bfsi) =>
         val (lhsUnique, lhsOverlap) = (SideOutput[(K, V)](), SideOutput[(K, V)]())
         val partitionedLhs = lhs
@@ -373,41 +509,44 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
           }
         (partitionedLhs(lhsUnique), partitionedLhs(lhsOverlap), rhs)
     }
-
   }
 
   /**
-   * Look up values from `that` where `that` is much larger and keys from `this` wont fit in memory,
-   * and is sparse in `that`. A Bloom Filter of keys in `this` is used to filter out irrelevant keys
-   * in `that`. This is useful when searching for a limited number of values from one or more vaery
+   * Look up values from `rhs` where `rhs` is much larger and keys from `this` wont fit in memory,
+   * and is sparse in `rhs`. A Bloom Filter of keys in `this` is used to filter out irrelevant keys
+   * in `rhs`. This is useful when searching for a limited number of values from one or more very
    * large tables. Read more about Bloom Filter: [[com.twitter.algebird.BloomFilter]].
    * @group join
-   * @param thisNumKeys estimated number of keys in `this`
-   * @param fpProb false positive probability when filtering `that`
+   * @param thisNumKeys An estimate of the number of keys in `this`. This estimate is used to find
+   *                    the size and number of BloomFilters that Scio would use to pre-filter
+   *                    `rhs` before doing a co-group.
+   *                    Having a value close to the actual number improves the false positives
+   *                    in intermediate steps which means less shuffle.
+   * @param fpProb A fraction in range (0, 1) which would be the accepted false positive
+   *               probability when discarding elements of `rhs` in the pre-filter step.
    */
-  def sparseLookup[A: Coder](that: SCollection[(K, A)], thisNumKeys: Long, fpProb: Double)(
+  def sparseLookup[A: Coder](rhs: SCollection[(K, A)], thisNumKeys: Long, fpProb: Double)(
     implicit hash: Hash128[K],
     koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (V, Iterable[A]))] = self.transform { sColl =>
+    voder: Coder[V]
+  ): SCollection[(K, (V, Iterable[A]))] = self.transform { sColl =>
     val selfBfSideInputs = sColl.optimalKeysBloomFiltersAsSideInputs(thisNumKeys, fpProb)
     val n = selfBfSideInputs.size
 
     val thisParts = sColl.hashPartitionByKey(n)
-    val thatParts = that.hashPartitionByKey(n)
+    val rhsParts = rhs.hashPartitionByKey(n)
 
     SCollection.unionAll(
       thisParts
         .zip(selfBfSideInputs)
-        .zip(thatParts)
+        .zip(rhsParts)
         .map {
           case ((lhs, lhsBfSi), rhs1) =>
             lhs
               .cogroup(
                 rhs1
                   .withSideInputs(lhsBfSi)
-                  .filter { (e, c) =>
-                    c(lhsBfSi).maybeContains(e._1)
-                  }
+                  .filter((e, c) => c(lhsBfSi).maybeContains(e._1))
                   .toSCollection
               )
               .flatMap { case (k, (iV, iA)) => iV.map(v => (k, (v, iA))) }
@@ -416,57 +555,67 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
   }
 
   /**
-   * Look up values from `that` where `that` is much larger and keys from `this` wont fit in memory,
-   * and is sparse in `that`. A Bloom Filter of keys in `this` is used to filter out irrelevant keys
-   * in `that`. This is useful when searching for a limited number of values from one or more vaery
+   * Look up values from `rhs` where `rhs` is much larger and keys from `this` wont fit in memory,
+   * and is sparse in `rhs`. A Bloom Filter of keys in `this` is used to filter out irrelevant keys
+   * in `rhs`. This is useful when searching for a limited number of values from one or more very
    * large tables. Read more about Bloom Filter: [[com.twitter.algebird.BloomFilter]].
    * @group join
-   * @param thisNumKeys estimated number of keys in `this`
+   * @param thisNumKeys An estimate of the number of keys in `this`. This estimate is used to find
+   *                    the size and number of BloomFilters that Scio would use to pre-filter
+   *                    `rhs` before doing a co-group.
+   *                    Having a value close to the actual number improves the false positives
+   *                    in intermediate steps which means less shuffle.
    */
-  def sparseLookup[A: Coder](that: SCollection[(K, A)], thisNumKeys: Long)(
+  def sparseLookup[A: Coder](rhs: SCollection[(K, A)], thisNumKeys: Long)(
     implicit hash: Hash128[K],
     koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (V, Iterable[A]))] = sparseLookup(that, thisNumKeys, 0.01)
+    voder: Coder[V]
+  ): SCollection[(K, (V, Iterable[A]))] = sparseLookup(rhs, thisNumKeys, 0.01)
 
   /**
-   * Look up values from `that` where `that` is much larger and keys from `this` wont fit in memory,
-   * and is sparse in `that`. A Bloom Filter of keys in `this` is used to filter out irrelevant keys
-   * in `that`. This is useful when searching for a limited number of values from one or more vaery
+   * Look up values from `rhs` where `rhs` is much larger and keys from `this` wont fit in memory,
+   * and is sparse in `rhs`. A Bloom Filter of keys in `this` is used to filter out irrelevant keys
+   * in `rhs`. This is useful when searching for a limited number of values from one or more very
    * large tables. Read more about Bloom Filter: [[com.twitter.algebird.BloomFilter]].
    * @group join
-   * @param thisNumKeys estimated number of keys in `this`
-   * @param fpProb false positive probability when filtering `that`
+   * @param thisNumKeys An estimate of the number of keys in `this`. This estimate is used to find
+   *                    the size and number of BloomFilters that Scio would use to pre-filter
+   *                    `rhs1` and `rhs2` before doing a co-group.
+   *                    Having a value close to the actual number improves the false positives
+   *                    in intermediate steps which means less shuffle.
+   * @param fpProb A fraction in range (0, 1) which would be the accepted false positive
+   *               probability when discarding elements of `rhs1` and `rhs2` in the pre-filter
+   *               step.
    */
-  def sparseLookup[A: Coder, B: Coder](that1: SCollection[(K, A)],
-                                       that2: SCollection[(K, B)],
-                                       thisNumKeys: Long,
-                                       fpProb: Double)(
+  def sparseLookup[A: Coder, B: Coder](
+    rhs1: SCollection[(K, A)],
+    rhs2: SCollection[(K, B)],
+    thisNumKeys: Long,
+    fpProb: Double
+  )(
     implicit hash: Hash128[K],
     koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (V, Iterable[A], Iterable[B]))] = self.transform { sColl =>
+    voder: Coder[V]
+  ): SCollection[(K, (V, Iterable[A], Iterable[B]))] = self.transform { sColl =>
     val selfBfSideInputs = sColl.optimalKeysBloomFiltersAsSideInputs(thisNumKeys, fpProb)
     val n = selfBfSideInputs.size
 
     val thisParts = sColl.hashPartitionByKey(n)
-    val that1Parts = that1.hashPartitionByKey(n)
-    val that2Parts = that2.hashPartitionByKey(n)
+    val rhs1Parts = rhs1.hashPartitionByKey(n)
+    val rhs2Parts = rhs2.hashPartitionByKey(n)
 
     SCollection.unionAll(
-      thisParts.zip(selfBfSideInputs).zip(that1Parts).zip(that2Parts).map {
+      thisParts.zip(selfBfSideInputs).zip(rhs1Parts).zip(rhs2Parts).map {
         case (((lhs, lhsBfSi), rhs1), rhs2) =>
           lhs
             .cogroup(
               rhs1
                 .withSideInputs(lhsBfSi)
-                .filter { (e, c) =>
-                  c(lhsBfSi).maybeContains(e._1)
-                }
+                .filter((e, c) => c(lhsBfSi).maybeContains(e._1))
                 .toSCollection,
               rhs2
                 .withSideInputs(lhsBfSi)
-                .filter { (e, c) =>
-                  c(lhsBfSi).maybeContains(e._1)
-                }
+                .filter((e, c) => c(lhsBfSi).maybeContains(e._1))
                 .toSCollection
             )
             .flatMap { case (k, (iV, iA, iB)) => iV.map(v => (k, (v, iA, iB))) }
@@ -475,26 +624,33 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
   }
 
   /**
-   * Look up values from `that` where `that` is much larger and keys from `this` wont fit in memory,
-   * and is sparse in `that`. A Bloom Filter of keys in `this` is used to filter out irrelevant keys
-   * in `that`. This is useful when searching for a limited number of values from one or more vaery
+   * Look up values from `rhs` where `rhs` is much larger and keys from `this` wont fit in memory,
+   * and is sparse in `rhs`. A Bloom Filter of keys in `this` is used to filter out irrelevant keys
+   * in `rhs`. This is useful when searching for a limited number of values from one or more very
    * large tables. Read more about Bloom Filter: [[com.twitter.algebird.BloomFilter]].
    * @group join
-   * @param thisNumKeys estimated number of keys in `this`
+   * @param thisNumKeys An estimate of the number of keys in `this`. This estimate is used to find
+   *                    the size and number of BloomFilters that Scio would use to pre-filter
+   *                    `rhs` before doing a co-group.
+   *                    Having a value close to the actual number improves the false positives
+   *                    in intermediate steps which means less shuffle.
    */
-  def sparseLookup[A: Coder, B: Coder](that1: SCollection[(K, A)],
-                                       that2: SCollection[(K, B)],
-                                       thisNumKeys: Long)(
+  def sparseLookup[A: Coder, B: Coder](
+    rhs1: SCollection[(K, A)],
+    rhs2: SCollection[(K, B)],
+    thisNumKeys: Long
+  )(
     implicit hash: Hash128[K],
     koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, (V, Iterable[A], Iterable[B]))] =
-    sparseLookup(that1, that2, thisNumKeys, 0.01)
+    voder: Coder[V]
+  ): SCollection[(K, (V, Iterable[A], Iterable[B]))] =
+    sparseLookup(rhs1, rhs2, thisNumKeys, 0.01)
 
-  private[values] def optimalKeysBloomFiltersAsSideInputs(thisNumKeys: Long, fpProb: Double)(
-    implicit hash: Hash128[K],
-    koder: Coder[K],
-    voder: Coder[V]): Seq[SideInput[BF[K]]] = {
-    val bfSettings = PairSCollectionFunctions.optimalBFSettings(thisNumKeys, fpProb)
+  private[values] def optimalKeysBloomFiltersAsSideInputs(
+    thisNumKeys: Long,
+    fpProb: Double
+  )(implicit hash: Hash128[K], koder: Coder[K], voder: Coder[V]): Seq[SideInput[MutableBF[K]]] = {
+    val bfSettings = PairSCollectionFunctions.optimalBFSettings(self.tfName, thisNumKeys, fpProb)
 
     val numKeysPerPartition = if (bfSettings.numBFs == 1) thisNumKeys.toInt else bfSettings.capacity
     val n = bfSettings.numBFs
@@ -504,7 +660,7 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
     self.keys
       .hashPartition(n)
       .map { me =>
-        me.aggregate(bfAggregator.monoid.zero)(_ + _, _ ++ _)
+        me.aggregate(bfAggregator.monoid.zero)(_ += _, _ ++= _)
           .asSingletonSideInput(bfAggregator.monoid.zero)
       }
   }
@@ -521,11 +677,14 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * modify and return their first argument instead of creating a new `U`.
    * @group per_key
    */
-  def aggregateByKey[U: Coder](zeroValue: U)(seqOp: (U, V) => U, combOp: (U, U) => U)(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, U)] =
+  def aggregateByKey[U: Coder](zeroValue: U)(
+    seqOp: (U, V) => U,
+    combOp: (U, U) => U
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, U)] =
     this
-      .applyPerKey(Combine.perKey(Functions.aggregateFn(zeroValue)(seqOp, combOp)), kvToTuple[K, U])
+      .applyPerKey(
+        Combine.perKey(Functions.aggregateFn(context, zeroValue)(seqOp, combOp))
+      )(kvToTuple)
 
   /**
    * Aggregate the values of each key with [[com.twitter.algebird.Aggregator Aggregator]]. First
@@ -534,9 +693,9 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * `U`. This could be more powerful and better optimized in some cases.
    * @group per_key
    */
-  def aggregateByKey[A: Coder, U: Coder](aggregator: Aggregator[V, A, U])(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, U)] = self.transform { in =>
+  def aggregateByKey[A: Coder, U: Coder](
+    aggregator: Aggregator[V, A, U]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, U)] = self.transform { in =>
     val a = aggregator // defeat closure
     in.mapValues(a.prepare)
       .sumByKey(a.semigroup, Coder[K], Coder[A])
@@ -549,15 +708,18 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * the elements.
    * @group per_key
    */
-  def approxQuantilesByKey(numQuantiles: Int, ord: Ordering[V])(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, Iterable[V])] =
-    this.applyPerKey(ApproximateQuantiles.perKey(numQuantiles, ord), kvListToTuple[K, V])
+  def approxQuantilesByKey(
+    numQuantiles: Int,
+    ord: Ordering[V]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, Iterable[V])] =
+    this.applyPerKey(ApproximateQuantiles.perKey(numQuantiles, ord))(kvListToTuple)
 
-  def approxQuantilesByKey(numQuantiles: Int)(implicit ord: Ordering[V],
-                                              koder: Coder[K],
-                                              voder: Coder[V],
-                                              dummy: DummyImplicit): SCollection[(K, Iterable[V])] =
+  def approxQuantilesByKey(numQuantiles: Int)(
+    implicit ord: Ordering[V],
+    koder: Coder[K],
+    voder: Coder[V],
+    dummy: DummyImplicit
+  ): SCollection[(K, Iterable[V])] =
     approxQuantilesByKey(numQuantiles, ord)(koder, voder)
 
   /**
@@ -574,11 +736,19 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * - `mergeCombiners`, to combine two `C`'s into a single one.
    * @group per_key
    */
-  def combineByKey[C: Coder](createCombiner: V => C)(mergeValue: (C, V) => C)(
-    mergeCombiners: (C, C) => C)(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, C)] =
+  def combineByKey[C: Coder](createCombiner: V => C)(
+    mergeValue: (C, V) => C
+  )(mergeCombiners: (C, C) => C)(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, C)] = {
+    PairSCollectionFunctions.logger.warn(
+      "combineByKey/sumByKey does not support default value and may fail in some streaming " +
+        "scenarios. Consider aggregateByKey/foldByKey instead."
+    )
     this.applyPerKey(
-      Combine.perKey(Functions.combineFn(createCombiner, mergeValue, mergeCombiners)),
-      kvToTuple[K, C])
+      Combine.perKey(
+        Functions.combineFn(context, createCombiner, mergeValue, mergeCombiners)
+      )
+    )(kvToTuple)
+  }
 
   /**
    * Count approximate number of distinct values for each key in the SCollection.
@@ -586,9 +756,10 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * more accurate the estimate will be; should be `>= 16`.
    * @group per_key
    */
-  def countApproxDistinctByKey(sampleSize: Int)(implicit koder: Coder[K],
-                                                voder: Coder[V]): SCollection[(K, Long)] =
-    this.applyPerKey(ApproximateUnique.perKey[K, V](sampleSize), klToTuple[K])
+  def countApproxDistinctByKey(
+    sampleSize: Int
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, Long)] =
+    this.applyPerKey(ApproximateUnique.perKey[K, V](sampleSize))(klToTuple)
 
   /**
    * Count approximate number of distinct values for each key in the SCollection.
@@ -596,10 +767,10 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * `[0.01, 0.5]`.
    * @group per_key
    */
-  def countApproxDistinctByKey(maximumEstimationError: Double = 0.02)(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, Long)] =
-    this.applyPerKey(ApproximateUnique.perKey[K, V](maximumEstimationError), klToTuple[K])
+  def countApproxDistinctByKey(
+    maximumEstimationError: Double = 0.02
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, Long)] =
+    this.applyPerKey(ApproximateUnique.perKey[K, V](maximumEstimationError))(klToTuple)
 
   /**
    * Count the number of elements for each key.
@@ -620,12 +791,21 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
     self.distinctBy(_._1)
 
   /**
+   * Pass each value in the key-value pair SCollection through a `filter` function without
+   * changing the keys.
+   * @group transform
+   */
+  def filterValues(f: V => Boolean)(implicit koder: Coder[K]): SCollection[(K, V)] =
+    self.filter(kv => f(kv._2))
+
+  /**
    * Pass each value in the key-value pair SCollection through a `flatMap` function without
    * changing the keys.
    * @group transform
    */
-  def flatMapValues[U: Coder](f: V => TraversableOnce[U])(
-    implicit koder: Coder[K]): SCollection[(K, U)] =
+  def flatMapValues[U: Coder](
+    f: V => TraversableOnce[U]
+  )(implicit koder: Coder[K]): SCollection[(K, U)] =
     self.flatMap(kv => f(kv._2).map(v => (kv._1, v)))
 
   /**
@@ -634,9 +814,12 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * (e.g., Nil for list concatenation, 0 for addition, or 1 for multiplication.).
    * @group per_key
    */
-  def foldByKey(zeroValue: V)(op: (V, V) => V)(implicit koder: Coder[K],
-                                               voder: Coder[V]): SCollection[(K, V)] =
-    this.applyPerKey(Combine.perKey(Functions.aggregateFn(zeroValue)(op, op)), kvToTuple[K, V])
+  def foldByKey(
+    zeroValue: V
+  )(op: (V, V) => V)(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] =
+    this.applyPerKey(Combine.perKey(Functions.aggregateFn(context, zeroValue)(op, op)))(
+      kvToTuple
+    )
 
   /**
    * Fold by key with [[com.twitter.algebird.Monoid Monoid]], which defines the associative
@@ -645,7 +828,7 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * @group per_key
    */
   def foldByKey(implicit mon: Monoid[V], koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] =
-    this.applyPerKey(Combine.perKey(Functions.reduceFn(mon)), kvToTuple[K, V])
+    this.applyPerKey(Combine.perKey(Functions.reduceFn(context, mon)))(kvToTuple)
 
   /**
    * Group the values for each key in the SCollection into a single sequence. The ordering of
@@ -662,81 +845,103 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * @group per_key
    */
   def groupByKey(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, Iterable[V])] =
-    this.applyPerKey(GroupByKey.create[K, V](), kvIterableToTuple[K, V])
+    this.applyPerKey(GroupByKey.create[K, V]())(kvIterableToTuple)
 
   /**
-   * Return an SCollection with the pairs from `this` whose keys are in `that`.
+   * Batches inputs to a desired batch size. Batches will contain only elements of a single key.
+   *
+   * Elements are buffered until there are batchSize elements buffered, at which point they are
+   * outputed to the output [[SCollection]].
+   *
+   * Windows are preserved (batches contain elements from the same window).
+   * Batches may contain elements from more than one bundle.
+   *
+   * @param batchSize
+   *
    * @group per_key
    */
-  def intersectByKey(that: SCollection[K])(implicit koder: Coder[K],
-                                           voder: Coder[V]): SCollection[(K, V)] = self.transform {
-    _.cogroup(that.map((_, ()))).flatMap { t =>
+  def batchByKey(
+    batchSize: Long
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, Iterable[V])] =
+    this.applyPerKey(GroupIntoBatches.ofSize(batchSize))(kvIterableToTuple)
+
+  /**
+   * Return an SCollection with the pairs from `this` whose keys are in `rhs`.
+   *
+   * Unlike [[SCollection.intersection]] this preserves duplicates in `this`.
+   *
+   * @group per_key
+   */
+  def intersectByKey(
+    rhs: SCollection[K]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] = self.transform {
+    _.cogroup(rhs.map((_, ()))).flatMap { t =>
       if (t._2._1.nonEmpty && t._2._2.nonEmpty) t._2._1.map((t._1, _))
       else Seq.empty
     }
   }
 
   /**
-   * Return an SCollection with the pairs from `this` whose keys are in `that`
-   * when the cardinality of `this` >> `that`, but neither can fit in memory
+   * Return an SCollection with the pairs from `this` whose keys are in `rhs`
+   * when the cardinality of `this` >> `rhs`, but neither can fit in memory
    * (see [[PairHashSCollectionFunctions.hashIntersectByKey]]).
+   *
+   * Unlike [[SCollection.intersection]] this preserves duplicates in `this`.
+   *
+   * @param rhsNumKeys  An estimate of the number of keys in `rhs`. This estimate is used to find
+   *                     the size and number of BloomFilters that Scio would use to pre-filter
+   *                     `this` in a "map" step before any join.
+   *                     Having a value close to the actual number improves the false positives
+   *                     in output. When `computeExact` is set to true, a more accurate estimate
+   *                     of the number of keys in `rhs` would mean less shuffle when finding the
+   *                     exact value.
+   *
    * @param computeExact Whether or not to directly pass through bloom filter results (with a small
    *                     false positive rate) or perform an additional inner join to confirm
-   *                     exact result set.
+   *                     exact result set. By default this is set to false.
+   *
+   * @param fpProb       A fraction in range (0, 1) which would be the accepted false positive
+   *                     probability for this transform. By default when `computeExact` is set to
+   *                     `false`, this reflects the probability that an output element is an
+   *                     incorrect intersect (meaning it may not be present in `rhs`)
+   *                     When `computeExact` is set to `true`, this fraction is used to find the
+   *                     acceptable false positive in the intermediate step before computing exact.
+   *                     Note: having fpProb = 0 doesn't mean an exact computation. This value
+   *                     along with `rhsNumKeys` is used for creating a BloomFilter.
+   *
    * @group per key
    */
-  def sparseIntersectByKey(that: SCollection[K],
-                           thatNumKeys: Int,
-                           computeExact: Boolean = false,
-                           fpProb: Double = 0.1)(implicit koder: Coder[K],
-                                                 voder: Coder[V],
-                                                 hash: Hash128[K]): SCollection[(K, V)] = {
-    val bfSettings =
-      PairSCollectionFunctions.optimalBFSettings(thatNumKeys, fpProb)
-    if (bfSettings.numBFs == 1) {
-      sparseIntersectByKeyImpl(that, thatNumKeys.toInt, computeExact, fpProb)
-    } else {
-      val n = bfSettings.numBFs
-      val thisParts = self.hashPartitionByKey(n)
-      val thatParts = that.hashPartition(n)
-      val joined = thisParts.zip(thatParts).map {
-        case (lhs, rhs) =>
-          lhs.sparseIntersectByKeyImpl(rhs, bfSettings.capacity, computeExact, fpProb)
-      }
-      SCollection.unionAll(joined)
+  def sparseIntersectByKey(
+    rhs: SCollection[K],
+    rhsNumKeys: Long,
+    computeExact: Boolean = false,
+    fpProb: Double = 0.01
+  )(implicit koder: Coder[K], voder: Coder[V], hash: Hash128[K]): SCollection[(K, V)] =
+    self.transform { me =>
+      val rhsBfs = rhs.map(k => (k, ())).optimalKeysBloomFiltersAsSideInputs(rhsNumKeys, fpProb)
+      val n = rhsBfs.size
+      val thisParts = me.hashPartitionByKey(n)
+      val rhsParts = rhs.hashPartition(n)
+      SCollection.unionAll(
+        thisParts
+          .zip(rhsParts)
+          .zip(rhsBfs)
+          .map {
+            case ((lhs, rhs), rhsBf) =>
+              val approxResults = lhs
+                .withSideInputs(rhsBf)
+                .filter { case (e, c) => c(rhsBf).maybeContains(e._1) }
+                .toSCollection
+
+              if (computeExact) {
+                approxResults
+                  .intersectByKey(rhs)
+              } else {
+                approxResults
+              }
+          }
+      )
     }
-  }
-
-  protected def sparseIntersectByKeyImpl(that: SCollection[K],
-                                         thatNumKeys: Int,
-                                         computeExact: Boolean = false,
-                                         fpProb: Double = 0.1)(
-    implicit koder: Coder[K],
-    voder: Coder[V],
-    hash: Hash128[K]): SCollection[(K, V)] = {
-    val width = BloomFilter.optimalWidth(thatNumKeys, fpProb).get
-    val numHashes = BloomFilter.optimalNumHashes(thatNumKeys, width)
-    val bfAggregator = BloomFilterAggregator[K](numHashes, width)
-    val rhsBf = that
-      .aggregate(bfAggregator.monoid.zero)(_ + _, _ ++ _)
-      .asSingletonSideInput(bfAggregator.monoid.zero)
-
-    val approxResults = self
-      .withSideInputs(rhsBf)
-      .filter { case (e, c) => c(rhsBf).maybeContains(e._1) }
-      .toSCollection
-
-    if (computeExact) {
-      approxResults
-        .cogroup(that.map((_, ())))
-        .flatMap { t =>
-          if (t._2._1.nonEmpty && t._2._2.nonEmpty) t._2._1.map((t._1, _))
-          else Seq.empty
-        }
-    } else {
-      approxResults
-    }
-  }
 
   /**
    * Return an SCollection with the keys of each tuple.
@@ -760,10 +965,12 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * @group per_key
    */
   // Scala lambda is simpler and more powerful than transforms.Max
-  def maxByKey(implicit ord: Ordering[V],
-               koder: Coder[K],
-               voder: Coder[V],
-               dummy: DummyImplicit): SCollection[(K, V)] =
+  def maxByKey(
+    implicit ord: Ordering[V],
+    koder: Coder[K],
+    voder: Coder[V],
+    dummy: DummyImplicit
+  ): SCollection[(K, V)] =
     this.reduceByKey(ord.max)
 
   def maxByKey(ord: Ordering[V])(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] =
@@ -788,16 +995,17 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * @group per_key
    */
   def reduceByKey(op: (V, V) => V)(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] =
-    this.applyPerKey(Combine.perKey(Functions.reduceFn(op)), kvToTuple[K, V])
+    this.applyPerKey(Combine.perKey(Functions.reduceFn(context, op)))(kvToTuple)
 
   /**
    * Return a sampled subset of values for each key of this SCollection.
    * @return a new SCollection of (key, sampled values) pairs
    * @group per_key
    */
-  def sampleByKey(sampleSize: Int)(implicit koder: Coder[K],
-                                   voder: Coder[V]): SCollection[(K, Iterable[V])] =
-    this.applyPerKey(Sample.fixedSizePerKey[K, V](sampleSize), kvIterableToTuple[K, V])
+  def sampleByKey(
+    sampleSize: Int
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, Iterable[V])] =
+    this.applyPerKey(Sample.fixedSizePerKey[K, V](sampleSize))(kvIterableToTuple)
 
   /**
    * Return a subset of this SCollection sampled by key (via stratified sampling).
@@ -812,23 +1020,24 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * @return SCollection containing the sampled subset
    * @group per_key
    */
-  def sampleByKey(withReplacement: Boolean, fractions: Map[K, Double])(
-    implicit koder: Coder[K],
-    voder: Coder[V]): SCollection[(K, V)] = {
+  def sampleByKey(
+    withReplacement: Boolean,
+    fractions: Map[K, Double]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] =
     if (withReplacement) {
       self.parDo(new PoissonValueSampler[K, V](fractions))
     } else {
       self.parDo(new BernoulliValueSampler[K, V](fractions))
     }
-  }
 
   /**
-   * Return an SCollection with the pairs from `this` whose keys are not in `that`.
+   * Return an SCollection with the pairs from `this` whose keys are not in `rhs`.
    * @group per_key
    */
-  def subtractByKey(that: SCollection[K])(implicit koder: Coder[K],
-                                          voder: Coder[V]): SCollection[(K, V)] = self.transform {
-    _.cogroup(that.map((_, ()))).flatMap { t =>
+  def subtractByKey(
+    rhs: SCollection[K]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] = self.transform {
+    _.cogroup(rhs.map((_, ()))).flatMap { t =>
       if (t._2._1.nonEmpty && t._2._2.isEmpty) t._2._1.map((t._1, _))
       else Seq.empty
     }
@@ -839,12 +1048,17 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * and better optimized than [[reduceByKey]] in some cases.
    * @group per_key
    */
-  def sumByKey(implicit sg: Semigroup[V], koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] =
-    this.applyPerKey(Combine.perKey(Functions.reduceFn(sg)), kvToTuple[K, V])
+  def sumByKey(implicit sg: Semigroup[V], koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] = {
+    PairSCollectionFunctions.logger.warn(
+      "combineByKey/sumByKey does not support default value and may fail in some streaming " +
+        "scenarios. Consider aggregateByKey/foldByKey instead."
+    )
+    this.applyPerKey(Combine.perKey(Functions.reduceFn(context, sg)))(kvToTuple)
+  }
 
-  def sumByKey(sg: Semigroup[V])(implicit koder: Coder[K],
-                                 voder: Coder[V],
-                                 d: DummyImplicit): SCollection[(K, V)] =
+  def sumByKey(
+    sg: Semigroup[V]
+  )(implicit koder: Coder[K], voder: Coder[V], d: DummyImplicit): SCollection[(K, V)] =
     sumByKey(sg, koder, voder)
 
   /**
@@ -856,21 +1070,25 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
     self.map(kv => (kv._2, kv._1))
 
   /**
-   * Return the top k (largest) values for each key from this SCollection as defined by the
+   * Return the top `num` (largest) values for each key from this SCollection as defined by the
    * specified implicit `Ordering[T]`.
-   * @return a new SCollection of (key, top k) pairs
+   *
+   * @return a new SCollection of (key, top `num` values) pairs
    * @group per_key
    */
-  def topByKey(num: Int)(implicit ord: Ordering[V],
-                         koder: Coder[K],
-                         voder: Coder[V],
-                         dummy: DummyImplicit): SCollection[(K, Iterable[V])] =
+  def topByKey(num: Int)(
+    implicit ord: Ordering[V],
+    koder: Coder[K],
+    voder: Coder[V],
+    dummy: DummyImplicit
+  ): SCollection[(K, Iterable[V])] =
     topByKey(num, ord)(koder, voder)
 
-  def topByKey(num: Int, ord: Ordering[V])(implicit koder: Coder[K],
-                                           voder: Coder[V]): SCollection[(K, Iterable[V])] =
-    this
-      .applyPerKey(Top.perKey[K, V, Ordering[V]](num, ord), kvListToTuple[K, V])
+  def topByKey(
+    num: Int,
+    ord: Ordering[V]
+  )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, Iterable[V])] =
+    this.applyPerKey(Top.perKey[K, V, Ordering[V]](num, ord))(kvListToTuple)
 
   /**
    * Return an SCollection with the values of each tuple.
@@ -883,8 +1101,10 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * Return an SCollection having its values flattened.
    * @group transform
    */
-  def flattenValues[U: Coder](implicit ev: V <:< TraversableOnce[U],
-                              koder: Coder[K]): SCollection[(K, U)] =
+  def flattenValues[U: Coder](
+    implicit ev: V <:< TraversableOnce[U],
+    koder: Coder[K]
+  ): SCollection[(K, U)] =
     self.flatMapValues(_.asInstanceOf[TraversableOnce[U]])
 
   // =======================================================================
@@ -896,7 +1116,8 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * `Map[key, value]`, to be used with [[SCollection.withSideInputs]]. It is required that each
    * key of the input be associated with a single value.
    *
-   * Currently, the resulting map is required to fit into memory.
+   * Note: the underlying map implementation is runner specific and may have performance overhead.
+   * Use [[asMapSingletonSideInput]] instead if the resulting map can fit into memory.
    */
   def asMapSideInput(implicit koder: Coder[K], voder: Coder[V]): SideInput[Map[K, V]] = {
     val o = self.applyInternal(new PTransform[PCollection[(K, V)], PCollectionView[JMap[K, V]]]() {
@@ -914,10 +1135,13 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
    * `Map[key, Iterable[value]]`, to be used with [[SCollection.withSideInputs]]. In contrast to
    * [[asMapSideInput]], it is not required that the keys in the input collection be unique.
    *
-   * Currently, the resulting map is required to fit into memory.
+   * Note: the underlying map implementation is runner specific and may have performance overhead.
+   * Use [[asMultiMapSingletonSideInput]] instead if the resulting map can fit into memory.
    */
-  def asMultiMapSideInput(implicit koder: Coder[K],
-                          voder: Coder[V]): SideInput[Map[K, Iterable[V]]] = {
+  def asMultiMapSideInput(
+    implicit koder: Coder[K],
+    voder: Coder[V]
+  ): SideInput[Map[K, Iterable[V]]] = {
     val o = self.applyInternal(
       new PTransform[PCollection[(K, V)], PCollectionView[JMap[K, JIterable[V]]]]() {
         override def expand(input: PCollection[(K, V)]): PCollectionView[JMap[K, JIterable[V]]] =
@@ -925,10 +1149,50 @@ class PairSCollectionFunctions[K, V](val self: SCollection[(K, V)]) {
             .apply(toKvTransform)
             .setCoder(CoderMaterializer.kvCoder[K, V](context))
             .apply(View.asMultimap())
-      })
+      }
+    )
     new MultiMapSideInput[K, V](o)
   }
 
+  /**
+   * Convert this SCollection to a SideInput, mapping key-value pairs of each window to a
+   * `Map[key, value]`, to be used with [[SCollection.withSideInputs]]. It is required that each
+   * key of the input be associated with a single value.
+   *
+   * Currently, the resulting map is required to fit into memory. This is preferable to
+   * [[asMapSideInput]] if that's the case.
+   */
+  def asMapSingletonSideInput(implicit koder: Coder[K], voder: Coder[V]): SideInput[Map[K, V]] =
+    self
+      .transform(
+        _.groupByKey
+          .map { kv =>
+            require(kv._2.size == 1, s"Multiple values for key ${kv._1}")
+            (kv._1, kv._2.head)
+          }
+          .groupBy(_ => ())
+          .map(_._2.toMap)
+      )
+      .asSingletonSideInput(Map.empty[K, V])
+
+  /**
+   * Convert this SCollection to a SideInput, mapping key-value pairs of each window to a
+   * `Map[key, Iterable[value]]`, to be used with [[SCollection.withSideInputs]]. In contrast to
+   * [[asMapSingletonSideInput]], it is not required that the keys in the input collection be
+   * unique.
+   *
+   * Currently, the resulting map is required to fit into memory. This is preferable to
+   * [[asMultiMapSideInput]] if that's the case.
+   */
+  def asMultiMapSingletonSideInput(
+    implicit koder: Coder[K],
+    voder: Coder[V]
+  ): SideInput[Map[K, Iterable[V]]] =
+    self
+      .transform(
+        _.groupByKey
+          .groupBy(_ => ())
+          .map(_._2.toMap)
+      )
+      .asSingletonSideInput(Map.empty[K, Iterable[V]])
 }
-// scalastyle:on number.of.methods
-// scalastyle:on file.size.limit

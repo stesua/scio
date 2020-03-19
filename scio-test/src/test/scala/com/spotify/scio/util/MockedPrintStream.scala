@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,5 +28,4 @@ class MockedPrintStream extends PrintStream("/dev/null") with Serializable {
     super.write(buf, off, len)
     message += new String(buf, off, len)
   }
-
 }

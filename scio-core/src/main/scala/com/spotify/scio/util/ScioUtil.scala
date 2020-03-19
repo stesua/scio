@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import com.spotify.scio.ScioContext
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions
-import org.apache.beam.sdk.util.Transport
+import org.apache.beam.sdk.extensions.gcp.util.Transport
 import org.apache.beam.sdk.{PipelineResult, PipelineRunner}
 import org.slf4j.LoggerFactory
 
@@ -32,7 +32,6 @@ import scala.reflect.ClassTag
 import scala.util.{Failure, Success, Try}
 
 private[scio] object ScioUtil {
-
   // Try.toEither does not exists in Scala 2.11
   def toEither[T](t: Try[T]): Either[Throwable, T] =
     t match {
@@ -40,7 +39,7 @@ private[scio] object ScioUtil {
       case Failure(e) => Left(e)
     }
 
-  @transient lazy private val log = LoggerFactory.getLogger(this.getClass)
+  @transient private lazy val log = LoggerFactory.getLogger(this.getClass)
   @transient lazy val jsonFactory = Transport.getJsonFactory
 
   def isLocalUri(uri: URI): Boolean =
@@ -81,7 +80,8 @@ private[scio] object ScioUtil {
         Try(context.optionsAs[GcpOptions].getGcpTempLocation) match {
           case Success(l) =>
             log.warn(
-              "Using GCP temporary location as a temporary location to materialize data. " + m)
+              "Using GCP temporary location as a temporary location to materialize data. " + m
+            )
             l
           case Failure(_) =>
             throw new IllegalArgumentException("No temporary location was specified. " + m)
@@ -93,5 +93,4 @@ private[scio] object ScioUtil {
 
   def pathWithShards(path: String): String =
     path.replaceAll("\\/+$", "") + "/part"
-
 }

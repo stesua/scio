@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import org.apache.commons.math3.distribution.PoissonDistribution
 
 // Ported from org.apache.spark.util.random.RandomSamplerSuite
 object RandomSamplerUtils extends Serializable {
-
   val populationSize = 10000
 
   /**
@@ -89,13 +88,15 @@ object RandomSamplerUtils extends Serializable {
   def cumulativeDist(hist: Array[Int]): Array[Double] = {
     val n = hist.sum.toDouble
     assert(n > 0.0)
-    hist.scanLeft(0)(_ + _).drop(1).map { _.toDouble / n }
+    hist.scanLeft(0)(_ + _).drop(1).map(_.toDouble / n)
   }
 
   // Returns aligned cumulative distributions from two arrays of data
-  def cumulants(d1: Array[Int],
-                d2: Array[Int],
-                ss: Int = sampleSize): (Array[Double], Array[Double]) = {
+  def cumulants(
+    d1: Array[Int],
+    d2: Array[Int],
+    ss: Int = sampleSize
+  ): (Array[Double], Array[Double]) = {
     assert(math.min(d1.length, d2.length) > 0)
     assert(math.min(d1.min, d2.min) >= 0)
     val m = 1 + math.max(d1.max, d2.max)
@@ -117,9 +118,7 @@ object RandomSamplerUtils extends Serializable {
     assert(cdf2(n - 1) == 1.0)
     cdf1
       .zip(cdf2)
-      .map { x =>
-        Math.abs(x._1 - x._2)
-      }
+      .map(x => Math.abs(x._1 - x._2))
       .max
   }
 
@@ -142,5 +141,4 @@ object RandomSamplerUtils extends Serializable {
     val s = if (withReplacement) sampleWR(i, fraction) else sample(i, fraction)
     s.toArray
   }
-
 }

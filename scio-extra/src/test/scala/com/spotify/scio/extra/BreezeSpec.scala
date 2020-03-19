@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,6 @@ import com.spotify.scio.extra.Breeze._
 import com.twitter.algebird.Semigroup
 import org.scalacheck._
 
-import scala.language.higherKinds
-
 trait BreezeSpec[M[_], T] extends PropertySpec {
   val dimension = 10
   val rows = 20
@@ -40,28 +38,20 @@ class FloatDenseVectorSpec extends BreezeSpec[DenseVector, Float] {
   val m = Gen.const(dimension).map(DenseVector.rand[Float](_, fRand))
 
   property("plus") {
-    forAll(m, m) { (x, y) =>
-      plus(x, y) == x + y
-    }
+    forAll(m, m)((x, y) => plus(x, y) == x + y)
   }
   property("sumOption") {
-    forAll(ms) { xs =>
-      sumOption(xs) == xs.reduceLeftOption(_ + _)
-    }
+    forAll(ms)(xs => sumOption(xs) == xs.reduceLeftOption(_ + _))
   }
 }
 
 class DoubleDenseVectorSpec extends BreezeSpec[DenseVector, Double] {
   val m = Gen.const(dimension).map(DenseVector.rand[Double](_))
   property("plus") {
-    forAll(m, m) { (x, y) =>
-      plus(x, y) == x + y
-    }
+    forAll(m, m)((x, y) => plus(x, y) == x + y)
   }
   property("sumOption") {
-    forAll(ms) { xs =>
-      sumOption(xs) == xs.reduceLeftOption(_ + _)
-    }
+    forAll(ms)(xs => sumOption(xs) == xs.reduceLeftOption(_ + _))
   }
 }
 
@@ -70,14 +60,10 @@ class FloatDenseMatrixSpec extends BreezeSpec[DenseMatrix, Float] {
     case (r, c) => DenseMatrix.rand[Float](r, c, fRand)
   }
   property("plus") {
-    forAll(m, m) { (x, y) =>
-      plus(x, y) == x + y
-    }
+    forAll(m, m)((x, y) => plus(x, y) == x + y)
   }
   property("sumOption") {
-    forAll(ms) { xs =>
-      sumOption(xs) == xs.reduceLeftOption(_ + _)
-    }
+    forAll(ms)(xs => sumOption(xs) == xs.reduceLeftOption(_ + _))
   }
 }
 
@@ -86,14 +72,10 @@ class DoubleDenseMatrixSpec extends BreezeSpec[DenseMatrix, Double] {
     case (r, c) => DenseMatrix.rand[Double](r, c)
   }
   property("plus") {
-    forAll(m, m) { (x, y) =>
-      plus(x, y) == x + y
-    }
+    forAll(m, m)((x, y) => plus(x, y) == x + y)
   }
   property("sumOption") {
-    forAll(ms) { xs =>
-      sumOption(xs) == xs.reduceLeftOption(_ + _)
-    }
+    forAll(ms)(xs => sumOption(xs) == xs.reduceLeftOption(_ + _))
   }
 }
 
@@ -103,14 +85,10 @@ class FloatSparseVectorSpec extends BreezeSpec[SparseVector, Float] {
     .map(d => SparseVector(DenseVector.rand[Float](d, fRand).data))
 
   property("plus") {
-    forAll(m, m) { (x, y) =>
-      plus(x, y) == x + y
-    }
+    forAll(m, m)((x, y) => plus(x, y) == x + y)
   }
   property("sumOption") {
-    forAll(ms) { xs =>
-      sumOption(xs) == xs.reduceLeftOption(_ + _)
-    }
+    forAll(ms)(xs => sumOption(xs) == xs.reduceLeftOption(_ + _))
   }
 }
 
@@ -120,13 +98,9 @@ class DoubleSparseVectorSpec extends BreezeSpec[SparseVector, Double] {
     .map(d => SparseVector(DenseVector.rand[Double](d).data))
 
   property("plus") {
-    forAll(m, m) { (x, y) =>
-      plus(x, y) == x + y
-    }
+    forAll(m, m)((x, y) => plus(x, y) == x + y)
   }
   property("sumOption") {
-    forAll(ms) { xs =>
-      sumOption(xs) == xs.reduceLeftOption(_ + _)
-    }
+    forAll(ms)(xs => sumOption(xs) == xs.reduceLeftOption(_ + _))
   }
 }

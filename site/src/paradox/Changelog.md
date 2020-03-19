@@ -1,9 +1,16 @@
 # Changelog
 
-## Breaking changes since Scio 0.7.0 (@ref[v0.7.0 Migration Guide](migrations/v0.7.0-Migration-Guide.md))
+## Breaking changes since Scio 0.8.0 (@ref:[v0.8.0 Migration Guide](migrations/v0.8.0-Migration-Guide.md))
+- `ScioIO`s no longer return `Future`
+- `ScioContext#close` returns `ScioExecutionContext` instead of `ScioResult`
+- Async `DoFn` refactor
+- Deprecate `scio-cassandra2` and `scio-elasticsearch2`
+- `ContextAndArgs#typed` no longer accepts list-case #2221
+
+## Breaking changes since Scio 0.7.0 (@ref:[v0.7.0 Migration Guide](migrations/v0.7.0-Migration-Guide.md))
 
 - New [Magnolia](https://github.com/propensive/magnolia) based @ref:[Coders](internals/Coders.md) derivation
-- New @ref[ScioIO](internals/ScioIO.md) replaces `TestIO[T]` to simplify IO implementation and stubbing in `JobTest`
+- New @ref:[ScioIO](internals/ScioIO.md) replaces `TestIO[T]` to simplify IO implementation and stubbing in `JobTest`
 
 ## Breaking changes since Scio 0.6.0
 
@@ -28,7 +35,7 @@
 - Java 7 is dropped and Java 8+ is required
 - `DataflowPipelineRunner` is renamed to `DataflowRunner`
 - `DirectPipelineRunner` is renamed to `DirectRunner`
-- `BlockingDataflowPipelineRunner` is removed and `ScioContext#close()` will not block execution; use `sc.close().waitUntilDone()` to retain the blocking behavior, i.e. if you launch job from an orchestration engine like [Airflow](https://airflow.apache.org/) or [Luigi](https://github.com/spotify/luigi)
+- `BlockingDataflowPipelineRunner` is removed and `ScioContext#close()` will not block execution; use `sc.run().waitUntilDone()` to retain the blocking behavior, i.e. if you launch job from an orchestration engine like [Airflow](https://airflow.apache.org/) or [Luigi](https://github.com/spotify/luigi)
 - You should set `tempLocation` instead of `stagingLocation` regardless of runner; set it to a local path for `DirectRunner` or a GCS path for `DataflowRunner`; if not set, `DataflowRunner` will create a default bucket for the project
 - Type safe BigQuery is now stable API; use `import com.spotify.scio.bigquery._` instead of `import com.spotify.scio.experimental._`
 - `scio-bigtable` no longer depends on HBase and uses Protobuf based Bigtable API; check out the updated @extref[example](example:BigtableExample)

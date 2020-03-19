@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ import scala.collection.mutable.{Map => MMap}
 import scala.util.Try
 
 private[coders] class GenericAvroSerializer extends KSerializer[GenericRecord] {
-
   private lazy val cache: MMap[String, AvroCoder[GenericRecord]] = MMap()
 
   private def getCoder(schemaStr: String): AvroCoder[GenericRecord] =
@@ -49,23 +48,22 @@ private[coders] class GenericAvroSerializer extends KSerializer[GenericRecord] {
     val coder = this.getCoder(in.readString())
     coder.decode(in)
   }
-
 }
 
 private[coders] class SpecificAvroSerializer[T <: SpecificRecordBase] extends KSerializer[T] {
-
   private lazy val cache: MMap[Class[T], AvroCoder[T]] = MMap()
 
   private def getCoder(cls: Class[T]): AvroCoder[T] =
-    cache.getOrElseUpdate(cls,
-                          Try(cls.newInstance.getSchema)
-                            .map(AvroCoder.of(cls, _))
-                            .getOrElse(AvroCoder.of(cls)))
+    cache.getOrElseUpdate(
+      cls,
+      Try(cls.getConstructor().newInstance().getSchema)
+        .map(AvroCoder.of(cls, _))
+        .getOrElse(AvroCoder.of(cls))
+    )
 
   override def write(kser: Kryo, out: Output, obj: T): Unit =
     this.getCoder(obj.getClass.asInstanceOf[Class[T]]).encode(obj, out)
 
   override def read(kser: Kryo, in: Input, cls: Class[T]): T =
     this.getCoder(cls).decode(in)
-
 }

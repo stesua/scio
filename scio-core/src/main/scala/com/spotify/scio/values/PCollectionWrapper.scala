@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ package com.spotify.scio.values
 import com.spotify.scio.ScioContext
 import com.spotify.scio.coders.{Coder, CoderMaterializer}
 import org.apache.beam.sdk.transforms.{Combine, DoFn, PTransform, ParDo}
-import org.apache.beam.sdk.values.{PCollection, POutput}
+import org.apache.beam.sdk.values.{PCollection, POutput, WindowingStrategy}
 
 private[values] trait PCollectionWrapper[T] extends TransformNameable {
 
@@ -34,13 +34,16 @@ private[values] trait PCollectionWrapper[T] extends TransformNameable {
   val context: ScioContext
 
   private[scio] def applyInternal[Output <: POutput](
-    transform: PTransform[_ >: PCollection[T], Output]): Output =
+    transform: PTransform[_ >: PCollection[T], Output]
+  ): Output =
     internal.apply(this.tfName, transform)
 
   protected def pApply[U](
-    transform: PTransform[_ >: PCollection[T], PCollection[U]]): SCollection[U] = {
+    transform: PTransform[_ >: PCollection[T], PCollection[U]]
+  ): SCollection[U] = {
     val t =
-      if (classOf[Combine.Globally[T, U]] isAssignableFrom transform.getClass) {
+      if ((classOf[Combine.Globally[T, U]] isAssignableFrom transform.getClass)
+          && internal.getWindowingStrategy != WindowingStrategy.globalDefault()) {
         // In case PCollection is windowed
         transform.asInstanceOf[Combine.Globally[T, U]].withoutDefaults()
       } else {

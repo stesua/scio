@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,5 +24,4 @@ package com.spotify.scio.annotations
  * <p>Note that the presence of this annotation implies nothing about the quality or performance of
  * the API in question, only the fact that the API or behavior may change in any way.</p>
  */
-//scalastyle:off class.name
 final class experimental extends scala.annotation.StaticAnnotation

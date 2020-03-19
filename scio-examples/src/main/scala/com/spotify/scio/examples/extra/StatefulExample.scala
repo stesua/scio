@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Stateful Processing
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.StatefulExample
+// `sbt "runMain com.spotify.scio.examples.extra.StatefulExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]"`
 package com.spotify.scio.examples.extra
 
@@ -31,7 +31,6 @@ import org.apache.beam.sdk.transforms.DoFn.{ProcessElement, StateId}
 import org.apache.beam.sdk.values.KV
 
 object StatefulExample {
-
   // States are persisted on a per-key-and-window basis
   type DoFnT = DoFn[KV[String, Int], KV[String, (Int, Int)]]
 
@@ -40,9 +39,11 @@ object StatefulExample {
     @StateId("count") private val count = StateSpecs.value[JInt]()
 
     @ProcessElement
-    def processElement(context: DoFnT#ProcessContext,
-                       // Access state declared earlier
-                       @StateId("count") count: ValueState[JInt]): Unit = {
+    def processElement(
+      context: DoFnT#ProcessContext,
+      // Access state declared earlier
+      @StateId("count") count: ValueState[JInt]
+    ): Unit = {
       // Read and write state
       val c = count.read()
       count.write(c + 1)
@@ -63,7 +64,7 @@ object StatefulExample {
       // Apply a stateful DoFn
       .applyPerKeyDoFn(new StatefulDoFn)
       .debug()
-    sc.close()
+    sc.run()
+    ()
   }
-
 }

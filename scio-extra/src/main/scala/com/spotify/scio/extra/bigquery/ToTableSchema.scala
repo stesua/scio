@@ -18,10 +18,12 @@
 package com.spotify.scio.extra.bigquery
 
 import com.google.api.services.bigquery.model.{TableFieldSchema, TableSchema}
+import com.spotify.scio.annotations.experimental
 import com.spotify.scio.extra.bigquery.Implicits.AvroConversionException
-import org.apache.avro.Schema
+import org.apache.avro.LogicalTypes._
 import org.apache.avro.Schema.Type
 import org.apache.avro.Schema.Type._
+import org.apache.avro.{LogicalType, Schema}
 
 import scala.collection.JavaConverters._
 
@@ -54,13 +56,14 @@ trait ToTableSchema {
    * @param avroSchema
    * @return the equivalent BigQuery schema
    */
+  @experimental
   def toTableSchema(avroSchema: Schema): TableSchema = {
     val fields = getFieldSchemas(avroSchema)
 
     new TableSchema().setFields(fields.asJava)
   }
 
-  private def getFieldSchemas(avroSchema: Schema): List[TableFieldSchema] = {
+  private def getFieldSchemas(avroSchema: Schema): List[TableFieldSchema] =
     avroSchema.getFields.asScala.map { field =>
       val tableField = new TableFieldSchema()
         .setName(field.name)
@@ -70,7 +73,6 @@ trait ToTableSchema {
       setFieldType(tableField, field.schema)
       tableField
     }.toList
-  }
 
   private def setFieldType(field: TableFieldSchema, schema: Schema): Unit = {
     val schemaType = schema.getType
@@ -83,16 +85,23 @@ trait ToTableSchema {
       field.setMode("REQUIRED")
     }
 
-    avroToBQTypes.get(schemaType).foreach { bqType =>
-      field.setType(bqType)
-    }
+    Option(schema.getLogicalType)
+      .map(typeFromLogicalType)
+      .orElse(avroToBQTypes.get(schemaType))
+      .foreach(field.setType)
 
     schemaType match {
-      case UNION  => setFieldDataTypeFromUnion(field, schema)
-      case ARRAY  => setFieldDataTypeFromArray(field, schema)
-      case RECORD => field.setFields(getFieldSchemas(schema).asJava)
-      case MAP    => setFieldTypeFromMap(field, schema)
-      case _      =>
+      case UNION =>
+        setFieldDataTypeFromUnion(field, schema)
+      case ARRAY =>
+        setFieldDataTypeFromArray(field, schema)
+      case RECORD =>
+        field.setFields(getFieldSchemas(schema).asJava)
+        ()
+      case MAP =>
+        setFieldTypeFromMap(field, schema)
+      case _ =>
+        ()
     }
   }
 
@@ -113,9 +122,9 @@ trait ToTableSchema {
 
     schema.getTypes.asScala
       .find(_.getType != NULL)
-      .foreach { fieldType =>
-        setFieldType(field, fieldType)
-      }
+      .foreach(fieldType => setFieldType(field, fieldType))
+
+    ()
   }
 
   private def setFieldDataTypeFromArray(field: TableFieldSchema, schema: Schema): Unit = {
@@ -143,5 +152,23 @@ trait ToTableSchema {
     setFieldType(valueField, schema.getValueType)
 
     field.setFields(List(keyField, valueField).asJava)
+    ()
+  }
+
+  /**
+   * This uses avro logical type to Converted BigQuery mapping in the following table
+   * https://cloud.google.com/bigquery/docs/loading-data-cloud-storage-avro#logical_types
+   * Joda time library doesn't support microsecond level precision, therefore
+   * time-micros map to 'INTEGER' instead of 'TIME', for the same reason
+   * timestamp-micros map to 'INTEGER' instead of 'TIMESTAMP'
+   */
+  private def typeFromLogicalType(logicalType: LogicalType): String = logicalType match {
+    case _: Date            => "DATE"
+    case _: TimeMillis      => "TIME"
+    case _: TimeMicros      => "INTEGER"
+    case _: TimestampMillis => "TIMESTAMP"
+    case _: TimestampMicros => "INTEGER"
+    case _: Decimal         => "NUMERIC"
+    case _                  => throw new IllegalStateException(s"Unknown Logical Type: [${logicalType.getName}]")
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Demonstrates saveAsDynamic* methods
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.WriteDynamicExample
+// `sbt "runMain com.spotify.scio.examples.extra.WriteDynamicExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/shakespeare/kinglear.txt
 // --output=gs://[OUTPUT]"`
@@ -47,10 +47,9 @@ object WriteDynamicExample {
       // Group records according to first letter of the character's name so
       // all characters starting with letter A will share an output path, etc.
       // Since input is small, restrict to one file per bucket.
-      .saveAsDynamicTextFile(args("output"), 1) { l =>
-        l.charAt(0).toString.toUpperCase
-      }
+      .saveAsDynamicTextFile(args("output"), 1)(l => l.charAt(0).toString.toUpperCase)
 
-    sc.close()
+    sc.run()
+    ()
   }
 }

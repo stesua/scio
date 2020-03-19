@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Use Futures and Taps to orchestrate multiple jobs with dependencies
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.WordCountOrchestration
+// `sbt "runMain com.spotify.scio.examples.extra.WordCountOrchestration
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --output=gs://[BUCKET]/[PATH]/wordcount"`
 package com.spotify.scio.examples.extra
@@ -32,7 +32,6 @@ import org.apache.beam.sdk.options.PipelineOptions
 import scala.concurrent.Future
 
 object WordCountOrchestration {
-
   def main(cmdlineArgs: Array[String]): Unit = {
     import scala.concurrent.ExecutionContext.Implicits.global
     val (opts, args) = ScioContext.parseArguments[PipelineOptions](cmdlineArgs)
@@ -53,11 +52,9 @@ object WordCountOrchestration {
       t2 <- f2
     } yield merge(opts, Seq(t1, t2), output)
 
-    // scalastyle:off regex
     // Block process and wait for last future
     println("Tap:")
     f.value.take(10).foreach(println)
-    // scalastyle:on regex
   }
 
   def count(opts: PipelineOptions, inputPath: String): Tap[(String, Long)] = {
@@ -67,7 +64,7 @@ object WordCountOrchestration {
       .flatMap(_.split("[^a-zA-Z']+").filter(_.nonEmpty))
       .countByValue
       .materialize
-    sc.close().waitUntilDone().tap(f)
+    sc.run().waitUntilDone().tap(f)
   }
 
   // Split out transform for unit testing
@@ -80,11 +77,10 @@ object WordCountOrchestration {
       .map(kv => kv._1 + " " + kv._2)
       .saveAsTextFile(outputPath)
 
-    sc.close().waitUntilDone().tap(f)
+    sc.run().waitUntilDone().tap(f)
   }
 
   // Split out transform for unit testing
   def mergeCounts(ins: Seq[SCollection[(String, Long)]]): SCollection[(String, Long)] =
     SCollection.unionAll(ins).sumByKey
-
 }

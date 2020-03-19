@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,46 +25,56 @@ private object Derived extends Serializable {
       v
     } catch {
       case e: Exception =>
-        throw new CoderException(stack, e, msg)
+        /* prior to scio 0.8, a wrapped exception was thrown. It is no longer the case, as some
+        backends (e.g. Flink) use exceptions as a way to signal from the Coder to the layers above
+         here; we therefore must alter the type of exceptions passing through this block.
+         */
+        throw CoderStackTrace.append(e, Some(msg), stack)
     }
 
-  def combineCoder[T](typeName: TypeName,
-                      ps: Seq[Param[Coder, T]],
-                      rawConstruct: Seq[Any] => T): Coder[T] = {
-    val cs = new Array[(String, Coder[Any])](ps.length)
-    var i = 0
-    while (i < ps.length) {
-      val p = ps(i)
-      cs.update(i, (p.label, p.typeclass.asInstanceOf[Coder[Any]]))
-      i = i + 1
-    }
-
-    val stack = CoderException.prepareStackTrace
-
-    @inline def destruct(v: T): Array[Any] = {
-      val arr = new Array[Any](ps.length)
-      var i = 0
-      while (i < ps.length) {
-        val p = ps(i)
-        catching(s"Error while dereferencing parameter ${p.label} in $v", stack) {
-          arr.update(i, p.dereference(v))
+  def combineCoder[T](
+    typeName: TypeName,
+    ps: Seq[Param[Coder, T]],
+    rawConstruct: Seq[Any] => T
+  ): Coder[T] =
+    Ref(
+      typeName.full, {
+        val cs = new Array[(String, Coder[Any])](ps.length)
+        var i = 0
+        while (i < ps.length) {
+          val p = ps(i)
+          cs.update(i, (p.label, p.typeclass.asInstanceOf[Coder[Any]]))
           i = i + 1
         }
+
+        val materializationStack = CoderStackTrace.prepare
+
+        @inline def destruct(v: T): Array[Any] = {
+          val arr = new Array[Any](ps.length)
+          var i = 0
+          while (i < ps.length) {
+            val p = ps(i)
+            catching(s"Error while dereferencing parameter ${p.label} in $v", materializationStack) {
+              arr.update(i, p.dereference(v))
+              i = i + 1
+            }
+          }
+          arr
+        }
+
+        val constructor: Seq[Any] => T =
+          ps =>
+            catching(s"Error while constructing object from parameters $ps", materializationStack)(
+              rawConstruct(ps)
+            )
+
+        Coder.record[T](typeName.full, cs, constructor, destruct)
       }
-      arr
-    }
-
-    val constructor: Seq[Any] => T =
-      ps =>
-        catching(s"Error while constructing object from parameters $ps", stack)(rawConstruct(ps))
-
-    Coder.record[T](typeName.full, cs, constructor, destruct)
-  }
+    )
 }
 
 trait LowPriorityCoderDerivation {
-  import language.experimental.macros, magnolia._
-  import com.spotify.scio.coders.CoderMacros
+  import magnolia._
 
   type Typeclass[T] = Coder[T]
 
@@ -86,18 +96,25 @@ trait LowPriorityCoderDerivation {
       val booleanId: Int => Boolean = _ != 0
       val cs = coders.map { case (key, v) => (booleanId(key), v) }
       Coder.disjunction[T, Boolean](typeName, cs) { t =>
-        sealedTrait.dispatch(t) { subtype =>
-          booleanId(idx(subtype.typeName))
-        }
+        sealedTrait.dispatch(t)(subtype => booleanId(idx(subtype.typeName)))
       }
     } else {
       Coder.disjunction[T, Int](typeName, coders) { t =>
-        sealedTrait.dispatch(t) { subtype =>
-          idx(subtype.typeName)
-        }
+        sealedTrait.dispatch(t)(subtype => idx(subtype.typeName))
       }
     }
   }
 
+  /**
+   * Derive a Coder for a type T given implicit coders of all parameters in the constructor
+   * of type T is in scope. For sealed trait, implicit coders of parameters of the constructors
+   * of all sub-types should be in scope.
+   *
+   * In case of a missing [[shapeless.LowPriority]] implicit error when calling this method as
+   * [[Coder.gen[Type] ]], it means that Scio is unable to derive a BeamCoder for some parameter
+   * [P] in the constructor of Type. This happens when no implicit Coder instance for type P is
+   * in scope. This is fixed by placing an implicit Coder of type P in scope, using
+   * [[Coder.kryo[P] ]] or defining the Coder manually (see also [[Coder.xmap]])
+   */
   implicit def gen[T]: Coder[T] = macro CoderMacros.wrappedCoder[T]
 }

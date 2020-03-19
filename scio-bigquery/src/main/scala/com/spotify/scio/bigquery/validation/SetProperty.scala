@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,21 +17,23 @@
 
 package com.spotify.scio.bigquery.validation
 
-import scala.annotation.StaticAnnotation
+import scala.annotation.{compileTimeOnly, StaticAnnotation}
 import scala.language.experimental.macros
 import scala.reflect.macros.blackbox
 
 // This shouldn't be necessary in most production use cases. However passing System properties from
 // Intellij can cause issues. The ideal place to set this system property is in your build.sbt file.
 private[validation] object SetProperty {
-
+  @compileTimeOnly("enable macro paradise to expand macro annotations")
   class setProperty extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro setPropertyImpl
   }
 
-  def setSystemProperty(): Unit =
-    System.setProperty("override.type.provider",
-                       "com.spotify.scio.bigquery.validation.SampleOverrideTypeProvider")
+  def setSystemProperty(): String =
+    System.setProperty(
+      "override.type.provider",
+      "com.spotify.scio.bigquery.validation.SampleOverrideTypeProvider"
+    )
 
   def setPropertyImpl(c: blackbox.Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
     setSystemProperty()

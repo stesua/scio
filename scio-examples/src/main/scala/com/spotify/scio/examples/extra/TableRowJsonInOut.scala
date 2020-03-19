@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: BigQuery TableRow JSON Input and Output
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.TableRowJsonInOut
+// `sbt "runMain com.spotify.scio.examples.extra.TableRowJsonInOut
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/wikipedia_edits/wiki_data-*.json
 // --output=gs://[BUCKET]/[PATH]/wikipedia"`
@@ -37,6 +37,7 @@ object TableRowJsonInOut {
       .take(100)
       // Save result as text files under the output path
       .saveAsTableRowJsonFile(args("output"))
-    sc.close()
+    sc.run()
+    ()
   }
 }

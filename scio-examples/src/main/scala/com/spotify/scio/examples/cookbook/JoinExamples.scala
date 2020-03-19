@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Different Types of Joins
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.cookbook.JoinExamples
+// `sbt "runMain com.spotify.scio.examples.cookbook.JoinExamples
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --output=gs://[BUCKET]/[PATH]/join_examples"`
 package com.spotify.scio.examples.cookbook
@@ -29,7 +29,6 @@ import com.spotify.scio.examples.common.ExampleData
 
 // ## Utilities used in all examples
 object JoinUtil {
-
   // Function to extract event information from BigQuery `TableRow`s
   def extractEventInfo(row: TableRow): Seq[(String, String)] = {
     val countryCode = row.getString("ActionGeo_CountryCode")
@@ -52,7 +51,6 @@ object JoinUtil {
   // Function to format output string
   def formatOutput(countryCode: String, countryName: String, eventInfo: String): String =
     s"Country code: $countryCode, Country name: $countryName, Event info: $eventInfo"
-
 }
 
 // ## Regular shuffle-based join
@@ -64,9 +62,9 @@ object JoinExamples {
 
     // Extract both sides as `SCollection[(String, String)]`s
     val eventsInfo =
-      sc.bigQueryTable(ExampleData.EVENT_TABLE).flatMap(extractEventInfo)
+      sc.bigQueryTable(Table.Spec(ExampleData.EVENT_TABLE)).flatMap(extractEventInfo)
     val countryInfo =
-      sc.bigQueryTable(ExampleData.COUNTRY_TABLE).map(extractCountryInfo)
+      sc.bigQueryTable(Table.Spec(ExampleData.COUNTRY_TABLE)).map(extractCountryInfo)
 
     eventsInfo
     // Left outer join to produce `SCollection[(String, (String, Option[String]))]
@@ -78,7 +76,8 @@ object JoinExamples {
       }
       .saveAsTextFile(args("output"))
 
-    sc.close()
+    sc.run()
+    ()
   }
 }
 
@@ -92,9 +91,9 @@ object SideInputJoinExamples {
     // Extract both sides as `SCollection[(String, String)]`s, and then convert right hand side as
     // a `SideInput` of `Map[String, String]`
     val eventsInfo =
-      sc.bigQueryTable(ExampleData.EVENT_TABLE).flatMap(extractEventInfo)
+      sc.bigQueryTable(Table.Spec(ExampleData.EVENT_TABLE)).flatMap(extractEventInfo)
     val countryInfo = sc
-      .bigQueryTable(ExampleData.COUNTRY_TABLE)
+      .bigQueryTable(Table.Spec(ExampleData.COUNTRY_TABLE))
       .map(extractCountryInfo)
       .asMapSideInput
 
@@ -113,7 +112,8 @@ object SideInputJoinExamples {
       .toSCollection
       .saveAsTextFile(args("output"))
 
-    sc.close()
+    sc.run()
+    ()
   }
 }
 
@@ -126,13 +126,13 @@ object HashJoinExamples {
 
     // Extract both sides as `SCollection[(String, String)]`s
     val eventsInfo =
-      sc.bigQueryTable(ExampleData.EVENT_TABLE).flatMap(extractEventInfo)
+      sc.bigQueryTable(Table.Spec(ExampleData.EVENT_TABLE)).flatMap(extractEventInfo)
     val countryInfo =
-      sc.bigQueryTable(ExampleData.COUNTRY_TABLE).map(extractCountryInfo)
+      sc.bigQueryTable(Table.Spec(ExampleData.COUNTRY_TABLE)).map(extractCountryInfo)
 
     eventsInfo
     // Hash join uses side input under the hood and is a drop-in replacement for regular join
-      .hashLeftJoin(countryInfo)
+      .hashLeftOuterJoin(countryInfo)
       .map { t =>
         val (countryCode, (eventInfo, countryNameOpt)) = t
         val countryName = countryNameOpt.getOrElse("none")
@@ -140,6 +140,7 @@ object HashJoinExamples {
       }
       .saveAsTextFile(args("output"))
 
-    sc.close()
+    sc.run()
+    ()
   }
 }

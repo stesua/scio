@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ import org.apache.beam.sdk.{PipelineResult, metrics => beam}
 import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
 import scala.util.Try
+import scala.concurrent.Future
 
 /** Represent a Beam runner specific result. */
 trait RunnerResult {
@@ -62,6 +63,16 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
   /** Whether this is the result of a test. */
   def isTest: Boolean = false
 
+  @deprecated("ScioResult is guaranteed to be completed in Scio > 0.8.0", since = "0.8.0")
+  def isCompleted: Boolean = true
+
+  @deprecated(
+    "Scio 0.8 does not use Futures anymore. You can simply use the 'state' directly to get a State",
+    since = "0.8.0"
+  )
+  def finalState: Future[State] =
+    Future.successful(state)
+
   /** Pipeline's current state. */
   def state: State = Try(internal.getState).getOrElse(State.UNKNOWN)
 
@@ -77,6 +88,7 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
         out.close()
       }
     }
+    ()
   }
 
   protected def getBeamMetrics: BeamMetrics = {
@@ -94,15 +106,19 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
     }
     val beamDistributions = allDistributions.map {
       case (k, v) =>
-        BeamMetric(k.getNamespace,
-                   k.getName,
-                   MetricValue(mkDist(v.attempted), v.committed.map(mkDist)))
+        BeamMetric(
+          k.getNamespace,
+          k.getName,
+          MetricValue(mkDist(v.attempted), v.committed.map(mkDist))
+        )
     }
     val beamGauges = allGauges.map {
       case (k, v) =>
-        BeamMetric(k.getNamespace,
-                   k.getName,
-                   MetricValue(mkGauge(v.attempted), v.committed.map(mkGauge)))
+        BeamMetric(
+          k.getNamespace,
+          k.getName,
+          MetricValue(mkGauge(v.attempted), v.committed.map(mkGauge))
+        )
     }
     BeamMetrics(beamCounters, beamDistributions, beamGauges)
   }
@@ -136,7 +152,8 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
       case Some(value) => value
       case None =>
         val e = new NoSuchElementException(
-          s"metric not found: $k, the metric might not have been accessed inside the pipeline")
+          s"metric not found: $k, the metric might not have been accessed inside the pipeline"
+        )
         throw e
     }
 
@@ -148,10 +165,12 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
   lazy val allDistributions: Map[beam.MetricName, MetricValue[beam.DistributionResult]] = {
     implicit val distributionResultSg =
       Semigroup.from[beam.DistributionResult] { (x, y) =>
-        beam.DistributionResult.create(x.getSum + y.getSum,
-                                       x.getCount + y.getCount,
-                                       math.min(x.getMin, y.getMin),
-                                       math.max(x.getMax, y.getMax))
+        beam.DistributionResult.create(
+          x.getSum + y.getSum,
+          x.getCount + y.getCount,
+          math.min(x.getMin, y.getMin),
+          math.max(x.getMax, y.getMax)
+        )
       }
     allDistributionsAtSteps.mapValues(reduceMetricValues[beam.DistributionResult])
   }
@@ -169,7 +188,8 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
   lazy val allCountersAtSteps: Map[beam.MetricName, Map[String, MetricValue[Long]]] =
     metricsAtSteps(
       internalMetrics.getCounters.asScala
-        .asInstanceOf[Iterable[beam.MetricResult[Long]]])
+        .asInstanceOf[Iterable[beam.MetricResult[Long]]]
+    )
 
   /** Retrieve per step values of all distributions from the pipeline. */
   lazy val allDistributionsAtSteps
@@ -184,12 +204,13 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
     internal.metrics.queryMetrics(beam.MetricsFilter.builder().build())
 
   private def metricsAtSteps[T](
-    results: Iterable[beam.MetricResult[T]]): Map[beam.MetricName, Map[String, MetricValue[T]]] =
+    results: Iterable[beam.MetricResult[T]]
+  ): Map[beam.MetricName, Map[String, MetricValue[T]]] =
     results
       .groupBy(_.getName)
       .mapValues { xs =>
         val m: Map[String, MetricValue[T]] = xs.map { r =>
-          r.getStep -> MetricValue(r.getAttempted, Try(r.getCommitted).toOption)
+          r.getKey.stepName -> MetricValue(r.getAttempted, Try(r.getCommitted).toOption)
         }(scala.collection.breakOut)
         m
       }
@@ -202,5 +223,4 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
     }
     xs.values.reduce(sg.plus)
   }
-
 }

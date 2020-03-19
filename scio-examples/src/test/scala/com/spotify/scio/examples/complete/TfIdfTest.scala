@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ package com.spotify.scio.examples.complete
 import com.spotify.scio.testing._
 
 class TfIdfTest extends PipelineSpec {
-
   "TfIdf.computeTfIdf" should "work" in {
     val data = Seq(("x", "a b c d"), ("y", "a b c"), ("z", "a m n"))
     runWithContext { sc =>
@@ -28,5 +27,4 @@ class TfIdfTest extends PipelineSpec {
       p.keys.distinct should containInAnyOrder(Seq("a", "m", "n", "b", "c", "d"))
     }
   }
-
 }

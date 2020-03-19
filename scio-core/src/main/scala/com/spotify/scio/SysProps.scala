@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 
 package com.spotify.scio
 
-import com.google.common.reflect.ClassPath
+import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.reflect.ClassPath
 
 final case class SysProp(flag: String, description: String) {
   def value(default: => String): String = sys.props.getOrElse(flag, default)
@@ -26,10 +26,8 @@ final case class SysProp(flag: String, description: String) {
 
   def valueOption: Option[String] = sys.props.get(flag)
 
-  // scalastyle:off method.name
   def value_=(str: String): Unit =
     sys.props(flag) = str
-  // scalastyle:on method.name
 
   def show: String =
     s"-D$flag=<String>\n\t$description"
@@ -73,11 +71,9 @@ object SysProps {
 
 @registerSysProps
 object CoreSysProps {
-
   val Project = SysProp("project", "")
   val Home = SysProp("java.home", "java home directory")
   val TmpDir = SysProp("java.io.tmpdir", "java temporary directory")
   val User = SysProp("user.name", "system username")
   val UserDir = SysProp("user.dir", "user dir")
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Spotify AB.
+ * Copyright 2019 Spotify AB.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 // Example: Distributed Cache Example
 // Usage:
 
-// `sbt runMain "com.spotify.scio.examples.extra.DistCacheExample
+// `sbt "runMain com.spotify.scio.examples.extra.DistCacheExample
 // --project=[PROJECT] --runner=DataflowRunner --zone=[ZONE]
 // --input=gs://apache-beam-samples/wikipedia_edits/wiki_data-*.json
 // --output=gs://[BUCKET]/[PATH]/dist_cache_example"`
@@ -56,6 +56,7 @@ object DistCacheExample {
       .map(kv => dc().getOrElse(kv._1, "unknown") + " " + kv._2)
       .saveAsTextFile(args("output"))
 
-    sc.close()
+    sc.run()
+    ()
   }
 }
