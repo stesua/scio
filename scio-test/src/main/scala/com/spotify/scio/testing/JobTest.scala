@@ -121,7 +121,7 @@ object JobTest {
       input(io, TestStreamInputSource(stream))
 
     private def input[T](io: ScioIO[T], value: JobInputSource[T]): Builder = {
-      require(!state.input.contains(io.toString), "Duplicate test input: " + io.toString)
+      require(!state.input.contains(io.testId), "Duplicate test input: " + io.testId)
       state = state.copy(input = state.input + (io.testId -> value))
       this
     }
@@ -135,7 +135,7 @@ object JobTest {
      *                  matchers on an [[com.spotify.scio.values.SCollection SCollection]].
      */
     def output[T](io: ScioIO[T])(assertion: SCollection[T] => Any): Builder = {
-      require(!state.output.contains(io.toString), "Duplicate test output: " + io.toString)
+      require(!state.output.contains(io.testId), "Duplicate test output: " + io.testId)
       state = state.copy(
         output = state.output + (io.testId -> assertion.asInstanceOf[SCollection[_] => AnyVal])
       )
@@ -294,21 +294,21 @@ object JobTest {
       val metricsFn = (result: ScioResult) => {
         state.counters.foreach {
           case a: SingleMetricAssertion[beam.Counter, Long] =>
-            a.assert(result.counter(a.metric).committed.get)
+            a.assert(result.counter(a.metric).attempted)
           case a: AllMetricsAssertion[beam.Counter, Long] =>
-            a.assert(result.allCounters.map(c => c._1 -> c._2.committed.get))
+            a.assert(result.allCounters.map(c => c._1 -> c._2.attempted))
         }
         state.gauges.foreach {
           case a: SingleMetricAssertion[beam.Gauge, beam.GaugeResult] =>
-            a.assert(result.gauge(a.metric).committed.get)
+            a.assert(result.gauge(a.metric).attempted)
           case a: AllMetricsAssertion[beam.Gauge, beam.GaugeResult] =>
-            a.assert(result.allGauges.map(c => c._1 -> c._2.committed.get))
+            a.assert(result.allGauges.map(c => c._1 -> c._2.attempted))
         }
         state.distributions.foreach {
           case a: SingleMetricAssertion[beam.Distribution, beam.DistributionResult] =>
-            a.assert(result.distribution(a.metric).committed.get)
+            a.assert(result.distribution(a.metric).attempted)
           case a: AllMetricsAssertion[beam.Distribution, beam.DistributionResult] =>
-            a.assert(result.allDistributions.map(c => c._1 -> c._2.committed.get))
+            a.assert(result.allDistributions.map(c => c._1 -> c._2.attempted))
         }
       }
       TestDataManager.tearDown(testId, metricsFn)

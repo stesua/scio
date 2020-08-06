@@ -32,7 +32,7 @@ import org.apache.beam.sdk.transforms.DoFn.ProcessElement
 import org.apache.beam.sdk.transforms.Partition.PartitionFn
 import org.apache.beam.sdk.transforms.{DoFn, ProcessFunction, SerializableFunction, SimpleFunction}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 private[scio] object Functions {
   private[this] val BufferSize = 20
@@ -86,7 +86,7 @@ private[scio] object Functions {
     ): BCoder[VA] = {
       val options = PipelineOptionsFactory.create()
       options.as(classOf[ScioOptions]).setNullableCoders(context.useNullableCoders)
-      CoderMaterializer.beamWithDefault(vacoder, registry, options)
+      CoderMaterializer.beamWithDefault(vacoder, options)
     }
 
     override def getDefaultOutputCoder(
@@ -95,13 +95,13 @@ private[scio] object Functions {
     ): BCoder[VO] = {
       val options = PipelineOptionsFactory.create()
       options.as(classOf[ScioOptions]).setNullableCoders(context.useNullableCoders)
-      CoderMaterializer.beamWithDefault(vocoder, registry, options)
+      CoderMaterializer.beamWithDefault(vocoder, options)
     }
   }
 
   def aggregateFn[T: Coder, U: Coder](
     sc: ScioContext,
-    zeroValue: U
+    zeroValue: => U
   )(seqOp: (U, T) => U, combOp: (U, U) => U): BCombineFn[T, (U, JList[T]), U] =
     new CombineFn[T, (U, JList[T]), U] {
       override val vacoder = Coder[(U, JList[T])]
@@ -263,7 +263,7 @@ private[scio] object Functions {
       c.output(g(c.element()))
   }
 
-  def partitionFn[T](numPartitions: Int, f: T => Int): PartitionFn[T] =
+  def partitionFn[T](f: T => Int): PartitionFn[T] =
     new NamedPartitionFn[T] {
       private[this] val g = ClosureCleaner.clean(f) // defeat closure
       override def partitionFor(elem: T, numPartitions: Int): Int = g(elem)

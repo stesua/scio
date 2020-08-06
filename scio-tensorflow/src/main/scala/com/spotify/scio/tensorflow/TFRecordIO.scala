@@ -24,11 +24,12 @@ import com.spotify.scio.values.SCollection
 import org.apache.beam.sdk.io.Compression
 import org.apache.beam.sdk.{io => beam}
 import org.tensorflow.example.{Example, SequenceExample}
+import com.spotify.scio.io.TapT
 
 final case class TFRecordIO(path: String) extends ScioIO[Array[Byte]] {
   override type ReadP = TFRecordIO.ReadParam
   override type WriteP = TFRecordIO.WriteParam
-  override val tapT = TapOf[Array[Byte]]
+  override val tapT: TapT.Aux[Array[Byte], Array[Byte]] = TapOf[Array[Byte]]
 
   override protected def read(sc: ScioContext, params: ReadP): SCollection[Array[Byte]] =
     TFRecordMethods.read(sc, path, params)
@@ -65,7 +66,7 @@ object TFRecordIO {
 final case class TFExampleIO(path: String) extends ScioIO[Example] {
   override type ReadP = TFExampleIO.ReadParam
   override type WriteP = TFExampleIO.WriteParam
-  override val tapT = TapOf[Example]
+  override val tapT: TapT.Aux[Example, Example] = TapOf[Example]
 
   override def testId: String = s"TFExampleIO($path)"
 
@@ -91,7 +92,7 @@ object TFExampleIO {
 final case class TFSequenceExampleIO(path: String) extends ScioIO[SequenceExample] {
   override type ReadP = TFExampleIO.ReadParam
   override type WriteP = TFExampleIO.WriteParam
-  override val tapT = TapOf[SequenceExample]
+  override val tapT: TapT.Aux[SequenceExample, SequenceExample] = TapOf[SequenceExample]
 
   override def testId: String = s"TFSequenceExampleIO($path)"
 
@@ -112,13 +113,11 @@ final case class TFSequenceExampleIO(path: String) extends ScioIO[SequenceExampl
 
 private object TFRecordMethods {
   def read(sc: ScioContext, path: String, params: TFRecordIO.ReadParam): SCollection[Array[Byte]] =
-    sc.wrap(
-      sc.applyInternal(
-        beam.TFRecordIO
-          .read()
-          .from(path)
-          .withCompression(params.compression)
-      )
+    sc.applyTransform(
+      beam.TFRecordIO
+        .read()
+        .from(path)
+        .withCompression(params.compression)
     )
 
   def write(data: SCollection[Array[Byte]], path: String, params: TFRecordIO.WriteParam): Unit = {

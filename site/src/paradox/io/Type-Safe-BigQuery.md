@@ -21,16 +21,37 @@ See documentation for @scaladoc[BigQueryType](com.spotify.scio.bigquery.types.Bi
 
 ## Type annotations
 
-There are 4 annotations for type safe code generation.
+There are 5 annotations for type safe code generation.
 
-### BigQueryType.fromTable
+### BigQueryType.fromStorage
 
-This expands a class with fields that map to a BigQuery table. Note that `class Row` has no body definition and is expanded by the annotation at compile time based on actual table schema.
+This expands a class with output fields from a [BigQuery Storage API](https://cloud.google.com/bigquery/docs/reference/storage) read. Note that `class Row` has no body definition and is expanded by the annotation at compile time based on actual table schema.
+
+Storage API provides fast access to BigQuery-managed storage by using an rpc-based protocol. It is preferred over `@BigQueryType.fromTable` and `@bigQueryType.fromQuery`. For comparison:
+
+- `fromTable` exports the entire table to Avro files on GCS and reads from them. This incurs export cost and export quota. It can also be wasteful if only a fraction of the columns/rows are needed.
+- `fromQuery` executes the query and saves result as a temporary table before reading it like `fromTable`. This incurs both query and export cost plus export quota.
+- `fromStorage` accesses the underlying BigQuery storage directly, reading only columns and rows based on `selectedFields` and `rowRestriction`. No query, export cost or quota hit.
 
 ```scala mdoc:reset:silent
 import com.spotify.scio.bigquery.types.BigQueryType
 
-@BigQueryType.fromTable("publicdata:samples.gsod")
+@BigQueryType.fromStorage(
+    "bigquery-public-data:samples.gsod",
+    selectedFields = List("tornado", "month"),
+    rowRestriction = "tornado = true"
+  )
+  class Row
+```
+
+### BigQueryType.fromTable
+
+This expands a class with fields that map to a BigQuery table.
+
+```scala mdoc:reset:silent
+import com.spotify.scio.bigquery.types.BigQueryType
+
+@BigQueryType.fromTable("bigquery-public-data:samples.gsod")
 class Row
 ```
 
@@ -41,7 +62,7 @@ This expands a class with output fields from a SELECT query. A dry run is execut
 ```scala mdoc:reset:silent
 import com.spotify.scio.bigquery.types.BigQueryType
 
-@BigQueryType.fromQuery("SELECT tornado, month FROM [publicdata:samples.gsod]")
+@BigQueryType.fromQuery("SELECT tornado, month FROM [bigquery-public-data:samples.gsod]")
 class Row
 ```
 
@@ -168,7 +189,7 @@ Classes annotated with the type safe BigQuery API have a few more convenience me
 ```scala mdoc:reset
 import com.spotify.scio.bigquery.types.BigQueryType
 
-@BigQueryType.fromTable("publicdata:samples.gsod")
+@BigQueryType.fromTable("bigquery-public-data:samples.gsod")
 class Row
 
 Row.toPrettyString(2)
@@ -177,6 +198,32 @@ Row.toPrettyString(2)
 In addition, `BigQueryType.fromTable` and `BigQueryTable.fromQuery` generate `table: String` and `query: String` respectively that refers to parameters in the original annotation.
 
 import com.spotify.scio.bigquery.types.BigQueryTypeUser defined companion objects may interfere with macro code generation so for now do not provide one to a case class annotated with `@BigQueryType.toTable`, i.e. `object Row`.
+
+## BigQuery reads using `Schema`
+Classes generated from `@BigQueryType` annotations extend the @scaladoc[HasAnnotation](com.spotify.scio.bigquery.types.BigQueryType$$HasAnnotation) trait, and most of Scio's @scaladoc[user-facing BigQuery APIs](com.spotify.scio.bigquery.syntax.ScioContextOps) expect a
+parameterized type `T <: HasAnnotation`. However, Scio also offers a typed BigQuery read API that accepts any type `T` with an implicit @github[Schema](/scio-core/src/main/scala/com/spotify/scio/schemas/Schema.scala) instance in scope:
+
+```scala
+def typedBigQueryTable[T: Schema: Coder: ClassTag](table: Table): SCollection[T]
+```
+
+A `Schema` will be implicitly derived at compile time (similar to @ref[Coder](../internals/Coders.md)s) for case classes and certain traits like Lists, Maps, and Options.
+
+
+```scala mdoc:reset
+import com.spotify.scio.bigquery._
+import com.spotify.scio.ContextAndArgs
+
+case class Shakespeare(word: String, word_count: Long, corpus: String, corpus_date: Long)
+
+def main(cmdlineArgs: Array[String]): Unit = {
+  val (sc, args) = ContextAndArgs(cmdlineArgs)
+  sc
+    .typedBigQueryTable[Shakespeare](Table.Spec("bigquery-public-data:samples.shakespeare"))
+}
+```
+
+For more information on Schema materialization, see the @ref:[V0.8.0 Migration Guide](../migrations/v0.8.0-Migration-Guide.md).
 
 ## Using type safe BigQuery
 
@@ -189,7 +236,7 @@ import com.spotify.scio._
 import com.spotify.scio.bigquery._
 import com.spotify.scio.bigquery.types.BigQueryType
 
-@BigQueryType.fromQuery("SELECT tornado, month FROM [publicdata:samples.gsod]")
+@BigQueryType.fromQuery("SELECT tornado, month FROM [bigquery-public-data:samples.gsod]")
 class Row
 
 @BigQueryType.toTable
@@ -201,7 +248,7 @@ def main(cmdlineArgs: Array[String]): Unit = {
     .flatMap(r => if (r.tornado.getOrElse(false)) Seq(r.month) else Nil)
     .countByValue
     .map(kv => Result(kv._1, kv._2))
-    .saveAsTypedBigQuery(args("output"))  // schema from Row.schema
+    .saveAsTypedBigQueryTable(Table.Spec(args("output")))  // schema from Row.schema
   sc.run()
   ()
 }
@@ -215,7 +262,7 @@ Annotated classes can be used with the `BigQueryClient` directly too.
 import com.spotify.scio.bigquery.types.BigQueryType
 import com.spotify.scio.bigquery.client.BigQuery
 
-@BigQueryType.fromQuery("SELECT tornado, month FROM [publicdata:samples.gsod]")
+@BigQueryType.fromQuery("SELECT tornado, month FROM [bigquery-public-data:samples.gsod]")
 class Row
 
 def bq = BigQuery.defaultInstance()
@@ -232,7 +279,7 @@ import com.spotify.scio.values.SCollection
 import com.spotify.scio.bigquery.types.BigQueryType
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO
 
-@BigQueryType.fromQuery("SELECT tornado, month FROM [publicdata:samples.gsod]")
+@BigQueryType.fromQuery("SELECT tornado, month FROM [bigquery-public-data:samples.gsod]")
 class Foo
 
 def bigQueryType = BigQueryType[Foo]

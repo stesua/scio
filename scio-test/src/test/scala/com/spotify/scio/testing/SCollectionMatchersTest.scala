@@ -35,6 +35,11 @@ import scala.util.Try
 import java.io.ObjectInputStream
 import java.io.IOException
 import java.io.NotSerializableException
+import cats.kernel.Eq
+import com.twitter.chill.Externalizer
+import com.esotericsoftware.kryo.KryoSerializable
+import com.esotericsoftware.kryo.Kryo
+import com.esotericsoftware.kryo.io.{Input, Output}
 
 object SCollectionMatchersTest {
   // intentionally not serializable to test lambda ser/de
@@ -45,18 +50,28 @@ object SCollectionMatchersTest {
   }
 }
 
-final case class DoesNotSerialize(a: String, b: Int) extends Serializable {
+final case class DoesNotSerialize[B](a: String, b: B) extends KryoSerializable with Serializable {
+
   @throws(classOf[IOException])
   private def writeObject(o: ObjectOutputStream): Unit =
     throw new NotSerializableException("DoesNotSerialize can't be serialized")
+
   @throws(classOf[IOException])
   private def readObject(o: ObjectInputStream): Unit =
+    throw new NotSerializableException("DoesNotSerialize can't be serialized")
+
+  @throws(classOf[IOException])
+  def write(kryo: Kryo, output: Output): Unit =
+    throw new NotSerializableException("DoesNotSerialize can't be serialized")
+
+  @throws(classOf[IOException])
+  def read(kryo: Kryo, input: Input): Unit =
     throw new NotSerializableException("DoesNotSerialize can't be serialized")
 }
 
 class SCollectionMatchersTest extends PipelineSpec {
   import SCollectionMatchersTest.TestRecord
-  implicit val coder = Coder.kryo[TestRecord]
+  implicit val coder: Coder[TestRecord] = Coder.kryo[TestRecord]
   private def newTR(x: Int) = new TestRecord(x)
 
   "SCollectionMatchers" should "support containInAnyOrder" in {
@@ -365,23 +380,32 @@ class SCollectionMatchersTest extends PipelineSpec {
     }
   }
 
-  it should "support satisfy when the closure does not serialize" in {
+  it should "work when the content does not serialize (even using Externalizer)" in {
     runWithContext { ctx =>
       import CoderAssertions._
-      import org.apache.beam.sdk.util.SerializableUtils
+      import org.apache.beam.sdk.util.SerializableUtils._
 
+      type DNS = DoesNotSerialize[Int]
       val v = new DoesNotSerialize("foo", 42)
-      val coder = CoderMaterializer.beam(ctx, Coder[DoesNotSerialize])
+      val coder = CoderMaterializer.beam(ctx, Coder[DNS])
 
-      assume(Try(SerializableUtils.ensureSerializable(v)).isFailure)
-      assume(Try(SerializableUtils.ensureSerializableByCoder(coder, v, "?")).isSuccess)
+      assume(Try(ensureSerializable(v)).isFailure)
+      assume(Try(ensureSerializable(Externalizer(v))).isFailure)
+      assume(Try(ensureSerializableByCoder(coder, v, "?")).isSuccess)
 
       v coderShould roundtrip()
-      coderIsSerializable[DoesNotSerialize]
+      coderIsSerializable[DNS]
 
       val coll = ctx.parallelize(List(v))
       coll shouldNot beEmpty // just make sure the SCollection can be built
-      coll should satisfySingleValue[DoesNotSerialize](_.a == v.a)
+
+      // satisfy and satisfySingleValue will fail bc. the closure
+      // cant be serialized by a Coder
+      // coll should satisfy[DNS](_.head.a == v.a)
+      // coll should satisfySingleValue[DNS](_.a == v.a)
+      coll should containInAnyOrder(List(v))
+      coll should containSingleValue(v)
+      coll should containValue(v)
     }
   }
 
@@ -489,7 +513,7 @@ class SCollectionMatchersTest extends PipelineSpec {
       TimestampedValue.of(elem, baseTime.plus(baseTimeOffset))
 
     val stream = testStreamOf[Int]
-    // Start at the epoch
+      // Start at the epoch
       .advanceWatermarkTo(baseTime)
       // add some elements ahead of the watermark
       .addElements(
@@ -587,4 +611,91 @@ class SCollectionMatchersTest extends PipelineSpec {
       }
     }
   }
+
+  it should "support late pane windowing" in {
+    val baseTime = new Instant(0)
+    val windowDuration = Duration.standardMinutes(10)
+    val allowedLateness = Duration.standardMinutes(5)
+    val stream = testStreamOf[Int]
+      // Start at the epoch
+      .advanceWatermarkTo(baseTime)
+      // On-time element
+      .addElements(
+        TimestampedValue.of(1, baseTime.plus(Duration.standardMinutes(1)))
+      )
+      // Advance watermark to the end of window
+      .advanceWatermarkTo(baseTime.plus(windowDuration))
+      .addElements(
+        // Late element in allowed lateness
+        TimestampedValue.of(2, baseTime.plus(Duration.standardMinutes(9)))
+      )
+      .advanceWatermarkToInfinity()
+
+    runWithContext { sc =>
+      val windowedStream = sc
+        .testStream(stream)
+        .withFixedWindows(
+          windowDuration,
+          options = WindowOptions(
+            trigger = AfterWatermark
+              .pastEndOfWindow()
+              .withLateFirings(
+                AfterProcessingTime.pastFirstElementInPane()
+              ),
+            accumulationMode = ACCUMULATING_FIRED_PANES,
+            allowedLateness = allowedLateness
+          )
+        )
+        .sum
+
+      val window = new IntervalWindow(baseTime, windowDuration)
+      windowedStream should inOnTimePane(window) {
+        containSingleValue(1)
+      }
+
+      windowedStream should inLatePane(window) {
+        containSingleValue(1 + 2)
+      }
+    }
+  }
+
+  it should "customize equality" in {
+    val in = 1 to 10
+    val out = 2 to 11
+
+    runWithContext {
+      _.parallelize(in) shouldNot containInAnyOrder(out)
+    }
+
+    runWithContext {
+      implicit val eqW = Eqv.always
+      _.parallelize(in) should containInAnyOrder(out)
+    }
+
+    runWithContext {
+      _.parallelize(List(1)) shouldNot containSingleValue(2)
+    }
+
+    runWithContext {
+      implicit val eqW = Eqv.always
+      _.parallelize(List(1)) should containSingleValue(2)
+    }
+
+    runWithContext {
+      _.parallelize(List(1, 3, 4, 5)) shouldNot containValue(2)
+    }
+
+    runWithContext {
+      implicit val eqW = Eqv.always
+      _.parallelize(List(1, 3, 4, 5)) should containValue(2)
+    }
+  }
+}
+
+object Eqv {
+  def always: Eq[Int] =
+    new Eq[Int] {
+      def eqv(x: Int, y: Int): Boolean =
+        true
+    }
 }

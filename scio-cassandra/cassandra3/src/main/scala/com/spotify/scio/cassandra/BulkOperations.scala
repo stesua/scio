@@ -26,7 +26,7 @@ import org.apache.cassandra.hadoop.cql3._
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.mapred.TaskAttemptContext
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 private[cassandra] class BulkOperations(val opts: CassandraOptions, val parallelism: Int)
     extends Serializable {
@@ -50,8 +50,9 @@ private[cassandra] class BulkOperations(val opts: CassandraOptions, val parallel
     val cluster = b.build()
 
     val table = for {
-      k <- cluster.getMetadata.getKeyspaces.asScala
-        .find(_.getName == opts.keyspace)
+      k <-
+        cluster.getMetadata.getKeyspaces.asScala
+          .find(_.getName == opts.keyspace)
       t <- k.getTables.asScala.find(_.getName == opts.table)
     } yield t
     require(table.isDefined, s"Invalid keyspace.table: ${opts.keyspace}.${opts.table}")
@@ -64,13 +65,13 @@ private[cassandra] class BulkOperations(val opts: CassandraOptions, val parallel
     val variables =
       cluster.connect().prepare(opts.cql).getVariables.asList().asScala
     val partitionKeys = table.get.getPartitionKey.asScala.map(_.getName).toSet
-    val partitionKeyIndices = variables
+    val partitionKeyIndices = variables.iterator
       .map(_.getName)
       .zipWithIndex
       .filter(t => partitionKeys.contains(t._1))
       .map(_._2)
       .toArray
-    val dataTypes = variables.map(v => DataTypeExternalizer(v.getType))
+    val dataTypes = variables.iterator.map(v => DataTypeExternalizer(v.getType)).toSeq
     cluster.close()
 
     BulkConfig(protocol, partitioner, numOfNodes, tableSchema, partitionKeyIndices, dataTypes)

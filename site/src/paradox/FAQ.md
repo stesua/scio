@@ -501,7 +501,7 @@ First start Scio REPL and generate case classes from your query or table.
 ```scala mdoc:reset
 import com.spotify.scio.bigquery.types.BigQueryType
 
-@BigQueryType.fromQuery("SELECT tornado, month FROM [publicdata:samples.gsod]")
+@BigQueryType.fromQuery("SELECT tornado, month FROM [bigquery-public-data:samples.gsod]")
 class Tornado
 ```
 
@@ -552,7 +552,7 @@ def main(cmdlineArgs: Array[String]): Unit = {
   val p: SCollection[(String, Int)] = ???
 
   p.map(kv => Result(kv._1, kv._2))
-   .saveAsTypedBigQuery(args("output"))
+   .saveAsTypedBigQueryTable(Table.Spec(args("output")))
 }
 ```
 
@@ -630,7 +630,7 @@ def main(cmdlineArgs: Array[String]): Unit = {
 
 #### How do I control concurrency (number of DoFn threads) in Dataflow workers
 
-By default Google Cloud Dataflow will use as many threads (concurrent DoFns) per worker as appropriate (precise definition is an implementation detail), in same cases you might want to control this. Use `NumberOfWorkerHarnessThreads` option from `DataflowPipelineDebugOptions`. For example to use a single thread per worker on 8 vCPU machine, simply specify 8 vCPU worker machine type, and `--numberOfWorkerHarnessThreads=1` in CLI or set corresponding option in `DataflowPipelineDebugOptions`.
+By default Google Cloud Dataflow will use as many threads (concurrent DoFns) per worker as appropriate (precise definition is an implementation detail), in some cases you might want to control this. Use `NumberOfWorkerHarnessThreads` option from `DataflowPipelineDebugOptions`. For example to use a single thread per worker on 8 vCPU machine, simply specify 8 vCPU worker machine type, and `--numberOfWorkerHarnessThreads=1` in CLI or set corresponding option in `DataflowPipelineDebugOptions`.
 
 #### How to manually investigate a Cloud Dataflow worker
 

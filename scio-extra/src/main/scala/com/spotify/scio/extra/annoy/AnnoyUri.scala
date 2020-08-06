@@ -26,9 +26,7 @@ import com.spotify.scio.coders.Coder
 import com.spotify.scio.util.{RemoteFileUtil, ScioUtil}
 import org.apache.beam.sdk.options.PipelineOptions
 
-/**
- * Represents the base URI for an Annoy tree, either on the local or a remote file system.
- */
+/** Represents the base URI for an Annoy tree, either on the local or a remote file system. */
 trait AnnoyUri extends Serializable {
   val path: String
   private[annoy] def getReader(metric: AnnoyMetric, dim: Int): AnnoyReader
@@ -84,8 +82,8 @@ private class RemoteAnnoyUri(val path: String, options: PipelineOptions) extends
 
 private[annoy] class AnnoyWriter(metric: AnnoyMetric, dim: Int, nTrees: Int) {
   private[this] val annoy4sIndex = metric match {
-    case Angular   => Annoy.annoyLib.createAngular(dim)
-    case Euclidean => Annoy.annoyLib.createEuclidean(dim)
+    case com.spotify.scio.extra.annoy.Angular   => Annoy.annoyLib.createAngular(dim)
+    case com.spotify.scio.extra.annoy.Euclidean => Annoy.annoyLib.createEuclidean(dim)
   }
 
   def addItem(item: Int, w: Array[Float]): Unit = {

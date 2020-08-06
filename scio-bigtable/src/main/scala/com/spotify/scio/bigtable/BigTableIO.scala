@@ -29,10 +29,11 @@ import org.apache.beam.sdk.transforms.SerializableFunction
 import org.apache.beam.sdk.values.KV
 import org.joda.time.Duration
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
+import com.spotify.scio.io.TapT
 
 sealed trait BigtableIO[T] extends ScioIO[T] {
-  final override val tapT = EmptyTapOf[T]
+  final override val tapT: TapT.Aux[T, Nothing] = EmptyTapOf[T]
 }
 
 object BigtableIO {
@@ -70,7 +71,7 @@ final case class BigtableRead(bigtableOptions: BigtableOptions, tableId: String)
     if (params.rowFilter != null) {
       read = read.withRowFilter(params.rowFilter)
     }
-    sc.wrap(sc.applyInternal(read))
+    sc.applyTransform(read)
   }
 
   override protected def write(data: SCollection[Row], params: WriteP): Tap[Nothing] =

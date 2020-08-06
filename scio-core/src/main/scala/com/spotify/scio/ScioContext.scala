@@ -46,14 +46,13 @@ import org.joda.time.Instant
 import org.slf4j.LoggerFactory
 
 import scala.annotation.tailrec
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection.mutable.{Buffer => MBuffer}
 import scala.concurrent.duration.Duration
 import scala.io.Source
 import scala.reflect.ClassTag
 import scala.util.control.NoStackTrace
 import scala.util.{Failure, Success, Try}
-import scala.concurrent.Future
 
 /** Runner specific context. */
 trait RunnerContext {
@@ -66,7 +65,14 @@ private case object NoOpContext extends RunnerContext {
 
 /** Direct runner specific context. */
 private case object DirectContext extends RunnerContext {
-  override def prepareOptions(options: PipelineOptions, artifacts: List[String]): Unit = ()
+  override def prepareOptions(options: PipelineOptions, artifacts: List[String]): Unit =
+    // if in local runner, temp location may be needed, but is not currently required by
+    // the runner, which may end up with NPE. If not set but user generate new temp dir
+    if (options.getTempLocation == null) {
+      val tmpDir = Files.createTempDirectory("scio-temp-")
+      ScioContext.log.debug(s"New temp directory at $tmpDir")
+      options.setTempLocation(tmpDir.toString)
+    }
 }
 
 /** Companion object for [[RunnerContext]]. */
@@ -77,7 +83,8 @@ private object RunnerContext {
     Map(
       "DirectRunner" -> DirectContext.getClass.getName,
       "DataflowRunner" -> "com.spotify.scio.runners.dataflow.DataflowContext$",
-      "SparkRunner" -> "com.spotify.scio.runners.spark.SparkContext$"
+      "SparkRunner" -> "com.spotify.scio.runners.spark.SparkContext$",
+      "FlinkRunner" -> "com.spotify.scio.runners.flink.FlinkContext$"
     ).withDefaultValue(NoOpContext.getClass.getName)
 
   // FIXME: this is ugly, is there a better way?
@@ -110,8 +117,13 @@ private object RunnerContext {
     extraLocalArtifacts: List[String]
   ): Iterable[String] = {
     val finalLocalArtifacts =
-      (detectClassPathResourcesToStage(pipelineOptions, classLoader) ++ extraLocalArtifacts)
-        .map(path => path.substring(path.lastIndexOf("/") + 1, path.length) -> path)
+      detectClassPathResourcesToStage(pipelineOptions, classLoader) ++ extraLocalArtifacts
+        .map {
+          case path if path.endsWith(".jar") =>
+            path.substring(path.lastIndexOf("/") + 1, path.length) -> path
+          case path =>
+            path -> path
+        }
         .toMap
         .values
 
@@ -160,20 +172,22 @@ object ContextAndArgs {
 
   import caseapp._
   import caseapp.core.help._
-  import caseapp.core.util.CaseUtil
+  import caseapp.core.parser.ParserWithNameFormatter
 
-  final case class TypedParser[T: Parser: Help] private () extends ArgsParser[Try] {
-    override type ArgsType = T
-
-    // #1770 CaseApp supports kebab-case only but we want camelCase for consistency with Beam.
-    private val ArgReg = "^(-{1,2})([^=]+)(.*)$".r
-
-    private def hyphenizeArg(arg: String): String = arg match {
-      case ArgReg(pre, name, v) =>
-        val n = CaseUtil.pascalCaseSplit(name.toList).map(_.toLowerCase).mkString("-")
-        pre + n + v
-      case _ => arg
+  object TypedParser {
+    final def apply[T]()(implicit parser: Parser[T], help: Help[T]): TypedParser[T] = {
+      val parserOverride = parser match {
+        case p: ParserWithNameFormatter[T] => p
+        case p                             => p.nameFormatter(_.name)
+      }
+      val helpOverride =
+        help.withNameFormatter(parserOverride.defaultNameFormatter).asInstanceOf[Help[T]]
+      new TypedParser()(parserOverride, helpOverride)
     }
+  }
+
+  final class TypedParser[T: Parser: Help] private () extends ArgsParser[Try] {
+    override type ArgsType = T
 
     override def parse(args: Array[String]): Try[Result] = {
       // limit the options passed to case-app
@@ -181,9 +195,8 @@ object ContextAndArgs {
       // fail if there are unsupported options
       val supportedCustomArgs =
         Parser[T].args
-          .flatMap { a =>
-            a.name.name +: a.extraNames.map(_.name)
-          } ++ List("help", "usage")
+          .flatMap(a => a.name +: a.extraNames)
+          .map(Parser[T].defaultNameFormatter.format) ++ List("help", "usage")
 
       val Reg = "^-{1,2}(.+)$".r
       val (customArgs, remainingArgs) =
@@ -194,12 +207,12 @@ object ContextAndArgs {
           case _ => true
         }
 
-      CaseApp.detailedParseWithHelp[T](customArgs.map(hyphenizeArg)) match {
+      CaseApp.detailedParseWithHelp[T](customArgs) match {
         case Left(error) =>
           Failure(new Exception(error.message))
-        case Right((_, usage, help, _)) if help =>
+        case Right((_, _, help, _)) if help =>
           Success(Left(Help[T].help))
-        case Right((_, usage, help, _)) if usage =>
+        case Right((_, usage, _, _)) if usage =>
           val sysProps = SysProps.properties.map(_.show).mkString("\n")
           val baos = new ByteArrayOutputStream()
           val pos = new PrintStream(baos)
@@ -211,7 +224,7 @@ object ContextAndArgs {
 
           val msg = sysProps + Help[T].help + new String(baos.toByteArray, StandardCharsets.UTF_8)
           Success(Left(msg))
-        case Right((Right(t), usage, help, _)) =>
+        case Right((Right(t), _, _, _)) =>
           val (opts, unused) = ScioContext.parseArguments[PipelineOptions](remainingArgs)
           val unusedMap = unused.asMap
           if (unusedMap.isEmpty) {
@@ -220,10 +233,41 @@ object ContextAndArgs {
             val msg = "Unknown arguments: " + unusedMap.keys.mkString(", ")
             Failure(new Exception(msg))
           }
-        case Right((Left(error), usage, help, _)) =>
+        case Right((Left(error), _, _, _)) =>
           Failure(new Exception(error.message))
       }
     }
+  }
+
+  final case class PipelineOptionsParser[T <: PipelineOptions: ClassTag] private ()
+      extends ArgsParser[Try] {
+    override type ArgsType = T
+
+    override def parse(args: Array[String]): Try[Result] = Try {
+      val (opts, remainingArgs) = ScioContext.parseArguments[T](args, withValidation = true)
+      Either.cond(remainingArgs.asMap.isEmpty, (opts, opts), s"Unused $remainingArgs")
+    } match {
+      case r @ Success(Right(_)) => r
+      case Success(Left(v))      => Failure(new Exception(v))
+      case f                     => f
+    }
+  }
+
+  sealed trait TypedArgsParser[T, F[_]] {
+    def parser: ArgsParser[F]
+  }
+
+  sealed trait LowPrioTypedArgsParser {
+    implicit def caseApp[T: Parser: Help]: TypedArgsParser[T, Try] = new TypedArgsParser[T, Try] {
+      override def parser: ArgsParser[Try] = TypedParser[T]()
+    }
+  }
+
+  object TypedArgsParser extends LowPrioTypedArgsParser {
+    implicit def pipelineOptions[T <: PipelineOptions: ClassTag]: TypedArgsParser[T, Try] =
+      new TypedArgsParser[T, Try] {
+        override def parser: ArgsParser[Try] = PipelineOptionsParser[T]()
+      }
   }
 
   def withParser[T](parser: ArgsParser[Try]): Array[String] => (ScioContext, T) =
@@ -244,8 +288,8 @@ object ContextAndArgs {
   def apply(args: Array[String]): (ScioContext, Args) =
     withParser(DefaultParser[PipelineOptions]()).apply(args)
 
-  def typed[T: Parser: Help](args: Array[String]): (ScioContext, T) =
-    withParser(TypedParser[T]()).apply(args)
+  def typed[T](args: Array[String])(implicit tap: TypedArgsParser[T, Try]): (ScioContext, T) =
+    withParser(tap.parser).apply(args)
 
   private[scio] class UsageOrHelpException extends Exception with NoStackTrace
 
@@ -308,18 +352,9 @@ trait ScioExecutionContext {
   ): ScioResult
 }
 
-object ScioExecutionContext {
-  @deprecated(
-    "close() now returns a ScioExecutionContext instead of a ScioResult. See https://git.io/JvvLu",
-    since = "0.8.0"
-  )
-  implicit def toResult(sec: ScioExecutionContext): ScioResult =
-    sec.waitUntilDone(Duration.Inf)
-}
-
 /** Companion object for [[ScioContext]]. */
 object ScioContext {
-  private val log = LoggerFactory.getLogger(this.getClass)
+  private[scio] val log = LoggerFactory.getLogger(this.getClass)
 
   import org.apache.beam.sdk.options.PipelineOptionsFactory
 
@@ -353,26 +388,29 @@ object ScioContext {
     withValidation: Boolean = false
   ): (T, Args) = {
     val optClass = ScioUtil.classOf[T]
+    PipelineOptionsFactory.register(optClass)
 
     // Extract --pattern of all registered derived types of PipelineOptions
-    val classes = PipelineOptionsFactory.getRegisteredOptions.asScala + optClass
-    val optPatterns = classes.flatMap { cls =>
-      cls.getMethods
-        .flatMap { m =>
-          val n = m.getName
-          if ((!n.startsWith("get") && !n.startsWith("is")) ||
-              m.getParameterTypes.nonEmpty || m.getReturnType == classOf[Unit]) {
-            None
-          } else {
-            Some(Introspector.decapitalize(n.substring(if (n.startsWith("is")) 2 else 3)))
-          }
+    val registeredPatterns = for {
+      cls <- PipelineOptionsFactory.getRegisteredOptions.asScala
+      method <- cls.getMethods()
+      name = method.getName
+      str <-
+        if (
+          (!name.startsWith("get") && !name.startsWith("is")) ||
+          method.getParameterTypes.nonEmpty || method.getReturnType == classOf[Unit]
+        ) {
+          None
+        } else {
+          Some(Introspector.decapitalize(name.substring(if (name.startsWith("is")) 2 else 3)))
         }
-        .map(s => s"--$s($$|=)".r)
-    }
+    } yield s"--$str($$|=)".r
+
+    val patterns = registeredPatterns + "--help($$|=)".r
 
     // Split cmdlineArgs into 2 parts, optArgs for PipelineOptions and appArgs for Args
     val (optArgs, appArgs) =
-      cmdlineArgs.partition(arg => optPatterns.exists(_.findFirstIn(arg).isDefined))
+      cmdlineArgs.partition(arg => patterns.exists(_.findFirstIn(arg).isDefined))
 
     val pipelineOpts = if (withValidation) {
       PipelineOptionsFactory.fromArgs(optArgs: _*).withValidation().as(optClass)
@@ -416,6 +454,25 @@ object ScioContext {
     new DistCacheScioContext(self)
 
   private def defaultOptions: PipelineOptions = PipelineOptionsFactory.create()
+
+  private[scio] def validateOptions(o: PipelineOptions): Unit = {
+    VersionUtil.checkVersion()
+    VersionUtil.checkRunnerVersion(o.getRunner)
+
+    // Check if running within scala.App. See https://github.com/spotify/scio/issues/449
+    if (
+      Thread
+        .currentThread()
+        .getStackTrace
+        .toList
+        .map(_.getClassName.split('$').head)
+        .exists(_.equals(classOf[App].getName))
+    ) {
+      ScioContext.log.warn(
+        "Applications defined within scala.App might not work properly. Please use main method!"
+      )
+    }
+  }
 }
 
 /**
@@ -452,25 +509,9 @@ class ScioContext private[scio] (
   }
 
   {
-    VersionUtil.checkVersion()
-    VersionUtil.checkRunnerVersion(options.getRunner)
     val o = optionsAs[ScioOptions]
     o.setScalaVersion(BuildInfo.scalaVersion)
     o.setScioVersion(BuildInfo.version)
-  }
-
-  {
-    // Check if running within scala.App. See https://github.com/spotify/scio/issues/449
-    if (Thread
-          .currentThread()
-          .getStackTrace
-          .toList
-          .map(_.getClassName.split('$').head)
-          .exists(_.equals(classOf[App].getName))) {
-      ScioContext.log.warn(
-        "Applications defined within scala.App might not work properly. Please use main method!"
-      )
-    }
   }
 
   private[scio] val testId: Option[String] =
@@ -492,23 +533,20 @@ class ScioContext private[scio] (
     }
   }
 
-  // if in local runner, temp location may be needed, but is not currently required by
-  // the runner, which may end up with NPE. If not set but user generate new temp dir
-  if (ScioUtil.isLocalRunner(options.getRunner) && options.getTempLocation == null) {
-    val tmpDir = Files.createTempDirectory("scio-temp-")
-    ScioContext.log.debug(s"New temp directory at $tmpDir")
-    options.setTempLocation(tmpDir.toString)
-  }
-
   if (isTest) {
     FileSystems.setDefaultPipelineOptions(PipelineOptionsFactory.create)
+  }
+
+  private[scio] def prepare(): Unit = {
+    // TODO: make sure this works for other PipelineOptions
+    RunnerContext.prepareOptions(options, artifacts)
+    ScioContext.validateOptions(options)
   }
 
   /** Underlying pipeline. */
   def pipeline: Pipeline = {
     if (_pipeline == null) {
-      // TODO: make sure this works for other PipelineOptions
-      RunnerContext.prepareOptions(options, artifacts)
+      prepare()
       _pipeline = if (testId.isEmpty) {
         Pipeline.create(options)
       } else {
@@ -516,12 +554,9 @@ class ScioContext private[scio] (
         // load TestPipeline dynamically to avoid ClassNotFoundException when running src/main
         // https://issues.apache.org/jira/browse/BEAM-298
         val cls = Class.forName("org.apache.beam.sdk.testing.TestPipeline")
-        // propagate options
-        val opts = PipelineOptionsFactory.create()
-        opts.setStableUniqueNames(options.getStableUniqueNames)
         val tp = cls
           .getMethod("fromOptions", classOf[PipelineOptions])
-          .invoke(null, opts)
+          .invoke(null, options)
           .asInstanceOf[Pipeline]
         // workaround for @Rule enforcement introduced by
         // https://issues.apache.org/jira/browse/BEAM-1205
@@ -545,9 +580,7 @@ class ScioContext private[scio] (
   def wrap[T](p: PCollection[T]): SCollection[T] =
     new SCollectionImpl[T](p, this)
 
-  /**
-   * Add callbacks calls when the context is closed.
-   */
+  /** Add callbacks calls when the context is closed. */
   private[scio] def onClose(f: Unit => Unit): Unit =
     _onClose = _onClose compose f
 
@@ -617,22 +650,19 @@ class ScioContext private[scio] (
       override val awaitDuration: Duration = sc.awaitDuration
 
       override def waitUntilFinish(duration: Duration, cancelJob: Boolean): ScioResult = {
-        try {
-          val wait = duration match {
-            // according to PipelineResult values <= 1 ms mean `Duration.Inf`
-            case Duration.Inf => -1
-            case d            => d.toMillis
-          }
-          pipelineResult.waitUntilFinish(time.Duration.millis(wait))
-        } catch {
-          case e: InterruptedException =>
-            val cause = if (cancelJob) {
-              pipelineResult.cancel()
-              new InterruptedException(s"Job cancelled after exceeding timeout value $duration")
-            } else {
-              e
-            }
-            throw new PipelineExecutionException(cause)
+        val wait = duration match {
+          // according to PipelineResult values <= 1 ms mean `Duration.Inf`
+          case Duration.Inf => -1
+          case d            => d.toMillis
+        }
+        // according to PipelineResult returns null on timeout
+        val state = pipelineResult.waitUntilFinish(time.Duration.millis(wait))
+        if (state == null && cancelJob) {
+          pipelineResult.cancel()
+          val cause = new InterruptedException(
+            s"Job cancelled after exceeding timeout value $duration"
+          )
+          throw new PipelineExecutionException(cause)
         }
 
         new ScioResult(pipelineResult) {
@@ -665,34 +695,6 @@ class ScioContext private[scio] (
     }
   }
 
-  /**
-   * Close the context. No operation can be performed once the context is closed.
-   *
-   * This method is deprecated and with it the `--blocking` flag.
-   *
-   * Use [[ScioContext#run]].
-   *
-   * To achieve the same behaviour when `--blocking` was enabled use:
-   *
-   * {{{
-   * val sc: ScioContext = ???
-   *
-   * sc.run().waitUntilDone(Duration.Inf)
-   * }}}
-   *
-   * @see [[ScioContext#run]]
-   */
-  @deprecated("this method will be removed in next scio version; use run() instead.", "0.8.0")
-  def close(): ScioExecutionContext = requireNotClosed {
-    val closedContext = run()
-
-    if (optionsAs[ScioOptions].isBlocking && awaitDuration == Duration.Inf) {
-      closedContext.waitUntilDone()
-    }
-
-    closedContext
-  }
-
   /** Whether the context is closed. */
   def isClosed: Boolean = _isClosed
 
@@ -706,7 +708,7 @@ class ScioContext private[scio] (
   // Test wiring
   // =======================================================================
 
-  /**  Whether this is a test context. */
+  /** Whether this is a test context. */
   def isTest: Boolean = testId.isDefined
 
   // =======================================================================
@@ -714,9 +716,38 @@ class ScioContext private[scio] (
   // =======================================================================
 
   private[scio] def applyInternal[Output <: POutput](
+    name: Option[String],
     root: PTransform[_ >: PBegin, Output]
   ): Output =
-    pipeline.apply(this.tfName, root)
+    pipeline.apply(this.tfName(name), root)
+
+  private[scio] def applyInternal[Output <: POutput](
+    root: PTransform[_ >: PBegin, Output]
+  ): Output =
+    applyInternal(None, root)
+
+  private[scio] def applyInternal[Output <: POutput](
+    name: String,
+    root: PTransform[_ >: PBegin, Output]
+  ): Output =
+    applyInternal(Option(name), root)
+
+  private[scio] def applyTransform[U](
+    name: Option[String],
+    root: PTransform[_ >: PBegin, PCollection[U]]
+  ): SCollection[U] =
+    wrap(applyInternal(name, root))
+
+  private[scio] def applyTransform[U](
+    root: PTransform[_ >: PBegin, PCollection[U]]
+  ): SCollection[U] =
+    applyTransform(None, root)
+
+  private[scio] def applyTransform[U](
+    name: String,
+    root: PTransform[_ >: PBegin, PCollection[U]]
+  ): SCollection[U] =
+    applyTransform(Option(name), root)
 
   /**
    * Get an SCollection for a Datastore query.
@@ -811,7 +842,7 @@ class ScioContext private[scio] (
       if (this.isTest) {
         TestDataManager.getInput(testId.get)(CustomIO[T](name)).toSCollection(this)
       } else {
-        wrap(this.pipeline.apply(name, transform))
+        applyTransform(name, transform)
       }
     }
 
@@ -855,23 +886,8 @@ class ScioContext private[scio] (
   def parallelize[T: Coder](elems: Iterable[T]): SCollection[T] =
     requireNotClosed {
       val coder = CoderMaterializer.beam(this, Coder[T])
-      wrap(
-        this.applyInternal(
-          Create
-            .of(elems.asJava)
-            .withCoder(coder)
-        )
-      )
+      this.applyTransform(Create.of(elems.asJava).withCoder(coder))
     }
-  @deprecated("""
-⛔️  makeFuture is PRIVATE and you should NOT be using it
-⛔️     - Scio's internals were simplified and it removed the need for makeFuture
-⛔️     - The current implementation is only there for back-compatibility
-⛔️     - There's NO GUARANTEE that its behavior is 100% similar to Scio < 0.8
-⛔️     - IT WILL BE REMOVED VERY SOON!
-⛔️ https://git.io/JeAt1""", since = "0.8.0")
-  private[scio] def makeFuture[T](value: Tap[T]): Future[Tap[T]] =
-    Future.successful(value)
 
   /**
    * Distribute a local Scala `Map` to form an SCollection.
@@ -882,7 +898,8 @@ class ScioContext private[scio] (
   )(implicit koder: Coder[K], voder: Coder[V]): SCollection[(K, V)] =
     requireNotClosed {
       val kvc = CoderMaterializer.kvCoder[K, V](this)
-      wrap(this.applyInternal(Create.of(elems.asJava).withCoder(kvc)))
+      this
+        .applyTransform(Create.of(elems.asJava).withCoder(kvc))
         .map(kv => (kv.getKey, kv.getValue))
     }
 
@@ -894,7 +911,7 @@ class ScioContext private[scio] (
     requireNotClosed {
       val coder = CoderMaterializer.beam(this, Coder[T])
       val v = elems.map(t => TimestampedValue.of(t._1, t._2))
-      wrap(this.applyInternal(Create.timestamped(v.asJava).withCoder(coder)))
+      this.applyTransform(Create.timestamped(v.asJava).withCoder(coder))
     }
 
   /**
@@ -908,7 +925,7 @@ class ScioContext private[scio] (
     requireNotClosed {
       val coder = CoderMaterializer.beam(this, Coder[T])
       val v = elems.zip(timestamps).map(t => TimestampedValue.of(t._1, t._2))
-      wrap(this.applyInternal(Create.timestamped(v.asJava).withCoder(coder)))
+      this.applyTransform(Create.timestamped(v.asJava).withCoder(coder))
     }
 
   // =======================================================================
@@ -925,7 +942,7 @@ class ScioContext private[scio] (
   /**
    * Initialize a new [[org.apache.beam.sdk.metrics.Counter Counter]] metric from namespace and
    * name.
-   * */
+   */
   def initCounter(namespace: String, name: String): Counter =
     initCounter(ScioMetrics.counter(namespace, name)).head
 

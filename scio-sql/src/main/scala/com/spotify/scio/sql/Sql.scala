@@ -35,7 +35,7 @@ import org.apache.beam.sdk.schemas.{SchemaCoder, Schema => BSchema}
 import org.apache.beam.sdk.values._
 import org.apache.commons.lang3.exception.ExceptionUtils
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 import scala.util.Try
 
@@ -132,9 +132,7 @@ private object Queries {
     expectedSchema: BSchema,
     udfs: List[Udf]
   ): Either[String, String] =
-    ScioUtil
-      .toEither(schema(query, inferredSchemas, udfs))
-      .left
+    schema(query, inferredSchemas, udfs).toEither.left
       .map { ex =>
         val mess = ExceptionUtils.getRootCauseMessage(ex) match {
           case TableNotFound(msg, _) =>

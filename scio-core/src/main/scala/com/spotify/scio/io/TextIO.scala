@@ -30,23 +30,21 @@ import org.apache.beam.sdk.io.{Compression, FileBasedSink, FileSystems, TextIO =
 import org.apache.commons.compress.compressors.CompressorStreamFactory
 import org.apache.commons.io.IOUtils
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.util.Try
 import org.apache.beam.sdk.io.ShardNameTemplate
 
 final case class TextIO(path: String) extends ScioIO[String] {
   override type ReadP = TextIO.ReadParam
   override type WriteP = TextIO.WriteParam
-  final override val tapT = TapOf[String]
+  final override val tapT: TapT.Aux[String, String] = TapOf[String]
 
   override protected def read(sc: ScioContext, params: ReadP): SCollection[String] =
-    sc.wrap(
-      sc.applyInternal(
-        BTextIO
-          .read()
-          .from(path)
-          .withCompression(params.compression)
-      )
+    sc.applyTransform(
+      BTextIO
+        .read()
+        .from(path)
+        .withCompression(params.compression)
     )
 
   override protected def write(data: SCollection[String], params: WriteP): Tap[String] = {
@@ -117,7 +115,7 @@ object TextIO {
   }
 
   private def listFiles(path: String): Seq[Metadata] =
-    FileSystems.`match`(path).metadata().asScala
+    FileSystems.`match`(path).metadata().iterator().asScala.toSeq
 
   private def getObjectInputStream(meta: Metadata): InputStream =
     Channels.newInputStream(FileSystems.open(meta.resourceId()))

@@ -25,6 +25,7 @@ import org.apache.beam.sdk.io.{jdbc => beam}
 import java.sql.{PreparedStatement, ResultSet}
 
 import com.spotify.scio.coders.{Coder, CoderMaterializer}
+import com.spotify.scio.io.TapT
 
 sealed trait JdbcIO[T] extends ScioIO[T]
 
@@ -66,7 +67,7 @@ object JdbcIO {
 final case class JdbcSelect[T: Coder](readOptions: JdbcReadOptions[T]) extends JdbcIO[T] {
   override type ReadP = Unit
   override type WriteP = Nothing
-  final override val tapT = EmptyTapOf[T]
+  final override val tapT: TapT.Aux[T, Nothing] = EmptyTapOf[T]
 
   override def testId: String = s"JdbcIO(${JdbcIO.jdbcIoId(readOptions)})"
 
@@ -91,7 +92,7 @@ final case class JdbcSelect[T: Coder](readOptions: JdbcReadOptions[T]) extends J
       // override default fetch size.
       transform = transform.withFetchSize(readOptions.fetchSize)
     }
-    sc.wrap(sc.applyInternal(transform))
+    sc.applyTransform(transform)
   }
 
   override protected def write(data: SCollection[T], params: WriteP): Tap[Nothing] =
@@ -104,7 +105,7 @@ final case class JdbcSelect[T: Coder](readOptions: JdbcReadOptions[T]) extends J
 final case class JdbcWrite[T](writeOptions: JdbcWriteOptions[T]) extends JdbcIO[T] {
   override type ReadP = Nothing
   override type WriteP = Unit
-  final override val tapT = EmptyTapOf[T]
+  final override val tapT: TapT.Aux[T, Nothing] = EmptyTapOf[T]
 
   override def testId: String = s"JdbcIO(${JdbcIO.jdbcIoId(writeOptions)})"
 

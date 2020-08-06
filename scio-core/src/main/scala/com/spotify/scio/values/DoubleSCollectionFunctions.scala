@@ -19,9 +19,7 @@ package com.spotify.scio.values
 
 import com.spotify.scio.util.StatCounter
 
-/**
- * Extra functions available on SCollections of `Double`s through an implicit conversion.
- */
+/** Extra functions available on SCollections of `Double`s through an implicit conversion. */
 class DoubleSCollectionFunctions(self: SCollection[Double]) {
 
   /**
@@ -170,7 +168,7 @@ class DoubleSCollectionFunctions(self: SCollection[Double]) {
     self.context
       .parallelize(Seq(0))
       .withSideInputs(bSide, hSide)
-      .map { (z, c) =>
+      .map { (_, c) =>
         val h = c(hSide)
         if (h.isEmpty) {
           Array.fill(c(bSide))(0L)

@@ -32,6 +32,7 @@ import scala.reflect.ClassTag
  * [[com.spotify.scio.values.SCollection SCollection]]s specific to Bigtable output.
  */
 trait BigtableMatchers extends SCollectionMatchers {
+
   type BTRow = (ByteString, Iterable[Mutation])
   type BTCollection = SCollection[BTRow]
 
@@ -50,9 +51,7 @@ trait BigtableMatchers extends SCollectionMatchers {
         containInAnyOrder(expectedKeys).apply(left.keys)
     }
 
-  /**
-   * Check that the BT collection contains only the given column families, unique, in any order.
-   */
+  /** Check that the BT collection contains only the given column families, unique, in any order. */
   def containColumnFamilies(expectedCFs: String*): Matcher[BTCollection] =
     new Matcher[BTCollection] {
       override def apply(left: BTCollection): MatchResult = {
@@ -69,8 +68,8 @@ trait BigtableMatchers extends SCollectionMatchers {
    * Check that the BT collection contains a cell with the given row key, column family, and
    * deserialized cell value. Column qualifier defaults to the same as column family.
    */
-  def containSetCellValue[V: ClassTag](key: ByteString, cf: String, value: V)(
-    implicit ser: V => ByteString
+  def containSetCellValue[V: ClassTag](key: ByteString, cf: String, value: V)(implicit
+    ser: V => ByteString
   ): Matcher[BTCollection] =
     containSetCellValue(key, cf, cf, value)
 
@@ -84,8 +83,8 @@ trait BigtableMatchers extends SCollectionMatchers {
    * @param ser Serializer to convert value type V to ByteString for BT format
    * @tparam V Class of expected value
    */
-  def containSetCellValue[V: ClassTag](key: ByteString, cf: String, cq: String, value: V)(
-    implicit ser: V => ByteString
+  def containSetCellValue[V: ClassTag](key: ByteString, cf: String, cq: String, value: V)(implicit
+    ser: V => ByteString
   ): Matcher[BTCollection] =
     new Matcher[BTCollection] {
       override def apply(left: BTCollection): MatchResult = {

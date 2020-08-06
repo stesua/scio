@@ -25,7 +25,7 @@ import org.apache.avro.Schema
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryUtils
 import org.joda.time.{Instant, LocalDate, LocalDateTime, LocalTime}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.runtime.universe._
 import com.spotify.scio.util.Cache
 
@@ -123,7 +123,7 @@ private[types] object SchemaProvider {
       _.annotations
         .find(_.tree.tpe.toString == tpe)
         .map { a =>
-          val q"new $t($v)" = a.tree
+          val q"new $_($v)" = a.tree
           val Literal(Constant(s)) = v
           s.toString
         }

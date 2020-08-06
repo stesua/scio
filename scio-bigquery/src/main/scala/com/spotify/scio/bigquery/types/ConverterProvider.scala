@@ -89,7 +89,7 @@ private[types] object ConverterProvider {
 
         case t if t =:= typeOf[ByteString] =>
           val b = q"$tree.asInstanceOf[_root_.java.nio.ByteBuffer]"
-          q"_root_.com.google.protobuf.ByteString.copyFrom($b)"
+          q"_root_.com.google.protobuf.ByteString.copyFrom($b.asReadOnlyBuffer())"
         case t if t =:= typeOf[Array[Byte]] =>
           val b = q"$tree.asInstanceOf[_root_.java.nio.ByteBuffer]"
           q"_root_.java.util.Arrays.copyOfRange($b.array(), $b.position(), $b.limit())"
@@ -121,8 +121,7 @@ private[types] object ConverterProvider {
 
     def list(tree: Tree, tpe: Type): Tree = {
       val jl = tq"_root_.java.util.List[AnyRef]"
-      val bo = q"_root_.scala.collection.breakOut"
-      q"$tree.asInstanceOf[$jl].asScala.map(x => ${cast(q"x", tpe)})($bo)"
+      q"$tree.asInstanceOf[$jl].asScala.iterator.map(x => ${cast(q"x", tpe)}).toList"
     }
 
     def field(symbol: Symbol, fn: TermName): Tree = {
@@ -154,7 +153,7 @@ private[types] object ConverterProvider {
 
     val tn = TermName("r")
     q"""(r: _root_.org.apache.avro.generic.GenericRecord) => {
-          import _root_.scala.collection.JavaConverters._
+          import _root_.scala.jdk.CollectionConverters._
           ${constructor(tpe, tn)}
         }
     """
@@ -248,7 +247,7 @@ private[types] object ConverterProvider {
 
     val tn = TermName("r")
     q"""(r: $tpe) => {
-          import _root_.scala.collection.JavaConverters._
+          import _root_.scala.jdk.CollectionConverters._
           ${constructor(tpe, tn)}
         }
     """
@@ -314,8 +313,7 @@ private[types] object ConverterProvider {
 
     def list(tree: Tree, tpe: Type): Tree = {
       val jl = tq"_root_.java.util.List[AnyRef]"
-      val bo = q"_root_.scala.collection.breakOut"
-      q"$tree.asInstanceOf[$jl].asScala.map(x => ${cast(q"x", tpe)})($bo)"
+      q"$tree.asInstanceOf[$jl].iterator.asScala.map(x => ${cast(q"x", tpe)}).toList"
     }
 
     def field(symbol: Symbol, fn: TermName): Tree = {
@@ -355,7 +353,7 @@ private[types] object ConverterProvider {
 
     val tn = TermName("r")
     q"""(r: _root_.java.util.Map[String, AnyRef]) => {
-          import _root_.scala.collection.JavaConverters._
+          import _root_.scala.jdk.CollectionConverters._
           ${constructor(tpe, tn)}
         }
     """
@@ -453,7 +451,7 @@ private[types] object ConverterProvider {
 
     val tn = TermName("r")
     q"""(r: $tpe) => {
-          import _root_.scala.collection.JavaConverters._
+          import _root_.scala.jdk.CollectionConverters._
           ${constructor(tpe, tn)}
         }
     """

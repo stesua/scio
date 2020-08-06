@@ -24,10 +24,11 @@ import com.spotify.scio.values.SCollection
 import org.apache.beam.sdk.io.gcp.spanner.SpannerIO.FailureMode
 import org.apache.beam.sdk.io.gcp.spanner.{SpannerConfig, SpannerIO => BSpannerIO}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
+import com.spotify.scio.io.TapT
 
 sealed trait SpannerIO[T] extends ScioIO[T] {
-  final override val tapT = EmptyTapOf[T]
+  final override val tapT: TapT.Aux[T, Nothing] = EmptyTapOf[T]
   val config: SpannerConfig
 
   override def testId: String =
@@ -58,7 +59,7 @@ final case class SpannerRead(config: SpannerConfig) extends SpannerIO[Struct] {
   override type ReadP = ReadParam
   override type WriteP = Nothing
 
-  override protected def read(sc: ScioContext, params: ReadP): SCollection[Struct] = sc.wrap {
+  override protected def read(sc: ScioContext, params: ReadP): SCollection[Struct] = {
     var transform = BSpannerIO
       .read()
       .withSpannerConfig(config)
@@ -74,7 +75,7 @@ final case class SpannerRead(config: SpannerConfig) extends SpannerIO[Struct] {
       transform = transform.withTransaction(sc.applyInternal(txn))
     }
 
-    sc.applyInternal(transform)
+    sc.applyTransform(transform)
   }
 
   override protected def write(data: SCollection[Struct], params: WriteP): Tap[Nothing] =

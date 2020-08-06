@@ -83,8 +83,7 @@ private[types] object ConverterProvider {
 
     def list(tree: Tree, tpe: Type): Tree = {
       val jl = tq"_root_.java.util.List[AnyRef]"
-      val bo = q"_root_.scala.collection.breakOut"
-      q"$tree.asInstanceOf[$jl].asScala.map(x => ${cast(q"x", tpe)})($bo)"
+      q"$tree.asInstanceOf[$jl].iterator().asScala.map(x => ${cast(q"x", tpe)}).toList"
     }
 
     def map(tree: Tree, tpe: Type): Tree = {
@@ -119,7 +118,7 @@ private[types] object ConverterProvider {
 
     val tn = TermName("r")
     q"""(r: ${p(c, ApacheAvro)}.generic.GenericRecord) => {
-          import _root_.scala.collection.JavaConverters._
+          import _root_.scala.jdk.CollectionConverters._
           ${constructor(tpe, tn)}
         }
     """
@@ -168,7 +167,7 @@ private[types] object ConverterProvider {
       q"$tree.map(x => ${cast(q"x", tpe)}).asJava"
 
     def map(tree: Tree, tpe: Type): Tree =
-      q"$tree.mapValues(x => ${cast(q"x", tpe)}).asJava"
+      q"$tree.iterator.map(kv => kv._1 -> ${cast(q"kv._2", tpe)}).toMap.asJava"
 
     def field(symbol: Symbol, fn: TermName): (String, Tree) = {
       val name = symbol.name.toString
@@ -205,7 +204,7 @@ private[types] object ConverterProvider {
 
     val tn = TermName("r")
     q"""(r: $tpe) => {
-          import _root_.scala.collection.JavaConverters._
+          import _root_.scala.jdk.CollectionConverters._
           ${constructor(tpe, tn)}
         }
     """

@@ -190,7 +190,6 @@ abstract class AsyncDoFnTester[P[_], F[_]] extends BaseDoFnTester {
     override def getPipelineOptions: PipelineOptions = ???
     override def sideInput[T](view: PCollectionView[T]): T = ???
     override def pane(): PaneInfo = ???
-    override def updateWatermark(watermark: Instant): Unit = ???
     override def output[T](tag: TupleTag[T], output: T): Unit = ???
     override def outputWithTimestamp(output: String, timestamp: Instant): Unit =
       ???
@@ -235,7 +234,7 @@ abstract class AsyncDoFnTester[P[_], F[_]] extends BaseDoFnTester {
         completePromise(promise, input.toString)
     }
     fn.finishBundle(finishBundleContext)
-    val result = Seq(outputBuffer: _*)
+    val result = Seq(outputBuffer.toSeq: _*)
 
     nextElement = 0
     pending.clear()

@@ -21,17 +21,19 @@ import java.io.{InputStream, OutputStream}
 import java.util
 import java.util.Collections
 
-import com.spotify.scio.coders.Coder
+import com.spotify.scio.coders.{Coder, CoderStackTrace}
 import org.apache.beam.sdk.coders.Coder.NonDeterministicException
 import org.apache.beam.sdk.coders.{Coder => BCoder, _}
 import org.apache.beam.sdk.util.CoderUtils
 import org.apache.beam.sdk.util.common.ElementByteSizeObserver
+import org.apache.beam.sdk.util.BufferedElementCountingOutputStream
+import org.apache.beam.sdk.util.VarInt
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 import scala.collection.{BitSet, SortedSet, TraversableOnce, mutable => m}
-import scala.collection.convert.Wrappers
 import scala.util.Try
+import scala.collection.compat.extra.Wrappers
 
 private object UnitCoder extends AtomicCoder[Unit] {
   override def encode(value: Unit, os: OutputStream): Unit = ()
@@ -50,15 +52,21 @@ private object NothingCoder extends AtomicCoder[Nothing] {
  * performance reasons given that pairs are really common and used in groupBy operations.
  */
 final private class PairCoder[A, B](ac: BCoder[A], bc: BCoder[B]) extends AtomicCoder[(A, B)] {
+  private[this] val materializationStackTrace: Array[StackTraceElement] = CoderStackTrace.prepare
+
   @inline def onErrorMsg[T](msg: => (String, String))(f: => T): T =
     try {
       f
     } catch {
       case e: Exception =>
-        throw new RuntimeException(
-          s"Exception while trying to `${msg._1}` an instance of Tuple2:" +
-            s" Can't decode field ${msg._2}",
-          e
+        // allow Flink memory management, see WrappedBCoder#catching comment.
+        throw CoderStackTrace.append(
+          e,
+          Some(
+            s"Exception while trying to `${msg._1}` an instance" +
+              s" of Tuple2: Can't decode field ${msg._2}"
+          ),
+          materializationStackTrace
         )
     }
 
@@ -119,8 +127,8 @@ final private class PairCoder[A, B](ac: BCoder[A], bc: BCoder[B]) extends Atomic
   }
 }
 
-abstract private class BaseSeqLikeCoder[M[_], T](val elemCoder: BCoder[T])(
-  implicit toSeq: M[T] => TraversableOnce[T]
+abstract private class BaseSeqLikeCoder[M[_], T](val elemCoder: BCoder[T])(implicit
+  toSeq: M[T] => TraversableOnce[T]
 ) extends AtomicCoder[M[T]] {
   override def getCoderArguments: java.util.List[_ <: BCoder[_]] =
     Collections.singletonList(elemCoder)
@@ -128,15 +136,6 @@ abstract private class BaseSeqLikeCoder[M[_], T](val elemCoder: BCoder[T])(
   // delegate methods for determinism and equality checks
   override def verifyDeterministic(): Unit = elemCoder.verifyDeterministic()
   override def consistentWithEquals(): Boolean = elemCoder.consistentWithEquals()
-  override def structuralValue(value: M[T]): AnyRef =
-    if (consistentWithEquals()) {
-      value.asInstanceOf[AnyRef]
-    } else {
-      val b = Seq.newBuilder[AnyRef]
-      b.sizeHint(value.size)
-      value.foreach(v => b += elemCoder.structuralValue(v))
-      b.result()
-    }
 
   // delegate methods for byte size estimation
   override def isRegisterByteSizeObserverCheap(value: M[T]): Boolean = false
@@ -149,31 +148,77 @@ abstract private class BaseSeqLikeCoder[M[_], T](val elemCoder: BCoder[T])(
     }
 }
 
-abstract private class SeqLikeCoder[M[_], T](bc: BCoder[T])(
-  implicit toSeq: M[T] => TraversableOnce[T]
+abstract private class SeqLikeCoder[M[_], T](bc: BCoder[T])(implicit
+  ev: M[T] => TraversableOnce[T]
 ) extends BaseSeqLikeCoder[M, T](bc) {
-  protected val lc = VarIntCoder.of()
   override def encode(value: M[T], outStream: OutputStream): Unit = {
-    lc.encode(value.size, outStream)
-    value.foreach(bc.encode(_, outStream))
+    val traversable = ev(value)
+    VarInt.encode(traversable.size, outStream)
+    traversable.foreach(bc.encode(_, outStream))
   }
+
   def decode(inStream: InputStream, builder: m.Builder[T, M[T]]): M[T] = {
-    val size = lc.decode(inStream)
+    val size = VarInt.decodeInt(inStream)
     builder.sizeHint(size)
     var i = 0
     while (i < size) {
       builder += bc.decode(inStream)
-      i = i + 1
+      i += 1
     }
     builder.result()
   }
 
-  override def toString: String =
-    s"SeqLikeCoder($bc)"
+  override def structuralValue(value: M[T]): AnyRef =
+    if (consistentWithEquals()) {
+      value.asInstanceOf[AnyRef]
+    } else {
+      val b = Seq.newBuilder[AnyRef]
+      val traversable = ev(value)
+      b.sizeHint(traversable.size)
+      traversable.foreach(v => b += elemCoder.structuralValue(v))
+      b.result()
+    }
+
+  override def toString: String = s"SeqLikeCoder($bc)"
 }
 
-private class OptionCoder[T](bc: BCoder[T]) extends SeqLikeCoder[Option, T](bc) {
-  private[this] val bcoder = BooleanCoder.of().asInstanceOf[BCoder[Boolean]]
+abstract private class BufferedSeqLikeCoder[M[_], T](bc: BCoder[T])(implicit
+  ev: M[T] => TraversableOnce[T]
+) extends BaseSeqLikeCoder[M, T](bc) {
+
+  override def encode(value: M[T], outStream: OutputStream): Unit = {
+    val buff = new BufferedElementCountingOutputStream(outStream)
+    ev(value).foreach { elem =>
+      buff.markElementStart()
+      bc.encode(elem, buff)
+    }
+    buff.finish()
+  }
+
+  def decode(inStream: InputStream, builder: m.Builder[T, M[T]]): M[T] = {
+    var count = VarInt.decodeLong(inStream);
+    while (count > 0L) {
+      builder += bc.decode(inStream)
+      count -= 1
+      if (count == 0L) {
+        count = VarInt.decodeLong(inStream);
+      }
+    }
+    builder.result()
+  }
+
+  override def structuralValue(value: M[T]): AnyRef = {
+    val b = Seq.newBuilder[AnyRef]
+    ev(value).foreach(v => b += elemCoder.structuralValue(v))
+    b.result()
+  }
+
+  override def toString: String = s"BufferedSeqLikeCoder($bc)"
+}
+
+private class OptionCoder[T](bc: BCoder[T]) extends AtomicCoder[Option[T]] {
+  private[this] val bcoder = BooleanCoder.of()
+
   override def encode(value: Option[T], os: OutputStream): Unit = {
     bcoder.encode(value.isDefined, os)
     value.foreach(bc.encode(_, os))
@@ -184,8 +229,14 @@ private class OptionCoder[T](bc: BCoder[T]) extends SeqLikeCoder[Option, T](bc) 
     if (isDefined) Some(bc.decode(is)) else None
   }
 
-  override def toString: String =
-    s"OptionCoder($bc)"
+  override def getCoderArguments: java.util.List[_ <: BCoder[_]] =
+    Collections.singletonList(bc)
+
+  override def verifyDeterministic(): Unit = bc.verifyDeterministic()
+
+  override def consistentWithEquals(): Boolean = bc.consistentWithEquals()
+
+  override def toString: String = s"OptionCoder($bc)"
 }
 
 private class SeqCoder[T](bc: BCoder[T]) extends SeqLikeCoder[Seq, T](bc) {
@@ -196,14 +247,13 @@ private class ListCoder[T](bc: BCoder[T]) extends SeqLikeCoder[List, T](bc) {
   override def decode(inStream: InputStream): List[T] = decode(inStream, List.newBuilder[T])
 }
 
-// TODO: implement chunking
-private class TraversableOnceCoder[T](bc: BCoder[T]) extends SeqLikeCoder[TraversableOnce, T](bc) {
+private class TraversableOnceCoder[T](bc: BCoder[T])
+    extends BufferedSeqLikeCoder[TraversableOnce, T](bc) {
   override def decode(inStream: InputStream): TraversableOnce[T] =
     decode(inStream, Seq.newBuilder[T])
 }
 
-// TODO: implement chunking
-private class IterableCoder[T](bc: BCoder[T]) extends SeqLikeCoder[Iterable, T](bc) {
+private class IterableCoder[T](bc: BCoder[T]) extends BufferedSeqLikeCoder[Iterable, T](bc) {
   override def decode(inStream: InputStream): Iterable[T] =
     decode(inStream, Iterable.newBuilder[T])
 }
@@ -216,7 +266,7 @@ private class ArrayCoder[@specialized(Short, Int, Long, Float, Double, Boolean, 
   bc: BCoder[T]
 ) extends SeqLikeCoder[Array, T](bc) {
   override def decode(inStream: InputStream): Array[T] = {
-    val size = lc.decode(inStream)
+    val size = VarInt.decodeInt(inStream)
     val arr = new Array[T](size)
     var i = 0
     while (i < size) {
@@ -281,7 +331,7 @@ private class MapCoder[K, V](kc: BCoder[K], vc: BCoder[V]) extends AtomicCoder[M
     lc.encode(value.size, os)
     val it = value.iterator
     while (it.hasNext) {
-      val (k, v) = it.next
+      val (k, v) = it.next()
       kc.encode(k, os)
       vc.encode(v, os)
     }
@@ -519,7 +569,7 @@ trait ScalaCoders {
     Coder.transform(Coder[T])(bc => Coder.beam(new BufferCoder[T](bc)))
 
   implicit def listBufferCoder[T: Coder]: Coder[m.ListBuffer[T]] =
-    Coder.xmap(bufferCoder[T])(m.ListBuffer(_: _*), identity)
+    Coder.xmap(bufferCoder[T])(x => m.ListBuffer(x.toSeq: _*), identity)
 
   implicit def arrayCoder[T: Coder: ClassTag]: Coder[Array[T]] =
     Coder.transform(Coder[T])(bc => Coder.beam(new ArrayCoder[T](bc)))
@@ -527,10 +577,10 @@ trait ScalaCoders {
   implicit def arrayByteCoder: Coder[Array[Byte]] =
     Coder.beam(ByteArrayCoder.of())
 
-  implicit def wrappedArrayCoder[T: Coder: ClassTag](
-    implicit wrap: Array[T] => m.WrappedArray[T]
+  implicit def wrappedArrayCoder[T: Coder: ClassTag](implicit
+    wrap: Array[T] => m.WrappedArray[T]
   ): Coder[m.WrappedArray[T]] =
-    Coder.xmap(Coder[Array[T]])(wrap, _.array)
+    Coder.xmap(Coder[Array[T]])(wrap, _.toArray)
 
   implicit def mutableMapCoder[K: Coder, V: Coder]: Coder[m.Map[K, V]] =
     Coder.transform(Coder[K]) { kc =>

@@ -21,7 +21,6 @@ import com.spotify.scio.values.SCollection
 import com.spotify.scio.schemas.Schema
 import org.apache.beam.sdk.values.TupleTag
 
-import scala.language.experimental.macros
 import scala.reflect.macros.{blackbox, whitebox}
 import com.spotify.scio.schemas.SchemaMacroHelpers
 
@@ -118,9 +117,7 @@ private trait SqlInterpolatorMacroHelpers {
 
 object SqlInterpolatorMacro {
 
-  /**
-   * This static annotation is used to pass (static) parameters to SqlInterpolatorMacro.expand
-   */
+  /** This static annotation is used to pass (static) parameters to SqlInterpolatorMacro.expand */
   final class SqlParts(parts: List[String], ps: Any*) extends scala.annotation.StaticAnnotation
 
   // For some reason this method needs to be a whitebox macro

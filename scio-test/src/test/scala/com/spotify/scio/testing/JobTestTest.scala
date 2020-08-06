@@ -36,6 +36,7 @@ import org.joda.time.Instant
 import org.scalatest.exceptions.TestFailedException
 
 import scala.io.Source
+import org.apache.beam.sdk.metrics.{Counter, Distribution, Gauge}
 
 object ObjectFileJob {
   def main(cmdlineArgs: Array[String]): Unit = {
@@ -62,7 +63,7 @@ object GenericAvroFileJob {
   def main(cmdlineArgs: Array[String]): Unit = {
     val (sc, args) = ContextAndArgs(cmdlineArgs)
     implicit val coder = Coder.avroGenericRecordCoder(AvroUtils.schema)
-    sc.avroFile[GenericRecord](args("input"), AvroUtils.schema)
+    sc.avroFile(args("input"), AvroUtils.schema)
       .saveAsAvroFile(args("output"), schema = AvroUtils.schema)
     sc.run()
     ()
@@ -70,15 +71,17 @@ object GenericAvroFileJob {
 }
 
 object GenericParseFnAvroFileJob {
+
+  implicit val coder: Coder[GenericRecord] = Coder.avroGenericRecordCoder(AvroUtils.schema)
+
   // A class with some fields from the Avro Record
   case class PartialFieldsAvro(intField: Int)
 
   def main(cmdlineArgs: Array[String]): Unit = {
     val (sc, args) = ContextAndArgs(cmdlineArgs)
     sc.parseAvroFile[PartialFieldsAvro](args("input"))((gr: GenericRecord) =>
-        PartialFieldsAvro(gr.get("int_field").asInstanceOf[Int])
-      )
-      .map(a => AvroUtils.newGenericRecord(a.intField))
+      PartialFieldsAvro(gr.get("int_field").asInstanceOf[Int])
+    ).map(a => AvroUtils.newGenericRecord(a.intField))
       .saveAsAvroFile(args("output"), schema = AvroUtils.schema)
     sc.run()
     ()
@@ -252,9 +255,9 @@ object JobWithDuplicateOutput {
 }
 
 object MetricsJob {
-  val counter = ScioMetrics.counter("counter")
-  val distribution = ScioMetrics.distribution("distribution")
-  val gauge = ScioMetrics.gauge("gauge")
+  val counter: Counter = ScioMetrics.counter("counter")
+  val distribution: Distribution = ScioMetrics.distribution("distribution")
+  val gauge: Gauge = ScioMetrics.gauge("gauge")
 
   def main(cmdlineArgs: Array[String]): Unit = {
     val (sc, _) = ContextAndArgs(cmdlineArgs)

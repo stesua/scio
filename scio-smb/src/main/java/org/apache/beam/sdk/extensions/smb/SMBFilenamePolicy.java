@@ -18,7 +18,7 @@
 package org.apache.beam.sdk.extensions.smb;
 
 import java.io.Serializable;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.UUID;
 import org.apache.beam.sdk.io.fs.ResolveOptions.StandardResolveOptions;
 import org.apache.beam.sdk.io.fs.ResourceId;
 import org.apache.beam.sdk.transforms.display.DisplayData;
@@ -42,39 +42,36 @@ import org.joda.time.format.DateTimeFormatter;
 public final class SMBFilenamePolicy implements Serializable {
 
   private static final String TEMP_DIRECTORY_PREFIX = ".temp-beam";
-  private static final AtomicLong TEMP_COUNT = new AtomicLong(0);
-  private static final DateTimeFormatter TEMPDIR_TIMESTAMP =
-      DateTimeFormat.forPattern("yyyy-MM-dd_HH-mm-ss");
-
-  private final String timestamp = Instant.now().toString(TEMPDIR_TIMESTAMP);
-  private final Long tempId = TEMP_COUNT.getAndIncrement();
+  private final String tempId = UUID.randomUUID().toString();
 
   private final ResourceId directory;
+  private final String filenamePrefix;
   private final String filenameSuffix;
 
-  public SMBFilenamePolicy(ResourceId directory, String filenameSuffix) {
+  public SMBFilenamePolicy(ResourceId directory, String filenamePrefix, String filenameSuffix) {
     Preconditions.checkArgument(directory.isDirectory(), "ResourceId must be a directory");
     this.directory = directory;
+    this.filenamePrefix = filenamePrefix;
     this.filenameSuffix = filenameSuffix;
   }
 
   public FileAssignment forDestination() {
-    return new FileAssignment(directory, filenameSuffix, false);
+    return new FileAssignment(directory, filenamePrefix, filenameSuffix, false);
   }
 
   FileAssignment forTempFiles(ResourceId tempDirectory) {
-    final String tempDirName =
-        String.format(TEMP_DIRECTORY_PREFIX + "-%s-%08d", timestamp, getTempId());
+    final String tempDirName = String.format(TEMP_DIRECTORY_PREFIX + "-%s", getTempId());
     return new FileAssignment(
         tempDirectory
             .getCurrentDirectory()
             .resolve(tempDirName, StandardResolveOptions.RESOLVE_DIRECTORY),
+        filenamePrefix,
         filenameSuffix,
         true);
   }
 
   @VisibleForTesting
-  Long getTempId() {
+  String getTempId() {
     return tempId;
   }
 
@@ -86,20 +83,28 @@ public final class SMBFilenamePolicy implements Serializable {
 
     private static final String NULL_KEYS_BUCKET_TEMPLATE = "null-keys";
     private static final String NUMERIC_BUCKET_TEMPLATE = "%05d-of-%05d";
-    private static final String BUCKET_ONLY_TEMPLATE = "bucket-%s%s";
-    private static final String BUCKET_SHARD_TEMPLATE = "bucket-%s-shard-%05d-of-%05d%s";
     private static final String METADATA_FILENAME = "metadata.json";
     private static final DateTimeFormatter TEMPFILE_TIMESTAMP =
         DateTimeFormat.forPattern("yyyy-MM-dd_HH-mm-ss-");
 
-    private final ResourceId filenamePrefix;
+    private final String bucketOnlyTemplate;
+    private final String bucketShardTemplate;
+
+    private final ResourceId directory;
     private final String filenameSuffix;
     private final boolean doTimestampFiles;
 
-    FileAssignment(ResourceId filenamePrefix, String filenameSuffix, boolean doTimestampFiles) {
-      this.filenamePrefix = filenamePrefix;
+    FileAssignment(
+        ResourceId directory,
+        String filenamePrefix,
+        String filenameSuffix,
+        boolean doTimestampFiles) {
+      this.directory = directory;
       this.filenameSuffix = filenameSuffix;
       this.doTimestampFiles = doTimestampFiles;
+
+      bucketOnlyTemplate = filenamePrefix + "-%s%s";
+      bucketShardTemplate = filenamePrefix + "-%s-shard-%05d-of-%05d%s";
     }
 
     ResourceId forBucket(BucketShardId id, int maxNumBuckets, int maxNumShards) {
@@ -123,11 +128,11 @@ public final class SMBFilenamePolicy implements Serializable {
       final String timestamp = doTimestampFiles ? Instant.now().toString(TEMPFILE_TIMESTAMP) : "";
       String filename =
           maxNumShards == 1
-              ? String.format(BUCKET_ONLY_TEMPLATE, bucketName, filenameSuffix)
+              ? String.format(bucketOnlyTemplate, bucketName, filenameSuffix)
               : String.format(
-                  BUCKET_SHARD_TEMPLATE, bucketName, id.getShardId(), maxNumShards, filenameSuffix);
+                  bucketShardTemplate, bucketName, id.getShardId(), maxNumShards, filenameSuffix);
 
-      return filenamePrefix.resolve(timestamp + filename, StandardResolveOptions.RESOLVE_FILE);
+      return directory.resolve(timestamp + filename, StandardResolveOptions.RESOLVE_FILE);
     }
 
     public ResourceId forBucket(BucketShardId id, BucketMetadata<?, ?> metadata) {
@@ -136,14 +141,21 @@ public final class SMBFilenamePolicy implements Serializable {
 
     public ResourceId forMetadata() {
       String timestamp = doTimestampFiles ? Instant.now().toString(TEMPFILE_TIMESTAMP) : "";
-      return filenamePrefix.resolve(
-          timestamp + METADATA_FILENAME, StandardResolveOptions.RESOLVE_FILE);
+      return directory.resolve(timestamp + METADATA_FILENAME, StandardResolveOptions.RESOLVE_FILE);
+    }
+
+    public ResourceId getDirectory() {
+      return directory;
     }
 
     @Override
     public void populateDisplayData(Builder builder) {
-      builder.add(DisplayData.item("directory", filenamePrefix.toString()));
+      builder.add(DisplayData.item("directory", directory.toString()));
       builder.add(DisplayData.item("filenameSuffix", filenameSuffix));
+    }
+
+    public static ResourceId forDstMetadata(ResourceId directory) {
+      return directory.resolve(METADATA_FILENAME, StandardResolveOptions.RESOLVE_FILE);
     }
   }
 }

@@ -17,14 +17,15 @@
 package com.spotify.scio.schemas.instances
 
 import java.util
+import java.time.LocalDate
 
 import com.spotify.scio.IsJavaBean
 import com.spotify.scio.schemas.{ArrayType, MapType, RawRecord, Schema, Type}
 import org.apache.beam.sdk.schemas.JavaBeanSchema
-import org.apache.beam.sdk.schemas.Schema.FieldType
+import org.apache.beam.sdk.schemas.Schema.{FieldType, LogicalType}
+import org.apache.beam.sdk.extensions.sql.impl.utils.CalciteUtils
 
 import scala.reflect.ClassTag
-import org.apache.beam.sdk.schemas.Schema.LogicalType
 
 trait JavaInstances {
   implicit val jByteSchema: Type[java.lang.Byte] =
@@ -60,8 +61,8 @@ trait JavaInstances {
   implicit def jArrayListSchema[T](implicit s: Schema[T]): Schema[java.util.ArrayList[T]] =
     ArrayType(s, identity, l => new util.ArrayList[T](l))
 
-  implicit def jMapSchema[K, V](
-    implicit ks: Schema[K],
+  implicit def jMapSchema[K, V](implicit
+    ks: Schema[K],
     vs: Schema[V]
   ): Schema[java.util.Map[K, V]] =
     MapType(ks, vs, identity, identity)
@@ -83,6 +84,8 @@ trait JavaInstances {
 
       override def getArgumentType: FieldType = FieldType.STRING
     }))
+
+  implicit def jLocalDate: Type[LocalDate] = Type(CalciteUtils.DATE)
 }
 
 private[schemas] object JavaInstances extends JavaInstances

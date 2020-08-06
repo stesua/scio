@@ -34,7 +34,7 @@ import org.apache.beam.sdk.util.CoderUtils
 import org.apache.beam.sdk.values.KV
 import org.joda.time.Instant
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 import org.apache.beam.sdk.testing.CoderProperties
 
@@ -43,7 +43,7 @@ case class RecordB(name: String, value: Int)
 
 class KryoAtomicCoderTest extends PipelineSpec {
   type CoderFactory = () => BCoder[Any]
-  val cf = () => new KryoAtomicCoder[Any](KryoOptions())
+  val cf: () => KryoAtomicCoder[Any] = () => new KryoAtomicCoder[Any](KryoOptions())
 
   "KryoAtomicCoder" should "support Scala collections" in {
     Seq(1, 2, 3) coderShould roundtripKryo()

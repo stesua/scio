@@ -26,6 +26,7 @@ import com.spotify.scio.ScioContext
 import com.spotify.scio.util.ScioUtil
 import com.spotify.scio.values.SCollection
 import kantan.csv._
+import kantan.codecs.compat._ // scalafix:ok
 import kantan.csv.CsvConfiguration.{Header, QuotePolicy}
 import kantan.csv.engine.ReaderEngine
 import kantan.csv.ops._
@@ -82,7 +83,6 @@ import org.apache.beam.sdk.values.PCollection
  *   val users: SCollection[User] = ???
  *   users.saveAsCsvFile(path)
  * }}}
- *
  */
 object CsvIO {
 
@@ -92,8 +92,9 @@ object CsvIO {
     quotePolicy = QuotePolicy.WhenNeeded,
     header = Header.Implicit
   )
-  final val DefaultReadParams = CsvIO.ReadParam(compression = beam.Compression.AUTO)
-  final val DefaultWriteParams = CsvIO.WriteParam(compression = beam.Compression.UNCOMPRESSED)
+  final val DefaultReadParams: ReadParam = CsvIO.ReadParam(compression = beam.Compression.AUTO)
+  final val DefaultWriteParams: WriteParam =
+    CsvIO.WriteParam(compression = beam.Compression.UNCOMPRESSED)
   final val DefaultFileSuffix = ".csv"
 
   final case class ReadParam(
@@ -114,7 +115,7 @@ object CsvIO {
   final case class Read[T: HeaderDecoder: Coder](path: String) extends ScioIO[T] {
     override type ReadP = CsvIO.ReadParam
     override type WriteP = CsvIO.WriteParam
-    final override val tapT = TapOf[T]
+    final override val tapT: TapT.Aux[T, T] = TapOf[T]
 
     override protected def read(
       sc: ScioContext,
@@ -130,7 +131,7 @@ object CsvIO {
   final case class Write[T: HeaderEncoder: Coder](path: String) extends ScioIO[T] {
     override type ReadP = Nothing // WriteOnly
     override type WriteP = CsvIO.WriteParam
-    final override val tapT = EmptyTapOf[T]
+    final override val tapT: TapT.Aux[T, Nothing] = EmptyTapOf[T]
 
     override protected def read(sc: ScioContext, params: ReadP): SCollection[T] =
       throw new UnsupportedOperationException("Use CsvIO.Read() for reading")
@@ -146,7 +147,7 @@ object CsvIO {
   final case class ReadWrite[T: HeaderCodec: Coder](path: String) extends ScioIO[T] {
     override type ReadP = CsvIO.ReadParam
     override type WriteP = CsvIO.WriteParam
-    final override val tapT = TapOf[T]
+    final override val tapT: TapT.Aux[T, T] = TapOf[T]
 
     override protected def read(sc: ScioContext, params: ReadP): SCollection[T] =
       CsvIO.read(sc, path, params)
@@ -184,7 +185,7 @@ object CsvIO {
     override def value: Iterator[T] =
       BinaryIO
         .openInputStreamsFor(ScioUtil.addPartSuffix(path))
-        .flatMap(_.asUnsafeCsvReader[T](params.csvConfiguration).toIterator)
+        .flatMap(_.asUnsafeCsvReader[T](params.csvConfiguration).iterator)
 
     override def open(sc: ScioContext): SCollection[T] = CsvIO.read(sc, path, params)
   }

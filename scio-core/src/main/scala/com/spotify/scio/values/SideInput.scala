@@ -25,7 +25,7 @@ import org.apache.beam.sdk.transforms.DoFn
 import org.apache.beam.sdk.transforms.windowing.{BoundedWindow, GlobalWindow}
 import org.apache.beam.sdk.values.PCollectionView
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 /** Encapsulate an SCollection when it is being used as a side input. */
 trait SideInput[T] extends Serializable {
@@ -39,17 +39,17 @@ trait SideInput[T] extends Serializable {
   private[values] def get[I, O](context: DoFn[I, O]#ProcessContext): T
 
   def getCache[I, O](context: DoFn[I, O]#ProcessContext, window: BoundedWindow): T = {
-    if (cache == null || this.window != window ||
-        (updateCacheOnGlobalWindow && window == GlobalWindow.INSTANCE)) {
+    if (
+      cache == null || this.window != window ||
+      (updateCacheOnGlobalWindow && window == GlobalWindow.INSTANCE)
+    ) {
       this.window = window
       cache = get(context)
     }
     cache
   }
 
-  /**
-   * Create a new [[SideInput]] by applying a function on the elements wrapped in this SideInput.
-   */
+  /** Create a new [[SideInput]] by applying a function on the elements wrapped in this SideInput. */
   def map[B](f: T => B): SideInput[B] = new DelegatingSideInput[T, B](this, f)
 
   private[values] val view: PCollectionView[_]
@@ -104,7 +104,7 @@ private[values] class SingletonSideInput[T](val view: PCollectionView[T]) extend
 private[values] class ListSideInput[T](val view: PCollectionView[JList[T]])
     extends SideInput[Seq[T]] {
   override def get[I, O](context: DoFn[I, O]#ProcessContext): Seq[T] =
-    context.sideInput(view).asScala
+    context.sideInput(view).iterator().asScala.toSeq
 }
 
 private[values] class IterableSideInput[T](val view: PCollectionView[JIterable[T]])

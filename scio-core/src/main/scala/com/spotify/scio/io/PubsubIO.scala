@@ -31,7 +31,7 @@ import org.apache.beam.sdk.util.CoderUtils
 import org.apache.beam.sdk.values.{PCollection, PDone}
 import org.joda.time.Instant
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.{classTag, ClassTag}
 import com.spotify.scio.io.PubsubIO.Subscription
 import com.spotify.scio.io.PubsubIO.Topic
@@ -39,7 +39,7 @@ import com.spotify.scio.io.PubsubIO.Topic
 sealed trait PubsubIO[T] extends ScioIO[T] {
   override type ReadP = PubsubIO.ReadParam
   override type WriteP = PubsubIO.WriteParam
-  final override val tapT = EmptyTapOf[T]
+  final override val tapT: TapT.Aux[T, Nothing] = EmptyTapOf[T]
 
   override def tap(params: ReadP): Tap[Nothing] =
     EmptyTap
@@ -51,7 +51,7 @@ object PubsubIO {
   case object Topic extends ReadType
 
   final case class ReadParam(readType: ReadType) {
-    val isSubscription = readType match {
+    val isSubscription: Boolean = readType match {
       case Subscription => true
       case _            => false
     }
@@ -203,14 +203,12 @@ final private case class StringPubsubIOWithoutAttributes(
 ) extends PubsubIOWithoutAttributes[String] {
   override protected def read(sc: ScioContext, params: ReadP): SCollection[String] = {
     val t = setup(beam.PubsubIO.readStrings(), params)
-    sc.wrap(sc.applyInternal(t))
+    sc.applyTransform(t)
   }
 
   override protected def write(data: SCollection[String], params: WriteP): Tap[Nothing] = {
     val t = setup(beam.PubsubIO.writeStrings(), params)
-    data
-      .asInstanceOf[SCollection[String]]
-      .applyInternal(t)
+    data.applyInternal(t)
     EmptyTap
   }
 }
@@ -224,7 +222,7 @@ final private case class AvroPubsubIOWithoutAttributes[T <: SpecificRecordBase: 
 
   override protected def read(sc: ScioContext, params: ReadP): SCollection[T] = {
     val t = setup(beam.PubsubIO.readAvros(cls), params)
-    sc.wrap(sc.applyInternal(t))
+    sc.applyTransform(t)
   }
 
   override protected def write(data: SCollection[T], params: WriteP): Tap[Nothing] = {
@@ -242,13 +240,13 @@ final private case class MessagePubsubIOWithoutAttributes[T <: Message: ClassTag
   private[this] val cls = ScioUtil.classOf[T]
 
   override protected def read(sc: ScioContext, params: ReadP): SCollection[T] = {
-    val t = setup(beam.PubsubIO.readProtos(cls.asSubclass(classOf[Message])), params)
-    sc.wrap(sc.applyInternal(t)).asInstanceOf[SCollection[T]]
+    val t = setup(beam.PubsubIO.readProtos(cls), params)
+    sc.applyTransform(t)
   }
 
   override protected def write(data: SCollection[T], params: WriteP): Tap[Nothing] = {
-    val t = setup(beam.PubsubIO.writeProtos(cls.asInstanceOf[Class[Message]]), params)
-    data.asInstanceOf[SCollection[Message]].applyInternal(t)
+    val t = setup(beam.PubsubIO.writeProtos(cls), params)
+    data.applyInternal(t)
     EmptyTap
   }
 }
@@ -260,12 +258,12 @@ final private case class PubSubMessagePubsubIOWithoutAttributes[T <: beam.Pubsub
 ) extends PubsubIOWithoutAttributes[T] {
   override protected def read(sc: ScioContext, params: ReadP): SCollection[T] = {
     val t = setup(beam.PubsubIO.readMessages(), params)
-    sc.wrap(sc.applyInternal(t)).asInstanceOf[SCollection[T]]
+    sc.applyTransform(t).contravary[T]
   }
 
   override protected def write(data: SCollection[T], params: WriteP): Tap[Nothing] = {
     val t = setup(beam.PubsubIO.writeMessages(), params)
-    data.asInstanceOf[SCollection[beam.PubsubMessage]].applyInternal(t)
+    data.covary[beam.PubsubMessage].applyInternal(t)
     EmptyTap
   }
 }
@@ -285,7 +283,7 @@ final private case class FallbackPubsubIOWithoutAttributes[T: Coder](
       params
     )
 
-    sc.wrap(sc.applyInternal(t))
+    sc.applyTransform(t)
   }
 
   override protected def write(data: SCollection[T], params: WriteP): Tap[Nothing] = {
@@ -320,7 +318,7 @@ final private case class PubsubIOWithAttributes[T: ClassTag: Coder](
     r = PubsubIO.setAttrs(r)(idAttribute, timestampAttribute)
 
     val coder = CoderMaterializer.beam(sc, Coder[T])
-    sc.wrap(sc.applyInternal(r))
+    sc.applyTransform(r)
       .map { m =>
         val payload = CoderUtils.decodeFromByteArray(coder, m.getPayload)
         val attributes = JMapWrapper.of(m.getAttributeMap)
@@ -328,8 +326,8 @@ final private case class PubsubIOWithAttributes[T: ClassTag: Coder](
       }
   }
 
-  override def readTest(sc: ScioContext, params: ReadP)(
-    implicit coder: Coder[WithAttributeMap]
+  override def readTest(sc: ScioContext, params: ReadP)(implicit
+    coder: Coder[WithAttributeMap]
   ): SCollection[WithAttributeMap] = {
     val read = TestDataManager.getInput(sc.testId.get)(this).toSCollection(sc)
 

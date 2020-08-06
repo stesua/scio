@@ -37,7 +37,7 @@ import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.hash.Hashing
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.io.Files
 import org.slf4j.LoggerFactory
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection.mutable.{Buffer => MBuffer, Map => MMap}
 import scala.reflect.macros._
 
@@ -131,12 +131,23 @@ private[types] object TypeProvider {
     val queryDef =
       q"override def query: _root_.java.lang.String = $queryFormat"
 
+    val queryRawDef =
+      q"override def queryRaw: _root_.java.lang.String = $queryFormat"
+
     val queryArgTypes = queryArgs.map(t => t._2 -> TermName(c.freshName("queryArg$")))
     val queryFnDef = if (queryArgTypes.nonEmpty) {
       val typesQ = queryArgTypes.map { case (tpt, termName) => q"$termName: $tpt" }
-      Some(q"def query(..$typesQ): String = $queryFormat.format(..${queryArgTypes.map(_._2)})")
+      val queryFn = q"""
+        def query(..$typesQ): String = $queryFormat.format(..${queryArgTypes.map(_._2)})
+      """
+
+      val queryAsSource = q"""
+        def queryAsSource(..$typesQ): ${p(c, SBQ)}.Query =
+          ${p(c, SBQ)}.Query(query(..${queryArgTypes.map(_._2)}))
+      """
+      List(queryFn, queryAsSource)
     } else {
-      None
+      List.empty[c.Tree]
     }
 
     val qa =
@@ -146,12 +157,13 @@ private[types] object TypeProvider {
             implicit def bqQuery: ${p(c, SType)}.Query[$cName] =
               new ${p(c, SType)}.Query[$cName]{
                 $queryDef
+                $queryRawDef
               }
           """)
         case _ =>
           Nil
       }
-    val overrides = queryFnDef.getOrElse(EmptyTree) :: queryDef :: qa
+    val overrides = queryFnDef ::: queryDef :: queryRawDef :: qa
 
     schemaToType(c)(schema, annottees, traits, overrides)
   }
@@ -160,7 +172,7 @@ private[types] object TypeProvider {
     c: blackbox.Context
   )(cd: c.universe.ClassDef): List[c.universe.Tree] =
     cd.mods.annotations
-      .filter(_.children.head.toString().matches("^new description$"))
+      .filter(_.children.head.toString.matches("^new description$"))
       .map(_.children.tail.head)
 
   def toTableImpl(c: blackbox.Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
@@ -169,9 +181,9 @@ private[types] object TypeProvider {
 
     val provider: OverrideTypeProvider = OverrideTypeProviderFinder.getProvider
     val (r, caseClassTree, name) = annottees.map(_.tree) match {
-      case (clazzDef @ q"$mods class $cName[..$tparams] $ctorMods(..$fields) extends { ..$earlydefns } with ..$parents { $self => ..$body }") :: tail
+      case (clazzDef @ q"$mods class $cName[..$_] $_(..$fields) extends { ..$_ } with ..$parents { $_ => ..$body }") :: tail
           if mods.asInstanceOf[Modifiers].hasFlag(Flag.CASE) =>
-        if (parents.map(_.toString()).toSet != Set("scala.Product", "scala.Serializable")) {
+        if (parents.map(_.toString).toSet != Set("scala.Product", "scala.Serializable")) {
           c.abort(c.enclosingPosition, s"Invalid annotation, don't extend the case class $clazzDef")
         }
         val desc = getTableDescription(c)(clazzDef.asInstanceOf[ClassDef])
@@ -208,15 +220,19 @@ private[types] object TypeProvider {
         val caseClassTree =
           q"""${caseClass(c)(mods, cName, taggedFields, body)}"""
         val maybeCompanion = tail.headOption
-        (q"""$caseClassTree
+        (
+          q"""$caseClassTree
             ${companion(c)(
-          cName,
-          traits,
-          Seq(defSchema, defAvroSchema, defToPrettyString) ++ defTblDesc,
-          taggedFields.asInstanceOf[Seq[Tree]].size,
-          maybeCompanion
-        )}
-        """, caseClassTree, cName.toString())
+            cName,
+            traits,
+            Seq(defSchema, defAvroSchema, defToPrettyString) ++ defTblDesc,
+            taggedFields.asInstanceOf[Seq[Tree]].size,
+            maybeCompanion
+          )}
+        """,
+          caseClassTree,
+          cName.toString
+        )
       case t =>
         val error =
           s"""Invalid annotation:
@@ -253,7 +269,7 @@ private[types] object TypeProvider {
     // Returns: (raw type, e.g. Int, String, NestedRecord, nested case class definitions)
     def getRawType(tfs: TableFieldSchema): (Tree, Seq[Tree]) =
       tfs.getType match {
-        case t if provider.shouldOverrideType(tfs) =>
+        case _ if provider.shouldOverrideType(tfs) =>
           (provider.getScalaType(c)(tfs), Nil)
         case "BOOLEAN" | "BOOL"  => (tq"_root_.scala.Boolean", Nil)
         case "INTEGER" | "INT64" => (tq"_root_.scala.Long", Nil)
@@ -295,15 +311,15 @@ private[types] object TypeProvider {
 
     def toFields(fields: JList[TableFieldSchema]): (Seq[Tree], Seq[Tree]) = {
       val f = fields.asScala.map(s => toField(s))
-      (f.map(_._1), f.flatMap(_._2))
+      (f.map(_._1).toSeq, f.flatMap(_._2).toSeq)
     }
 
     val (fields, records) = toFields(schema.getFields)
 
     val (r, caseClassTree, name) = annottees.map(_.tree) match {
-      case (clazzDef @ q"$mods class $cName[..$tparams] $ctorMods(..$cfields) extends { ..$earlydefns } with ..$parents { $self => ..$body }") :: tail
+      case (clazzDef @ q"$mods class $cName[..$_] $_(..$cfields) extends { ..$_ } with ..$parents { $_ => ..$body }") :: tail
           if mods.asInstanceOf[Modifiers].flags == NoFlags =>
-        if (parents.map(_.toString()).toSet != Set("scala.AnyRef")) {
+        if (parents.map(_.toString).toSet != Set("scala.AnyRef")) {
           c.abort(c.enclosingPosition, s"Invalid annotation, don't extend the class $clazzDef")
         }
         if (cfields.nonEmpty) {
@@ -326,16 +342,20 @@ private[types] object TypeProvider {
 
         val caseClassTree = q"""${caseClass(c)(mods, cName, fields, body)}"""
         val maybeCompanion = tail.headOption
-        (q"""$caseClassTree
+        (
+          q"""$caseClassTree
             ${companion(c)(
-          cName,
-          traits ++ defTblTrait,
-          Seq(defSchema, defAvroSchema, defToPrettyString) ++ overrides ++ defTblDesc,
-          fields.size,
-          maybeCompanion
-        )}
+            cName,
+            traits ++ defTblTrait,
+            Seq(defSchema, defAvroSchema, defToPrettyString) ++ overrides ++ defTblDesc,
+            fields.size,
+            maybeCompanion
+          )}
             ..$records
-        """, caseClassTree, cName.toString)
+        """,
+          caseClassTree,
+          cName.toString
+        )
       case t => c.abort(c.enclosingPosition, s"Invalid annotation $t")
     }
     debug(s"TypeProvider.schemaToType[$schema]:")
@@ -439,7 +459,7 @@ private[types] object TypeProvider {
     import c.universe._
 
     val overrideFlag =
-      if (traits.exists(_.toString().contains("Function"))) Flag.OVERRIDE
+      if (traits.exists(_.toString.contains("Function"))) Flag.OVERRIDE
       else NoFlags
     val tupled =
       if (numFields > 1 && numFields <= 22)
@@ -578,6 +598,6 @@ private[types] object NameProvider {
   private def toPascalCase(s: String): String =
     s.split('_')
       .filter(_.nonEmpty)
-      .map(t => t(0).toUpper + t.drop(1).toLowerCase)
+      .map(t => s"${t(0).toUpper}${t.drop(1).toLowerCase}")
       .mkString("")
 }

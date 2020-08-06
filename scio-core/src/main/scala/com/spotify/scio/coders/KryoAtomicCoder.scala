@@ -25,7 +25,7 @@ import com.esotericsoftware.kryo.KryoException
 import com.esotericsoftware.kryo.io.{InputChunked, OutputChunked}
 import com.esotericsoftware.kryo.serializers.JavaSerializer
 import com.google.protobuf.{ByteString, Message}
-import com.spotify.scio.coders.instances.kryo._
+import com.spotify.scio.coders.instances.kryo.{GrpcSerializers => grpc, _}
 import com.spotify.scio.options.ScioOptions
 import com.twitter.chill._
 import com.twitter.chill.algebird.AlgebirdRegistrar
@@ -45,9 +45,9 @@ import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.reflect.ClassPat
 import org.joda.time.{DateTime, LocalDate, LocalDateTime, LocalTime}
 import org.slf4j.LoggerFactory
 
-import scala.collection.JavaConverters._
-import scala.collection.convert.Wrappers
+import scala.jdk.CollectionConverters._
 import scala.collection.mutable
+import scala.collection.compat.extra.Wrappers
 
 private object KryoRegistrarLoader {
   private[this] val logger = LoggerFactory.getLogger(this.getClass)
@@ -87,8 +87,10 @@ object ScioKryoRegistrar {
   private val logger = LoggerFactory.getLogger(this.getClass)
 }
 
-/** serializers we've written in Scio and want to add to Kryo serialization
- * @see com.spotify.scio.coders.instances.serializers */
+/**
+ * serializers we've written in Scio and want to add to Kryo serialization
+ * @see com.spotify.scio.coders.instances.serializers
+ */
 final private class ScioKryoRegistrar extends IKryoRegistrar {
   import ScioKryoRegistrar.logger
 
@@ -112,6 +114,7 @@ final private class ScioKryoRegistrar extends IKryoRegistrar {
       classOf[Wrappers.JListWrapper[_]],
       new JTraversableSerializer[Any, mutable.Buffer[Any]]
     )
+
     k.forSubclass[SpecificRecordBase](new SpecificAvroSerializer)
     k.forSubclass[GenericRecord](new GenericAvroSerializer)
     k.forSubclass[Message](new ProtobufSerializer)
@@ -122,7 +125,9 @@ final private class ScioKryoRegistrar extends IKryoRegistrar {
     k.forSubclass[Path](new JPathSerializer)
     k.forSubclass[ByteString](new ByteStringSerializer)
     k.forClass(new KVSerializer)
-    k.addDefaultSerializer(classOf[Throwable], new JavaSerializer())
+    k.forClass[io.grpc.Status](new grpc.StatusSerializer)
+    k.forSubclass[io.grpc.StatusRuntimeException](new grpc.StatusRuntimeExceptionSerializer)
+    k.addDefaultSerializer(classOf[Throwable], new JavaSerializer)
     ()
   }
 }

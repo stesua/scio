@@ -23,28 +23,30 @@
 package com.spotify.scio.examples.extra
 
 import com.spotify.scio._
+import org.apache.beam.sdk.metrics.{Counter, Distribution, Gauge}
 
 object MetricsExample {
   // ## Creating metrics
 
   // Create counters to be incremented inside the pipeline
-  val sum = ScioMetrics.counter("sum")
-  val sum2 = ScioMetrics.counter("sum2")
-  val count = ScioMetrics.counter("count")
+  val sum: Counter = ScioMetrics.counter("sum")
+  val sum2: Counter = ScioMetrics.counter("sum2")
+  val count: Counter = ScioMetrics.counter("count")
 
   // Distribution to track min, max, count, sum, mean, with optional namespace
-  val dist = ScioMetrics.distribution("com.spotify.scio.examples.extra.MetricsExample", "dist")
+  val dist: Distribution =
+    ScioMetrics.distribution("com.spotify.scio.examples.extra.MetricsExample", "dist")
 
   // Gauge to track a changing value, with job class as namespace
-  val gauge = ScioMetrics.gauge[MetricsExample.type]("gauge")
+  val gauge: Gauge = ScioMetrics.gauge[MetricsExample.type]("gauge")
 
   def main(cmdlineArgs: Array[String]): Unit = {
     val (sc, args) = ContextAndArgs(cmdlineArgs)
 
     // Create and initialize counters from ScioContext
-    val ctxCount1 = sc.initCounter("ctxcount")
-    val ctxCount2 = sc.initCounter("namespace", "ctxcount")
-    val ctxCount3 = sc.initCounter(count)
+    sc.initCounter("ctxcount")
+    sc.initCounter("namespace", "ctxcount")
+    sc.initCounter(count)
 
     // ## Accessing metrics
     sc.parallelize(1 to 100)

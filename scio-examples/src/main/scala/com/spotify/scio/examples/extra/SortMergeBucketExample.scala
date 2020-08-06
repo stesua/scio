@@ -35,9 +35,10 @@ import org.apache.avro.generic.{GenericData, GenericRecord}
 import org.apache.avro.{JsonProperties, Schema}
 import org.apache.beam.sdk.extensions.smb.AvroSortedBucketIO
 import org.apache.beam.sdk.extensions.smb.BucketMetadata.HashType
+import org.apache.beam.sdk.extensions.smb.TargetParallelism
 import org.apache.beam.sdk.values.TupleTag
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.util.Random
 
 object SortMergeBucketExample {
@@ -75,10 +76,11 @@ object SortMergeBucketWriteExample {
       .saveAsSortedBucket(
         AvroSortedBucketIO
           .write(classOf[Integer], "userId", SortMergeBucketExample.UserDataSchema)
-          .to(args("userOutput"))
+          .to(args("users"))
           .withTempDirectory(sc.options.getTempLocation)
           .withCodec(CodecFactory.snappyCodec())
           .withHashType(HashType.MURMUR3_32)
+          .withFilenamePrefix("example-prefix")
           .withNumBuckets(2)
           .withNumShards(1)
       )
@@ -97,11 +99,12 @@ object SortMergeBucketWriteExample {
       .saveAsSortedBucket(
         AvroSortedBucketIO
           .write[Integer, Account](classOf[Integer], "id", classOf[Account])
-          .to(args("accountOutput"))
+          .to(args("accounts"))
           .withSorterMemoryMb(128)
           .withTempDirectory(sc.options.getTempLocation)
           .withCodec(CodecFactory.snappyCodec())
           .withHashType(HashType.MURMUR3_32)
+          .withFilenamePrefix("part") // Default is "bucket"
           .withNumBuckets(1)
           .withNumShards(1)
       )
@@ -131,15 +134,15 @@ object SortMergeBucketJoinExample {
 
     // #SortMergeBucketExample_join
     sc.sortMergeJoin(
-        classOf[Integer],
-        AvroSortedBucketIO
-          .read(new TupleTag[GenericRecord]("lhs"), SortMergeBucketExample.UserDataSchema)
-          .from(args("lhsInput")),
-        AvroSortedBucketIO
-          .read(new TupleTag[Account]("rhs"), classOf[Account])
-          .from(args("rhsInput"))
-      )
-      .map(mapFn) // Apply mapping function
+      classOf[Integer],
+      AvroSortedBucketIO
+        .read(new TupleTag[GenericRecord]("lhs"), SortMergeBucketExample.UserDataSchema)
+        .from(args("users")),
+      AvroSortedBucketIO
+        .read(new TupleTag[Account]("rhs"), classOf[Account])
+        .from(args("accounts")),
+      TargetParallelism.max()
+    ).map(mapFn) // Apply mapping function
       .saveAsTextFile(args("output"))
     // #SortMergeBucketExample_join
 
@@ -156,36 +159,32 @@ object SortMergeBucketTransformExample {
 
     // #SortMergeBucketExample_transform
     sc.sortMergeTransform(
-        classOf[Integer],
-        AvroSortedBucketIO
-          .read(new TupleTag[GenericRecord]("lhs"), SortMergeBucketExample.UserDataSchema)
-          .from(args("lhsInput")),
-        AvroSortedBucketIO
-          .read(new TupleTag[Account]("rhs"), classOf[Account])
-          .from(args("rhsInput"))
-      )
-      .to(
-        AvroSortedBucketIO
-          .write(classOf[Integer], "userId", classOf[Account])
-          .to(args("output"))
-          .withNumBuckets(2)
-          .withNumShards(1)
-          .withHashType(HashType.MURMUR3_32)
-      )
-      .via {
-        case (key, (users, accounts), outputCollector) =>
-          users.foreach { user =>
-            outputCollector.accept(
-              Account
-                .newBuilder()
-                .setId(key)
-                .setName(user.get("userId").toString)
-                .setType("combinedAmount")
-                .setAmount(accounts.foldLeft(0.0)(_ + _.getAmount))
-                .build()
-            )
-          }
-      }
+      classOf[Integer],
+      AvroSortedBucketIO
+        .read(new TupleTag[GenericRecord]("lhs"), SortMergeBucketExample.UserDataSchema)
+        .from(args("users")),
+      AvroSortedBucketIO
+        .read(new TupleTag[Account]("rhs"), classOf[Account])
+        .from(args("accounts")),
+      TargetParallelism.auto()
+    ).to(
+      AvroSortedBucketIO
+        .transformOutput(classOf[Integer], "id", classOf[Account])
+        .to(args("output"))
+    ).via {
+      case (key, (users, accounts), outputCollector) =>
+        users.foreach { user =>
+          outputCollector.accept(
+            Account
+              .newBuilder()
+              .setId(key)
+              .setName(user.get("userId").toString)
+              .setType("combinedAmount")
+              .setAmount(accounts.foldLeft(0.0)(_ + _.getAmount))
+              .build()
+          )
+        }
+    }
     // #SortMergeBucketExample_transform
 
     sc.run().waitUntilDone()

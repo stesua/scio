@@ -19,7 +19,7 @@ package com.spotify.scio.extra
 
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.MinMaxPriorityQueue
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 /**
  * Utilities for Scala collection library.
@@ -75,7 +75,7 @@ object Collections {
         m(k).add(v)
       }
     }
-    m.mapValues(_.asScala).toMap
+    m.map { case (k, v) => k -> v.asScala }.toMap
   }
 
   /** Enhance Array by adding a `top` method. */

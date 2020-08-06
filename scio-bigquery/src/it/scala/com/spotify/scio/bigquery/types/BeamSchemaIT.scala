@@ -28,12 +28,12 @@ import org.apache.beam.sdk.testing.PAssert
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 object BeamSchemaIT {
   final case class Shakespeare(word: String, word_count: Long, corpus: String, corpus_date: Long)
 
-  val AlienExpected = Set(
+  val AlienExpected: Set[Shakespeare] = Set(
     Shakespeare("alien", 1, "sonnets", 0),
     Shakespeare("alien", 1, "merchantofvenice", 1596),
     Shakespeare("alien", 1, "1kinghenryiv", 1597)
@@ -98,7 +98,7 @@ final class BeamSchemaIT extends AnyFlatSpec with Matchers {
 
     val closedTap = sc
       .parallelize(AlienExpected)
-      .saveAsBigQuery(table, writeDisposition = WriteDisposition.WRITE_TRUNCATE)
+      .saveAsBigQueryTable(table, writeDisposition = WriteDisposition.WRITE_TRUNCATE)
     val result = sc.run().waitUntilDone()
 
     val (readContext, _) = ContextAndArgs(args)

@@ -28,7 +28,7 @@ import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.flatspec.AnyFlatSpec
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.util.Success
 
 // scio-test/it:runMain PopulateTestData to re-populate data for integration tests
@@ -85,7 +85,7 @@ class BigQueryClientIT extends AnyFlatSpec with Matchers {
   }
 
   it should "support missing source tables" in {
-    bq.query.extractLocation("SELECT 6") shouldBe None
+    bq.query.extractLocation("SELECT 6") shouldBe Some("US")
   }
 
   "QueryService.extractTables" should "work with legacy syntax" in {

@@ -21,20 +21,20 @@ import com.spotify.scio.bigquery._
 import com.spotify.scio.testing._
 
 final class StorageBigQueryTornadoesTest extends PipelineSpec {
-  val inData = Seq(
+  val inData: Seq[TableRow] = Seq(
     (1, true),
     (3, true),
     (4, true),
     (4, true)
   ).map(t => TableRow("month" -> t._1, "tornado" -> t._2))
 
-  val expected = Seq((1, 1), (3, 1), (4, 2))
+  val expected: Seq[TableRow] = Seq((1, 1), (3, 1), (4, 2))
     .map(t => TableRow("month" -> t._1, "tornado_count" -> t._2))
 
   "BigQueryTornadoes" should "work" in {
     JobTest[com.spotify.scio.examples.cookbook.StorageBigQueryTornadoes.type]
-      .args("--input=publicdata:samples.gsod", "--output=dataset.table")
-      .input(BigQueryIO("publicdata:samples.gsod"), inData)
+      .args("--input=bigquery-public-data:samples.gsod", "--output=dataset.table")
+      .input(BigQueryIO("bigquery-public-data:samples.gsod"), inData)
       .output(BigQueryIO[TableRow]("dataset.table")) { coll =>
         coll should containInAnyOrder(expected)
       }

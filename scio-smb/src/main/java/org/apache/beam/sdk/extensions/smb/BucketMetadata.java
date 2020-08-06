@@ -39,7 +39,6 @@ import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.transforms.display.DisplayData;
 import org.apache.beam.sdk.transforms.display.DisplayData.Builder;
 import org.apache.beam.sdk.transforms.display.HasDisplayData;
-import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.annotations.VisibleForTesting;
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.base.Preconditions;
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.hash.HashFunction;
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.hash.Hashing;
@@ -79,12 +78,25 @@ public abstract class BucketMetadata<K, V> implements Serializable, HasDisplayDa
 
   @JsonProperty private final HashType hashType;
 
+  @JsonProperty private final String filenamePrefix;
+
   @JsonIgnore private final HashFunction hashFunction;
 
   @JsonIgnore private final Coder<K> keyCoder;
 
   public BucketMetadata(
       int version, int numBuckets, int numShards, Class<K> keyClass, HashType hashType)
+      throws CannotProvideCoderException, NonDeterministicException {
+    this(version, numBuckets, numShards, keyClass, hashType, null);
+  }
+
+  public BucketMetadata(
+      int version,
+      int numBuckets,
+      int numShards,
+      Class<K> keyClass,
+      HashType hashType,
+      String filenamePrefix)
       throws CannotProvideCoderException, NonDeterministicException {
     Preconditions.checkArgument(
         numBuckets > 0 && ((numBuckets & (numBuckets - 1)) == 0),
@@ -98,6 +110,8 @@ public abstract class BucketMetadata<K, V> implements Serializable, HasDisplayDa
     this.hashFunction = hashType.create();
     this.keyCoder = getKeyCoder();
     this.version = version;
+    this.filenamePrefix =
+        filenamePrefix != null ? filenamePrefix : SortedBucketIO.DEFAULT_FILENAME_PREFIX;
   }
 
   @JsonIgnore
@@ -124,6 +138,7 @@ public abstract class BucketMetadata<K, V> implements Serializable, HasDisplayDa
     builder.add(DisplayData.item("hashType", hashType.toString()));
     builder.add(DisplayData.item("keyClass", keyClass));
     builder.add(DisplayData.item("keyCoder", keyCoder.getClass()));
+    builder.add(DisplayData.item("filenamePrefix", filenamePrefix));
   }
 
   /** Enumerated hashing schemes available for an SMB write. */
@@ -175,11 +190,17 @@ public abstract class BucketMetadata<K, V> implements Serializable, HasDisplayDa
     return hashType;
   }
 
+  public String getFilenamePrefix() {
+    return filenamePrefix;
+  }
+
   /* Business logic */
 
   byte[] getKeyBytes(V value) {
-    final K key = extractKey(value);
+    return encodeKeyBytes(extractKey(value));
+  }
 
+  byte[] encodeKeyBytes(K key) {
     if (key == null) {
       return null;
     }
@@ -203,23 +224,25 @@ public abstract class BucketMetadata<K, V> implements Serializable, HasDisplayDa
     return Math.abs(hashFunction.hashBytes(keyBytes).asInt()) % numBuckets;
   }
 
+  int rehashBucket(byte[] keyBytes, int newNumBuckets) {
+    return Math.abs(hashFunction.hashBytes(keyBytes).asInt()) % newNumBuckets;
+  }
+
   ////////////////////////////////////////
   // Serialization
   ////////////////////////////////////////
 
   @JsonIgnore private static ObjectMapper objectMapper = new ObjectMapper();
 
-  @VisibleForTesting
   public static <K, V> BucketMetadata<K, V> from(String src) throws IOException {
     return objectMapper.readerFor(BucketMetadata.class).readValue(src);
   }
 
-  @VisibleForTesting
   public static <K, V> BucketMetadata<K, V> from(InputStream src) throws IOException {
+    // readValue will close the input stream
     return objectMapper.readerFor(BucketMetadata.class).readValue(src);
   }
 
-  @VisibleForTesting
   public static <K, V> void to(BucketMetadata<K, V> bucketMetadata, OutputStream outputStream)
       throws IOException {
 

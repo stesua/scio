@@ -17,24 +17,27 @@
 
 package com.spotify.scio.extra
 
-import java.nio.charset.Charset
-import java.util
-import java.util.{UUID, List => JList}
-import java.lang.{Iterable => JIterable}
+import java.lang.Math.floorMod
+import java.util.{UUID, Iterator => JIterator}
 
-import com.spotify.scio.util.Cache
 import com.spotify.scio.ScioContext
 import com.spotify.scio.annotations.experimental
-import com.spotify.scio.coders.{Coder, CoderMaterializer}
+import com.spotify.scio.coders.Coder
+import com.spotify.scio.extra.sparkey.instances.{
+  CachedStringSparkeyReader,
+  SparkeyReaderInstances,
+  TypedSparkeyReader
+}
+import com.spotify.scio.util.Cache
 import com.spotify.scio.values.{SCollection, SideInput}
 import com.spotify.sparkey.{IndexHeader, LogHeader, SparkeyReader}
-import org.apache.beam.sdk.transforms.{DoFn, Reify, View}
+import org.apache.beam.sdk.io.FileSystems
+import org.apache.beam.sdk.transforms.{DoFn, View}
 import org.apache.beam.sdk.values.PCollectionView
 import org.slf4j.LoggerFactory
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.util.hashing.MurmurHash3
-import java.lang.Math.floorMod
 
 /**
  * Main package for Sparkey side input APIs. Import all.
@@ -119,7 +122,7 @@ import java.lang.Math.floorMod
  *   .toSCollection
  * }}}
  */
-package object sparkey {
+package object sparkey extends SparkeyReaderInstances {
 
   /** Enhanced version of [[ScioContext]] with Sparkey methods. */
   implicit class SparkeyScioContext(private val self: ScioContext) extends AnyVal {
@@ -181,7 +184,7 @@ package object sparkey {
   private def writeToSparkey[K, V](
     uri: SparkeyUri,
     maxMemoryUsage: Long,
-    elements: JIterable[(K, V)]
+    elements: Iterable[(K, V)]
   )(implicit w: SparkeyWritable[K, V], koder: Coder[K], voder: Coder[V]): SparkeyUri = {
     val writer = new SparkeyWriter(uri, maxMemoryUsage)
     val it = elements.iterator
@@ -193,9 +196,7 @@ package object sparkey {
     uri
   }
 
-  /**
-   * Enhanced version of [[com.spotify.scio.values.SCollection SCollection]] with Sparkey methods.
-   */
+  /** Enhanced version of [[com.spotify.scio.values.SCollection SCollection]] with Sparkey methods. */
   implicit class SparkeyPairSCollection[K, V](@transient private val self: SCollection[(K, V)]) {
     private val logger = LoggerFactory.getLogger(this.getClass)
 
@@ -215,53 +216,74 @@ package object sparkey {
       path: String = null,
       maxMemoryUsage: Long = -1,
       numShards: Short = DefaultNumShards
-    )(
-      implicit w: SparkeyWritable[K, V],
+    )(implicit
+      w: SparkeyWritable[K, V],
       koder: Coder[K],
       voder: Coder[V]
     ): SCollection[SparkeyUri] = {
-      val basePath = if (path == null) {
-        val uuid = UUID.randomUUID()
-        self.context.options.getTempLocation + s"/sparkey-$uuid"
-      } else {
-        path
-      }
-
-      val coder = CoderMaterializer.beam(self.context, Coder[JList[(K, V)]])
       require(numShards > 0, s"numShards must be greater than 0, found $numShards")
 
-      numShards match {
-        case 1 =>
-          val uri = SparkeyUri(basePath, self.context.options)
-          require(!uri.exists, s"Sparkey URI $uri already exists")
-          logger.info(s"Saving as Sparkey: $uri")
+      val tempLocation = self.context.options.getTempLocation()
+      val tempPath = s"$tempLocation/sparkey-${UUID.randomUUID}"
+      val basePath = if (path == null) tempPath else path
+      val nonShardedUri = SparkeyUri(basePath, self.context.options)
+      require(!nonShardedUri.exists, s"Sparkey URI $nonShardedUri already exists")
+      val uri = ShardedSparkeyUri(basePath, self.context.options)
+      require(!uri.exists, s"Sparkey URI $uri already exists")
 
-          self.transform { coll =>
-            coll.context
-              .wrap {
-                val view = coll.applyInternal(View.asList[(K, V)]())
-                coll.internal.getPipeline.apply(Reify.viewInGlobalWindow(view, coder))
-              }
-              .map(writeToSparkey(uri, maxMemoryUsage, _))
+      logger.info(s"Saving as Sparkey with $numShards shards: $basePath")
+
+      self.transform { collection =>
+        val shards = collection
+          .groupBy { case (k, _) => floorMod(w.shardHash(k), numShards).toShort }
+          .map {
+            case (shard, xs) =>
+              shard -> writeToSparkey(
+                uri.sparkeyUriForShard(shard, numShards),
+                maxMemoryUsage,
+                xs
+              )
           }
-        case shardCount =>
-          val uri = ShardedSparkeyUri(basePath, self.context.options)
-          require(!uri.exists, s"Sparkey URI $uri already exists")
-          logger.info(s"Saving as Sparkey with $shardCount shards: $uri")
 
-          self.transform { collection =>
-            collection
-              .groupBy { case (k, _) => floorMod(w.shardHash(k), shardCount).toShort }
-              .map {
-                case (shard, xs) =>
-                  writeToSparkey(
-                    uri.sparkeyUriForShard(shard, shardCount),
-                    maxMemoryUsage,
-                    xs.asJava
-                  )
-              }
-              .groupBy(_ => Unit)
-              .map(_ => uri: SparkeyUri)
+        val shardsMap = shards.asMapSideInput
+
+        val uris = shards.context
+          .parallelize((0 until numShards).map(_.toShort))
+          .withSideInputs(shardsMap)
+          .map {
+            case (shard, sideContext) =>
+              sideContext(shardsMap).getOrElse(
+                shard,
+                writeToSparkey(
+                  uri.sparkeyUriForShard(shard, numShards),
+                  maxMemoryUsage,
+                  Iterable.empty[(K, V)]
+                )
+              )
+          }
+          .toSCollection
+
+        uris.reifyAsListInGlobalWindow
+          .map { _ =>
+            if (numShards == 1) {
+              val src = FileSystems
+                .`match`(basePath + "/*")
+                .metadata()
+                .asScala
+                .map(_.resourceId())
+                .sortWith(_.getFilename < _.getFilename)
+                .asJava
+              val dst = SparkeyUri.extensions
+                .map(ext => FileSystems.matchNewResource(s"$basePath$ext", false))
+                .asJava
+
+              FileSystems.rename(src, dst)
+
+              nonShardedUri
+            } else {
+              uri
+            }
+
           }
       }
     }
@@ -272,8 +294,8 @@ package object sparkey {
      * @return A singleton SCollection containing the [[SparkeyUri]] of the saved files.
      */
     @experimental
-    def asSparkey(
-      implicit w: SparkeyWritable[K, V],
+    def asSparkey(implicit
+      w: SparkeyWritable[K, V],
       koder: Coder[K],
       voder: Coder[V]
     ): SCollection[SparkeyUri] = this.asSparkey()
@@ -287,8 +309,8 @@ package object sparkey {
      * @param numShards the number of shards to use when writing the Sparkey file(s).
      */
     @experimental
-    def asSparkeySideInput(numShards: Short = DefaultSideInputNumShards)(
-      implicit w: SparkeyWritable[K, V],
+    def asSparkeySideInput(numShards: Short = DefaultSideInputNumShards)(implicit
+      w: SparkeyWritable[K, V],
       koder: Coder[K],
       voder: Coder[V]
     ): SideInput[SparkeyReader] =
@@ -301,8 +323,8 @@ package object sparkey {
      * required that each key of the input be associated with a single value.
      */
     @experimental
-    def asSparkeySideInput(
-      implicit w: SparkeyWritable[K, V],
+    def asSparkeySideInput(implicit
+      w: SparkeyWritable[K, V],
       koder: Coder[K],
       voder: Coder[V]
     ): SideInput[SparkeyReader] =
@@ -316,8 +338,8 @@ package object sparkey {
      * [[Cache]] will be used to cache reads from the resulting [[SparkeyReader]].
      */
     @experimental
-    def asTypedSparkeySideInput[T](decoder: Array[Byte] => T)(
-      implicit w: SparkeyWritable[K, V],
+    def asTypedSparkeySideInput[T](decoder: Array[Byte] => T)(implicit
+      w: SparkeyWritable[K, V],
       koder: Coder[K],
       voder: Coder[V]
     ): SideInput[TypedSparkeyReader[T]] =
@@ -336,8 +358,8 @@ package object sparkey {
       numShards: Short = DefaultSideInputNumShards
     )(
       decoder: Array[Byte] => T
-    )(
-      implicit w: SparkeyWritable[K, V],
+    )(implicit
+      w: SparkeyWritable[K, V],
       koder: Coder[K],
       voder: Coder[V]
     ): SideInput[TypedSparkeyReader[T]] =
@@ -352,17 +374,15 @@ package object sparkey {
     def asCachedStringSparkeySideInput(
       cache: Cache[String, String],
       numShards: Short = DefaultSideInputNumShards
-    )(
-      implicit w: SparkeyWritable[K, V],
+    )(implicit
+      w: SparkeyWritable[K, V],
       koder: Coder[K],
       voder: Coder[V]
     ): SideInput[CachedStringSparkeyReader] =
       self.asSparkey(numShards = numShards).asCachedStringSparkeySideInput(cache)
   }
 
-  /**
-   * Enhanced version of [[com.spotify.scio.values.SCollection SCollection]] with Sparkey methods.
-   */
+  /** Enhanced version of [[com.spotify.scio.values.SCollection SCollection]] with Sparkey methods. */
   implicit class SparkeySCollection(private val self: SCollection[SparkeyUri]) extends AnyVal {
 
     /**
@@ -422,7 +442,8 @@ package object sparkey {
     def hashKey(arr: Array[Byte]): Short =
       floorMod(MurmurHash3.bytesHash(arr, 1), numShards).toShort
 
-    def hashKey(str: String): Short = hashKey(str.getBytes)
+    def hashKey(str: String): Short =
+      floorMod(MurmurHash3.stringHash(str, 1), numShards).toShort
 
     override def getAsString(key: String): String = {
       val hashed = hashKey(key)
@@ -462,21 +483,8 @@ package object sparkey {
 
     override def close(): Unit = sparkeys.values.foreach(_.close())
 
-    override def iterator(): util.Iterator[SparkeyReader.Entry] =
+    override def iterator(): JIterator[SparkeyReader.Entry] =
       sparkeys.values.map(_.iterator.asScala).reduce(_ ++ _).asJava
-  }
-
-  /** Enhanced version of `SparkeyReader` that mimics a `Map`. */
-  implicit class RichStringSparkeyReader(val self: SparkeyReader) extends Map[String, String] {
-    override def get(key: String): Option[String] =
-      Option(self.getAsString(key))
-    override def iterator: Iterator[(String, String)] =
-      self.iterator.asScala.map(e => (e.getKeyAsString, e.getValueAsString))
-
-    override def +[B1 >: String](kv: (String, B1)): Map[String, B1] =
-      throw new NotImplementedError("Sparkey-backed map; operation not supported.")
-    override def -(key: String): Map[String, String] =
-      throw new NotImplementedError("Sparkey-backed map; operation not supported.")
   }
 
   private class SparkeySideInput(val view: PCollectionView[SparkeyUri])
@@ -486,74 +494,20 @@ package object sparkey {
       context.sideInput(view).getReader
   }
 
-  /**
-   * A wrapper around `SparkeyReader` that includes an in-memory Caffeine cache.
-   */
-  class CachedStringSparkeyReader(val sparkey: SparkeyReader, val cache: Cache[String, String])
-      extends RichStringSparkeyReader(sparkey) {
-    override def get(key: String): Option[String] =
-      Option(cache.get(key, sparkey.getAsString(key)))
-
-    def close(): Unit = {
-      sparkey.close()
-      cache.invalidateAll()
-    }
-  }
-
-  /**
-   * A wrapper around `SparkeyReader` that includes both a decoder (to map from each byte array
-   * to a JVM type) and an optional in-memory cache.
-   */
-  class TypedSparkeyReader[T](
-    val sparkey: SparkeyReader,
-    val decoder: Array[Byte] => T,
-    val cache: Cache[String, T] = Cache.noOp
-  ) extends Map[String, T] {
-    private def stringKeyToBytes(key: String): Array[Byte] = key.getBytes(Charset.defaultCharset())
-
-    private def loadValueFromSparkey(key: String): T = {
-      val value = sparkey.getAsByteArray(stringKeyToBytes(key))
-      if (value == null) {
-        null.asInstanceOf[T]
-      } else {
-        decoder(value)
-      }
-    }
-
-    override def get(key: String): Option[T] =
-      Option(cache.get(key, loadValueFromSparkey(key)))
-
-    override def iterator: Iterator[(String, T)] =
-      sparkey.iterator.asScala.map { e =>
-        val key = e.getKeyAsString
-        val value = cache.get(key).getOrElse(decoder(e.getValue))
-        (key, value)
-      }
-
-    override def +[B1 >: T](kv: (String, B1)): Map[String, B1] =
-      throw new NotImplementedError("Sparkey-backed map; operation not supported.")
-    override def -(key: String): Map[String, T] =
-      throw new NotImplementedError("Sparkey-backed map; operation not supported.")
-
-    def close(): Unit = {
-      sparkey.close()
-      cache.invalidateAll()
-    }
-  }
-
   sealed trait SparkeyWritable[K, V] extends Serializable {
     private[sparkey] def put(w: SparkeyWriter, key: K, value: V): Unit
     private[sparkey] def shardHash(key: K): Int
   }
 
-  implicit val stringSparkeyWritable = new SparkeyWritable[String, String] {
-    def put(w: SparkeyWriter, key: String, value: String): Unit =
-      w.put(key, value)
+  implicit val stringSparkeyWritable: SparkeyWritable[String, String] =
+    new SparkeyWritable[String, String] {
+      def put(w: SparkeyWriter, key: String, value: String): Unit =
+        w.put(key, value)
 
-    def shardHash(key: String): Int = MurmurHash3.stringHash(key, 1)
-  }
+      def shardHash(key: String): Int = MurmurHash3.stringHash(key, 1)
+    }
 
-  implicit val ByteArraySparkeyWritable =
+  implicit val ByteArraySparkeyWritable: SparkeyWritable[Array[Byte], Array[Byte]] =
     new SparkeyWritable[Array[Byte], Array[Byte]] {
       def put(w: SparkeyWriter, key: Array[Byte], value: Array[Byte]): Unit =
         w.put(key, value)

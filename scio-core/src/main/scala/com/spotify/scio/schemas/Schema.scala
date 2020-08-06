@@ -33,7 +33,7 @@ import org.apache.beam.sdk.transforms.SerializableFunction
 import org.apache.beam.sdk.values.{Row, TypeDescriptor}
 import com.twitter.chill.ClosureCleaner
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 import org.apache.beam.sdk.values.TupleTag
 
@@ -61,6 +61,7 @@ object Schema extends JodaInstances with AvroInstances with LowPrioritySchemaDer
     JavaInstances.javaBeanSchema
   implicit def javaEnumSchema[T <: java.lang.Enum[T]: ClassTag]: Schema[T] =
     JavaInstances.javaEnumSchema
+  implicit def jLocalDate: Type[java.time.LocalDate] = JavaInstances.jLocalDate
 
   implicit val stringSchema: Type[String] = ScalaInstances.stringSchema
   implicit val byteSchema: Type[Byte] = ScalaInstances.byteSchema
@@ -238,7 +239,7 @@ private[scio] trait SchemaMacroHelpers {
   val ctx: blackbox.Context
   import ctx.universe._
 
-  val cacheImplicitSchemas = MacroSettings.cacheImplicitSchemas(ctx)
+  val cacheImplicitSchemas: FeatureFlag = MacroSettings.cacheImplicitSchemas(ctx)
 
   def untyped[A: ctx.WeakTypeTag](expr: ctx.Expr[Schema[A]]): ctx.Expr[Schema[A]] =
     ctx.Expr[Schema[A]](ctx.untypecheck(expr.tree.duplicate))

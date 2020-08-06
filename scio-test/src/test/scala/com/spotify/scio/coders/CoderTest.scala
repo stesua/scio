@@ -20,7 +20,7 @@ package com.spotify.scio.coders
 import com.spotify.scio.proto.OuterClassForProto
 import com.spotify.scio.testing.CoderAssertions._
 import org.apache.avro.generic.GenericRecord
-import org.apache.beam.sdk.coders.{Coder => BCoder, CoderRegistry}
+import org.apache.beam.sdk.coders.{CoderException, Coder => BCoder}
 import org.apache.beam.sdk.coders.Coder.NonDeterministicException
 import org.apache.beam.sdk.options.{PipelineOptions, PipelineOptionsFactory}
 import org.scalactic.Equality
@@ -28,7 +28,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.apache.beam.sdk.util.SerializableUtils
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection.{mutable => mut}
 import java.io.ByteArrayInputStream
 import org.apache.beam.sdk.testing.CoderProperties
@@ -53,7 +53,7 @@ case class CaseClassWithExplicitCoder(i: Int, s: String)
 object CaseClassWithExplicitCoder {
   import org.apache.beam.sdk.coders.{AtomicCoder, StringUtf8Coder, VarIntCoder}
   import java.io.{InputStream, OutputStream}
-  implicit val caseClassWithExplicitCoderCoder =
+  implicit val caseClassWithExplicitCoderCoder: Coder[CaseClassWithExplicitCoder] =
     Coder.beam(new AtomicCoder[CaseClassWithExplicitCoder] {
       val sc = StringUtf8Coder.of()
       val ic = VarIntCoder.of()
@@ -77,6 +77,8 @@ object PrivateClass {
   def apply(l: Long): PrivateClass = new PrivateClass(l)
 }
 
+case class UsesPrivateClass(privateClass: PrivateClass)
+
 case class ClassWithProtoEnum(s: String, enum: OuterClassForProto.EnumExample)
 
 @SerialVersionUID(1)
@@ -87,16 +89,11 @@ final case class FirstImplementationWithAnnotation(s: String) extends TraitWithA
 final case class SecondImplementationWithAnnotation(i: Int) extends TraitWithAnnotation
 
 final class CoderTest extends AnyFlatSpec with Matchers {
-  val userId = UserId(Array[Byte](1, 2, 3, 4))
-  val user = User(userId, "johndoe", "johndoe@spotify.com")
+  val userId: UserId = UserId(Array[Byte](1, 2, 3, 4))
+  val user: User = User(userId, "johndoe", "johndoe@spotify.com")
 
   def materialize[T](coder: Coder[T]): BCoder[T] =
-    CoderMaterializer
-      .beam(
-        CoderRegistry.createDefault(),
-        PipelineOptionsFactory.create(),
-        coder
-      )
+    CoderMaterializer.beam(PipelineOptionsFactory.create(), coder)
 
   "Coders" should "support primitives" in {
     1 coderShould roundtrip()
@@ -192,7 +189,7 @@ final class CoderTest extends AnyFlatSpec with Matchers {
     val bnc = CoderMaterializer.beamWithDefault[Nothing](Coder[Nothing])
     bnc
       .asInstanceOf[BCoder[Any]]
-      .encode(null, null) shouldBe (()) // make sure the code does nothing
+      .encode(null, null) shouldBe () // make sure the code does nothing
     an[IllegalStateException] should be thrownBy {
       bnc.decode(new ByteArrayInputStream(Array()))
     }
@@ -200,7 +197,7 @@ final class CoderTest extends AnyFlatSpec with Matchers {
 
   it should "support Java collections" in {
     import java.util.{List => jList, Map => jMap, ArrayList => jArrayList}
-    val is = (1 to 10)
+    val is = 1 to 10
     val s: jList[String] = is.map(_.toString).asJava
     val m: jMap[String, Int] = is
       .map(v => v.toString -> v)
@@ -221,7 +218,7 @@ final class CoderTest extends AnyFlatSpec with Matchers {
       new Address("street1", "street2", "city", "state", "01234", "Sweden")
     val user = new AvUser(1, "lastname", "firstname", "email@foobar.com", accounts.asJava, address)
 
-    val eq = new Equality[GenericRecord] {
+    val eq: Equality[GenericRecord] = new Equality[GenericRecord] {
       def areEqual(a: GenericRecord, b: Any): Boolean =
         a.toString === b.toString // YOLO
     }
@@ -285,6 +282,7 @@ final class CoderTest extends AnyFlatSpec with Matchers {
     // Message
     // ByteString
     BigDecimal("1234") coderShould notFallback()
+    new java.sql.Timestamp(1) coderShould notFallback()
     new Instant coderShould notFallback()
     new LocalDate coderShould notFallback()
     new LocalTime coderShould notFallback()
@@ -333,13 +331,12 @@ final class CoderTest extends AnyFlatSpec with Matchers {
         .build()
 
     implicit val coderRow = Coder.row(beamSchema)
-    val rows =
-      List[(jInt, jString, jDouble)]((1, "row", 1.0), (2, "row", 2.0), (3, "row", 3.0))
-        .map {
-          case (a, b, c) =>
-            Row.withSchema(beamSchema).addValues(a, b, c).build()
-        }
-        .foreach(r => r coderShould notFallback())
+    List[(jInt, jString, jDouble)]((1, "row", 1.0), (2, "row", 2.0), (3, "row", 3.0))
+      .map {
+        case (a, b, c) =>
+          Row.withSchema(beamSchema).addValues(a, b, c).build()
+      }
+      .foreach(r => r coderShould notFallback())
   }
 
   it should "Serialize objects" in {
@@ -361,6 +358,11 @@ final class CoderTest extends AnyFlatSpec with Matchers {
   it should "support classes with private constructors" in {
     Coder.gen[PrivateClass]
     PrivateClass(42L) coderShould fallback()
+  }
+
+  it should "support classes that contain classes with private constructors" in {
+    Coder.gen[UsesPrivateClass]
+    UsesPrivateClass(PrivateClass(1L)) coderShould notFallback()
   }
 
   it should "not derive Coders for org.apache.beam.sdk.values.Row" in {
@@ -501,7 +503,7 @@ final class CoderTest extends AnyFlatSpec with Matchers {
     val ok: (String, String) = ("foo", "bar")
     val nok: (String, String) = (null, "bar")
     ok coderShould roundtrip()
-    val caught = intercept[RuntimeException] {
+    val caught = intercept[CoderException] {
       nok coderShould roundtrip()
     }
 
@@ -592,7 +594,7 @@ object RecursiveCase {
   case object StringType extends SampleFieldType
   case class RecordType(fields: List[SampleField]) extends SampleFieldType
 
-  implicit val coderSampleFieldType = Coder.gen[SampleField]
+  implicit val coderSampleFieldType = Coder.gen[SampleField] // scalafix:ok
 
   case class Recursive(a: Int, rec: Option[Recursive] = None)
 }

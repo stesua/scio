@@ -19,7 +19,7 @@ package org.apache.beam.sdk.extensions.smb;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import java.util.Objects;
+import com.google.protobuf.ByteString;
 import org.apache.beam.sdk.coders.CannotProvideCoderException;
 import org.apache.beam.sdk.coders.Coder.NonDeterministicException;
 import org.apache.beam.sdk.transforms.display.DisplayData;
@@ -41,9 +41,17 @@ public class TensorFlowBucketMetadata<K> extends BucketMetadata<K, Example> {
       int numShards,
       Class<K> keyClass,
       BucketMetadata.HashType hashType,
-      String keyField)
+      String keyField,
+      String filenamePrefix)
       throws CannotProvideCoderException, NonDeterministicException {
-    this(BucketMetadata.CURRENT_VERSION, numBuckets, numShards, keyClass, hashType, keyField);
+    this(
+        BucketMetadata.CURRENT_VERSION,
+        numBuckets,
+        numShards,
+        keyClass,
+        hashType,
+        keyField,
+        filenamePrefix);
   }
 
   @JsonCreator
@@ -53,9 +61,10 @@ public class TensorFlowBucketMetadata<K> extends BucketMetadata<K, Example> {
       @JsonProperty("numShards") int numShards,
       @JsonProperty("keyClass") Class<K> keyClass,
       @JsonProperty("hashType") BucketMetadata.HashType hashType,
-      @JsonProperty("keyField") String keyField)
+      @JsonProperty("keyField") String keyField,
+      @JsonProperty(value = "filenamePrefix", required = false) String filenamePrefix)
       throws CannotProvideCoderException, NonDeterministicException {
-    super(version, numBuckets, numShards, keyClass, hashType);
+    super(version, numBuckets, numShards, keyClass, hashType, filenamePrefix);
     this.keyField = keyField;
   }
 
@@ -67,6 +76,14 @@ public class TensorFlowBucketMetadata<K> extends BucketMetadata<K, Example> {
       BytesList values = feature.getBytesList();
       Preconditions.checkState(values.getValueCount() == 1, "Number of feature in keyField != 1");
       return (K) values.getValue(0).toByteArray();
+    } else if (getKeyClass() == ByteString.class) {
+      BytesList values = feature.getBytesList();
+      Preconditions.checkState(values.getValueCount() == 1, "Number of feature in keyField != 1");
+      return (K) values.getValue(0);
+    } else if (getKeyClass() == String.class) {
+      BytesList values = feature.getBytesList();
+      Preconditions.checkState(values.getValueCount() == 1, "Number of feature in keyField != 1");
+      return (K) values.getValue(0).toStringUtf8();
     } else if (getKeyClass() == Long.class) {
       Int64List values = feature.getInt64List();
       Preconditions.checkState(values.getValueCount() == 1, "Number of feature in keyField != 1");

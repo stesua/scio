@@ -28,9 +28,9 @@ import org.joda.time.{DateTime, LocalDate, LocalTime}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
-class ToTableRowTest extends AnyFlatSpec with Matchers with ToTableRow {
+class ToTableRowTest extends AnyFlatSpec with Matchers {
   val expectedOutput: TableRow = new TableRow()
     .set("booleanField", true)
     .set("intField", 1)
@@ -38,12 +38,12 @@ class ToTableRowTest extends AnyFlatSpec with Matchers with ToTableRow {
     .set("longField", 1L)
     .set("doubleField", 1.0)
     .set("floatField", 1f)
-    .set("bytesField", BaseEncoding.base64Url().encode("someBytes".getBytes))
+    .set("bytesField", BaseEncoding.base64().encode("%20cフーバー".getBytes))
     .set("unionField", "someUnion")
     .set("arrayField", List(new TableRow().set("nestedField", "nestedValue")).asJava)
     .set("mapField", List(new TableRow().set("key", "mapKey").set("value", 1.0d)).asJava)
     .set("enumField", Kind.FOO.toString)
-    .set("fixedField", BaseEncoding.base64Url().encode("1234567890123456".getBytes))
+    .set("fixedField", BaseEncoding.base64().encode("%20cフーバー".getBytes))
 
   "ToTableRow" should "convert a SpecificRecord to TableRow" in {
     val specificRecord = AvroExample
@@ -54,7 +54,7 @@ class ToTableRowTest extends AnyFlatSpec with Matchers with ToTableRow {
       .setLongField(1L)
       .setIntField(1)
       .setFloatField(1f)
-      .setBytesField(ByteBuffer.wrap(ByteString.copyFromUtf8("someBytes").toByteArray))
+      .setBytesField(ByteBuffer.wrap(ByteString.copyFromUtf8("%20cフーバー").toByteArray))
       .setArrayField(List(NestedAvro.newBuilder().setNestedField("nestedValue").build()).asJava)
       .setUnionField("someUnion")
       .setMapField(
@@ -62,10 +62,10 @@ class ToTableRowTest extends AnyFlatSpec with Matchers with ToTableRow {
           .asInstanceOf[java.util.Map[java.lang.CharSequence, java.lang.Double]]
       )
       .setEnumField(Kind.FOO)
-      .setFixedField(new fixedType("1234567890123456".getBytes()))
+      .setFixedField(new fixedType("%20cフーバー".getBytes()))
       .build()
 
-    toTableRow(specificRecord) shouldEqual expectedOutput
+    AvroConverters.toTableRow(specificRecord) shouldEqual expectedOutput
   }
 
   it should "convert a GenericRecord to TableRow" in {
@@ -81,7 +81,7 @@ class ToTableRowTest extends AnyFlatSpec with Matchers with ToTableRow {
     genericRecord.put("floatField", 1f)
     genericRecord.put(
       "bytesField",
-      ByteBuffer.wrap(ByteString.copyFromUtf8("someBytes").toByteArray)
+      ByteBuffer.wrap(ByteString.copyFromUtf8("%20cフーバー").toByteArray)
     )
     genericRecord.put("arrayField", List(nestedAvro).asJava)
     genericRecord.put("unionField", "someUnion")
@@ -91,26 +91,26 @@ class ToTableRowTest extends AnyFlatSpec with Matchers with ToTableRow {
         .asInstanceOf[java.util.Map[java.lang.CharSequence, java.lang.Double]]
     )
     genericRecord.put("enumField", Kind.FOO)
-    genericRecord.put("fixedField", new fixedType("1234567890123456".getBytes()))
+    genericRecord.put("fixedField", new fixedType("%20cフーバー".getBytes()))
 
-    toTableRow(genericRecord) shouldEqual expectedOutput
+    AvroConverters.toTableRow(genericRecord) shouldEqual expectedOutput
   }
 
-  val date = LocalDate.parse("2019-10-29")
+  val date: LocalDate = LocalDate.parse("2019-10-29")
   val timeMillis: LocalTime = LocalTime.parse("01:24:52.211")
   val timeMicros = 1234L
   val timestampMillis: DateTime = DateTime.parse("2019-10-29T05:24:52.215")
   val timestampMicros = 4325L
   val decimal = new JBigDecimal("3.14")
 
-  val expectedLogicalTypeOutput = new TableRow()
+  val expectedLogicalTypeOutput: TableRow = new TableRow()
     .set("intField", 1)
     .set("stringField", "someString")
     .set("booleanField", true)
     .set("longField", 1L)
     .set("doubleField", 1.0)
     .set("floatField", 1f)
-    .set("bytesField", BaseEncoding.base64Url().encode("someBytes".getBytes))
+    .set("bytesField", BaseEncoding.base64().encode("%20cフーバー".getBytes))
     .set("dateField", "2019-10-29")
     .set("decimalField", decimal.toString)
     .set("timeMillisField", "01:24:52.211000")
@@ -127,7 +127,7 @@ class ToTableRowTest extends AnyFlatSpec with Matchers with ToTableRow {
       .setLongField(1L)
       .setIntField(1)
       .setFloatField(1f)
-      .setBytesField(ByteBuffer.wrap(ByteString.copyFromUtf8("someBytes").toByteArray))
+      .setBytesField(ByteBuffer.wrap(ByteString.copyFromUtf8("%20cフーバー").toByteArray))
       .setDateField(date)
       .setTimeMillisField(timeMillis)
       .setTimeMicrosField(timeMicros)
@@ -136,6 +136,6 @@ class ToTableRowTest extends AnyFlatSpec with Matchers with ToTableRow {
       .setDecimalField(decimal)
       .build()
 
-    toTableRow(specificRecord) shouldEqual expectedLogicalTypeOutput
+    AvroConverters.toTableRow(specificRecord) shouldEqual expectedLogicalTypeOutput
   }
 }

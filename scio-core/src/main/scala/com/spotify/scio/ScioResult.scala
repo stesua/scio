@@ -29,10 +29,9 @@ import org.apache.beam.sdk.metrics.{DistributionResult, GaugeResult}
 import org.apache.beam.sdk.util.MimeTypes
 import org.apache.beam.sdk.{PipelineResult, metrics => beam}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 import scala.util.Try
-import scala.concurrent.Future
 
 /** Represent a Beam runner specific result. */
 trait RunnerResult {
@@ -62,16 +61,6 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
 
   /** Whether this is the result of a test. */
   def isTest: Boolean = false
-
-  @deprecated("ScioResult is guaranteed to be completed in Scio > 0.8.0", since = "0.8.0")
-  def isCompleted: Boolean = true
-
-  @deprecated(
-    "Scio 0.8 does not use Futures anymore. You can simply use the 'state' directly to get a State",
-    since = "0.8.0"
-  )
-  def finalState: Future[State] =
-    Future.successful(state)
 
   /** Pipeline's current state. */
   def state: State = Try(internal.getState).getOrElse(State.UNKNOWN)
@@ -159,7 +148,9 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
 
   /** Retrieve aggregated values of all counters from the pipeline. */
   lazy val allCounters: Map[beam.MetricName, MetricValue[Long]] =
-    allCountersAtSteps.mapValues(reduceMetricValues[Long])
+    allCountersAtSteps.iterator.map {
+      case (k, v) => (k, reduceMetricValues[Long](v))
+    }.toMap
 
   /** Retrieve aggregated values of all distributions from the pipeline. */
   lazy val allDistributions: Map[beam.MetricName, MetricValue[beam.DistributionResult]] = {
@@ -172,7 +163,9 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
           math.max(x.getMax, y.getMax)
         )
       }
-    allDistributionsAtSteps.mapValues(reduceMetricValues[beam.DistributionResult])
+    allDistributionsAtSteps.iterator.map {
+      case (k, v) => (k, reduceMetricValues[beam.DistributionResult](v))
+    }.toMap
   }
 
   /** Retrieve latest values of all gauges from the pipeline. */
@@ -181,7 +174,9 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
       // sum by taking the latest
       if (x.getTimestamp isAfter y.getTimestamp) x else y
     }
-    allGaugesAtSteps.mapValues(reduceMetricValues[beam.GaugeResult])
+    allGaugesAtSteps.iterator.map {
+      case (k, v) => (k, reduceMetricValues[beam.GaugeResult](v))
+    }.toMap
   }
 
   /** Retrieve per step values of all counters from the pipeline. */
@@ -208,12 +203,15 @@ abstract class ScioResult private[scio] (val internal: PipelineResult) {
   ): Map[beam.MetricName, Map[String, MetricValue[T]]] =
     results
       .groupBy(_.getName)
-      .mapValues { xs =>
-        val m: Map[String, MetricValue[T]] = xs.map { r =>
-          r.getKey.stepName -> MetricValue(r.getAttempted, Try(r.getCommitted).toOption)
-        }(scala.collection.breakOut)
-        m
+      .iterator
+      .map {
+        case (k, xs) =>
+          val m: Map[String, MetricValue[T]] = xs.iterator.map { r =>
+            r.getKey.stepName -> MetricValue(r.getAttempted, Try(r.getCommitted).toOption)
+          }.toMap
+          (k, m)
       }
+      .toMap
 
   private def reduceMetricValues[T: Semigroup](xs: Map[String, MetricValue[T]]) = {
     val sg = Semigroup.from[MetricValue[T]] { (x, y) =>

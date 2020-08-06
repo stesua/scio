@@ -37,8 +37,10 @@ import org.apache.beam.sdk.transforms.windowing.{
 import org.apache.beam.sdk.values.KV
 import org.joda.time.{DateTimeConstants, Duration, Instant}
 
-import scala.collection.JavaConverters._
+import scala.collection.mutable
+import scala.jdk.CollectionConverters._
 import com.spotify.scio.coders.Coder
+import com.spotify.scio.schemas.Schema
 
 class SCollectionTest extends PipelineSpec {
   "SCollection" should "support applyTransform()" in {
@@ -54,6 +56,15 @@ class SCollectionTest extends PipelineSpec {
     def processElement(c: DoFn[Int, KV[Int, String]]#ProcessContext): Unit = {
       val x = c.element()
       c.output(KV.of(x, x.toString))
+    }
+  }
+
+  it should "set schema" in {
+    runWithContext { sc =>
+      val empty = sc.empty[(Int, Int)]()
+      empty.keyBy(_._1)
+
+      empty.setSchema(Schema[(Int, Int)])
     }
   }
 
@@ -192,6 +203,25 @@ class SCollectionTest extends PipelineSpec {
     }
   }
 
+  it should "support aggregate() with mutation" in {
+    runWithContext { sc =>
+      val p = sc
+        .parallelize(1 to 100)
+        .aggregate(mutable.Buffer.empty[Int])(
+          (xs, x) => {
+            xs.append(x)
+            xs
+          },
+          (xs, ys) => {
+            xs.appendAll(ys)
+            xs
+          }
+        )
+        .map(_.sorted)
+      p should containSingleValue(mutable.Buffer(1 to 100: _*))
+    }
+  }
+
   it should "support collect" in {
     runWithContext { sc =>
       val records = Seq(
@@ -208,6 +238,22 @@ class SCollectionTest extends PipelineSpec {
     runWithContext { sc =>
       val p = sc.parallelize(1 to 100).combine(_.toDouble)(_ + _)(_ + _)
       p should containSingleValue(5050.0)
+    }
+  }
+
+  it should "support combine() with mutation" in {
+    runWithContext { sc =>
+      val p = sc
+        .parallelize(1 to 100)
+        .combine(mutable.Buffer(_)) { (xs, x) =>
+          xs.append(x)
+          xs
+        } { (xs, ys) =>
+          xs.appendAll(ys)
+          xs
+        }
+        .map(_.sorted)
+      p should containSingleValue(mutable.Buffer(1 to 100: _*))
     }
   }
 
@@ -291,10 +337,38 @@ class SCollectionTest extends PipelineSpec {
     }
   }
 
+  it should "support fold() with mutation" in {
+    runWithContext { sc =>
+      val p = sc
+        .parallelize(1 to 100)
+        .map(mutable.Buffer(_))
+        .fold(mutable.Buffer.empty) { (xs, ys) =>
+          xs.appendAll(ys)
+          xs
+        }
+        .map(_.sorted)
+      p should containSingleValue(mutable.Buffer(1 to 100: _*))
+    }
+  }
+
   it should "support groupBy()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(1, 2, 3, 4)).groupBy(_ % 2).mapValues(_.toSet)
       p should containInAnyOrder(Seq((0, Set(2, 4)), (1, Set(1, 3))))
+    }
+  }
+
+  it should "support groupMap()" in {
+    runWithContext { sc =>
+      val p = sc.parallelize(Seq(1, 2)).groupMap(_ + 1)(_ + 1)
+      p should containInAnyOrder(Seq((2, Iterable(2)), (3, Iterable(3))))
+    }
+  }
+
+  it should "support groupMapReduce()" in {
+    runWithContext { sc =>
+      val p = sc.parallelize(Seq(1, 2, 3, 4)).groupMapReduce(_ % 2)(_ + _)
+      p should containInAnyOrder(Seq((0, 6), (1, 4)))
     }
   }
 
@@ -501,6 +575,20 @@ class SCollectionTest extends PipelineSpec {
     }
   }
 
+  it should "#2745: not throw an exception for valid values" in runWithContext { sc =>
+    val p =
+      sc.parallelizeTimestamped(Seq("a", "b", "c", "d", "e", "f"), (0 to 5).map(new Instant(_)))
+    val r = p
+      .withSlidingWindows(
+        size = Duration.standardHours(24),
+        period = Duration.standardHours(25),
+        offset = Duration.standardHours(23)
+      )
+      .top(10)
+      .map(_.toSet)
+    r shouldNot beEmpty
+  }
+
   it should "support withSessionWindows()" in {
     runWithContext { sc =>
       val p =
@@ -670,4 +758,51 @@ class SCollectionTest extends PipelineSpec {
       count should containSingleValue(0L)
     }
   }
+
+  it should "reify as List" in {
+    runWithContext { sc =>
+      val other = sc.parallelize(Seq(1))
+      val coll = sc.parallelize(Seq(1, 2)).reifySideInputAsValues(other.asListSideInput)
+      coll should containInAnyOrder(Seq((1, Seq(1)), (2, Seq(1))))
+    }
+  }
+
+  it should "reify as Iterable" in {
+    runWithContext { sc =>
+      val other = sc.parallelize(Seq(1))
+      val coll = sc.parallelize(Seq(1, 2)).reifySideInputAsValues(other.asIterableSideInput)
+      coll should containInAnyOrder(Seq((1, Iterable(1)), (2, Iterable(1))))
+    }
+  }
+
+  it should "reify as Map" in {
+    runWithContext { sc =>
+      val other = sc.parallelize(Seq((1, 1)))
+      val coll = sc.parallelize(Seq(1, 2)).reifySideInputAsValues(other.asMapSideInput)
+      coll should containInAnyOrder(Seq((1, Map(1 -> 1)), (2, Map(1 -> 1))))
+    }
+  }
+
+  it should "reify as Multimap" in {
+    runWithContext { sc =>
+      val other = sc.parallelize(Seq((1, 1)))
+      val coll = sc.parallelize(Seq(1, 2)).reifySideInputAsValues(other.asMultiMapSideInput)
+      coll should containInAnyOrder(Seq((1, Map(1 -> Iterable(1))), (2, Map(1 -> Iterable(1)))))
+    }
+  }
+
+  it should "reify in Golbal Window as List" in {
+    runWithContext { sc =>
+      val coll = sc.parallelize(Seq(1)).reifyAsListInGlobalWindow
+      coll should containInAnyOrder(Seq(Seq(1)))
+    }
+  }
+
+  it should "reify empty in Golbal Window as List" in {
+    runWithContext { sc =>
+      val coll = sc.empty[Int]().reifyAsListInGlobalWindow
+      coll should containInAnyOrder(Seq(Seq.empty[Int]))
+    }
+  }
+
 }

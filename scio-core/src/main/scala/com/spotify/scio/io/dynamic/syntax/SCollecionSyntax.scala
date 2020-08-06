@@ -30,7 +30,7 @@ import org.apache.beam.sdk.io.AvroIO.RecordFormatter
 import org.apache.beam.sdk.io.{Compression, FileIO}
 import org.apache.beam.sdk.{io => beam}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 import java.util.{HashMap => JHashMap}
 
@@ -57,9 +57,7 @@ final class DynamicSpecificRecordSCollectionOps[T <: SpecificRecord](
 ) extends AnyVal {
   import DynamicSCollectionOps.writeDynamic
 
-  /**
-   * Save this SCollection as Avro files specified by the destination function.
-   */
+  /** Save this SCollection as Avro files specified by the destination function. */
   def saveAsDynamicAvroFile(
     path: String,
     numShards: Int = 0,
@@ -100,9 +98,7 @@ final class DynamicGenericRecordSCollectionOps[T <: GenericRecord](private val s
     extends AnyVal {
   import DynamicSCollectionOps.writeDynamic
 
-  /**
-   * Save this SCollection as Avro files specified by the destination function.
-   */
+  /** Save this SCollection as Avro files specified by the destination function. */
   def saveAsDynamicAvroFile(
     path: String,
     schema: Schema,
@@ -121,10 +117,13 @@ final class DynamicGenericRecordSCollectionOps[T <: GenericRecord](private val s
       val nm = new JHashMap[String, AnyRef]()
       nm.putAll(metadata.asJava)
       val sink = beam.AvroIO
-        .sinkViaGenericRecords(schema, new RecordFormatter[T] {
-          override def formatRecord(element: T, schema: Schema): GenericRecord =
-            element
-        })
+        .sinkViaGenericRecords(
+          schema,
+          new RecordFormatter[T] {
+            override def formatRecord(element: T, schema: Schema): GenericRecord =
+              element
+          }
+        )
         .withCodec(codec)
         .withMetadata(nm)
       val write =
@@ -145,9 +144,7 @@ final class DynamicGenericRecordSCollectionOps[T <: GenericRecord](private val s
 final class DynamicSCollectionOps[T](private val self: SCollection[T]) extends AnyVal {
   import DynamicSCollectionOps.writeDynamic
 
-  /**
-   * Save this SCollection as text files specified by the destination function.
-   */
+  /** Save this SCollection as text files specified by the destination function. */
   def saveAsDynamicTextFile(
     path: String,
     numShards: Int = 0,
@@ -197,10 +194,13 @@ final class DynamicProtobufSCollectionOps[T <: Message](private val self: SColle
       )
     } else {
       val sink = beam.AvroIO
-        .sinkViaGenericRecords(avroSchema, new RecordFormatter[T] {
-          override def formatRecord(element: T, schema: Schema): GenericRecord =
-            AvroBytesUtil.encode(elemCoder, element)
-        })
+        .sinkViaGenericRecords(
+          avroSchema,
+          new RecordFormatter[T] {
+            override def formatRecord(element: T, schema: Schema): GenericRecord =
+              AvroBytesUtil.encode(elemCoder, element)
+          }
+        )
         .withCodec(codec)
         .withMetadata(nm)
       val write =

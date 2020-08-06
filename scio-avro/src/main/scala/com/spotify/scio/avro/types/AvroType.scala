@@ -21,7 +21,6 @@ import org.apache.avro.Schema
 import org.apache.avro.generic.GenericRecord
 
 import scala.annotation.{compileTimeOnly, StaticAnnotation}
-import scala.language.experimental.macros
 import scala.reflect.runtime.universe._
 
 /**
@@ -80,7 +79,9 @@ object AvroType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
-  @compileTimeOnly("enable macro paradise to expand macro annotations")
+  @compileTimeOnly(
+    "enable macro paradise (2.12) or -Ymacro-annotations (2.13) to expand macro annotations"
+  )
   class fromSchema(schema: String) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.schemaImpl
   }
@@ -121,7 +122,9 @@ object AvroType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
-  @compileTimeOnly("enable macro paradise to expand macro annotations")
+  @compileTimeOnly(
+    "enable macro paradise (2.12) or -Ymacro-annotations (2.13) to expand macro annotations"
+  )
   class fromPath(folderGlob: String) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.pathImpl
   }
@@ -148,7 +151,9 @@ object AvroType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
-  @compileTimeOnly("enable macro paradise to expand macro annotations")
+  @compileTimeOnly(
+    "enable macro paradise (2.12) or -Ymacro-annotations (2.13) to expand macro annotations"
+  )
   class fromSchemaFile(schemaFile: String) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.schemaFileImpl
   }
@@ -173,7 +178,9 @@ object AvroType {
    * Rule of thumb is to only add new fields, without removing the old ones.
    * @group annotation
    */
-  @compileTimeOnly("enable macro paradise to expand macro annotations")
+  @compileTimeOnly(
+    "enable macro paradise (2.12) or -Ymacro-annotations (2.13) to expand macro annotations"
+  )
   class toSchema extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.toSchemaImpl
   }
@@ -206,9 +213,7 @@ object AvroType {
    */
   trait HasAvroAnnotation
 
-  /**
-   * Generate [[org.apache.avro.Schema Schema]] for a case class.
-   */
+  /** Generate [[org.apache.avro.Schema Schema]] for a case class. */
   def schemaOf[T: TypeTag]: Schema = SchemaProvider.schemaOf[T]
 
   /**

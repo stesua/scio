@@ -31,7 +31,7 @@ import org.apache.beam.sdk.transforms.PTransform
 import org.apache.beam.sdk.values.{PInput, POutput}
 import org.apache.beam.sdk.{Pipeline, PipelineResult}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 /** Represent a Dataflow runner specific result. */
 class DataflowResult(val internal: DataflowPipelineJob) extends RunnerResult {
@@ -93,16 +93,15 @@ object DataflowResult {
     // AppliedPTransform#getUserName, e.g. flatMap@MyJob.scala:12, to Dataflow service generated
     // transform names, e.g. s12
     val transformStepNames: Map[AppliedPTransform[_, _, _], String] =
-      job.getPipelineDescription.getExecutionPipelineStage.asScala
-        .flatMap { s =>
-          if (s.getComponentTransform != null) {
-            s.getComponentTransform.asScala.map { t =>
-              newAppliedPTransform(t.getUserName) -> t.getName
-            }
-          } else {
-            Nil
+      job.getPipelineDescription.getExecutionPipelineStage.asScala.iterator.flatMap { s =>
+        if (s.getComponentTransform != null) {
+          s.getComponentTransform.asScala.map { t =>
+            newAppliedPTransform(t.getUserName) -> t.getName
           }
-        }(scala.collection.breakOut)
+        } else {
+          Nil
+        }
+      }.toMap
 
     val client = DataflowClient.create(options)
     val internal =

@@ -21,7 +21,7 @@ package com.spotify.scio.bigquery.syntax
 import com.spotify.scio.bigquery.{Date, DateTime, TableRow, Time, Timestamp}
 import org.joda.time.{Instant, LocalDate, LocalDateTime, LocalTime}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import scala.util.Try
 
@@ -74,7 +74,7 @@ final class TableRowOps(private val r: TableRow) extends AnyVal {
     this.getValueOpt(name, v => DateTime.parse(v.toString))
 
   def getRepeated(name: AnyRef): Seq[AnyRef] =
-    this.getValue(name, _.asInstanceOf[java.util.List[AnyRef]].asScala, null)
+    this.getValue(name, x => x.asInstanceOf[java.util.List[AnyRef]].iterator().asScala.toSeq, null)
 
   def getRecord(name: AnyRef): Map[String, AnyRef] =
     r.get(name).asInstanceOf[java.util.Map[String, AnyRef]].asScala.toMap

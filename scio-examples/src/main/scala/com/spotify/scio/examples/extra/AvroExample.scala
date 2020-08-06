@@ -32,7 +32,7 @@ import com.spotify.scio.io.ClosedTap
 import org.apache.avro.Schema
 import org.apache.avro.generic.{GenericData, GenericRecord}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 object AvroExample {
   @AvroType.fromSchema("""{
@@ -127,12 +127,12 @@ object AvroExample {
 
   private def genericIn(sc: ScioContext, args: Args): ClosedTap[String] = {
     implicit def genericCoder = Coder.avroGenericRecordCoder(schema)
-    sc.avroFile[GenericRecord](args("input"), schema)
+    sc.avroFile(args("input"), schema)
       .map(_.toString)
       .saveAsTextFile(args("output"))
   }
 
-  val schema = {
+  val schema: Schema = {
     def f(name: String, tpe: Schema.Type) =
       new Schema.Field(
         name,

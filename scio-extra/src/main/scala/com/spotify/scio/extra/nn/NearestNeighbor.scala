@@ -22,7 +22,7 @@ import breeze.math._
 import info.debatty.java.lsh.LSHSuperBit
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.collect.MinMaxPriorityQueue
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection.mutable.{Buffer => MBuffer, Map => MMap, Set => MSet}
 import scala.reflect.ClassTag
 import scala.{specialized => sp}
@@ -167,7 +167,7 @@ private class MatrixNNBuilder[
       keyToId.toMap,
       idToKey.toArray,
       vectors.toArray,
-      DenseMatrix(vectors.map(_.toArray): _*)
+      DenseMatrix(vectors.iterator.map(_.toArray).toSeq: _*)
     )
 }
 

@@ -31,7 +31,6 @@ import org.tensorflow._
 import org.tensorflow.example.Example
 import scala.io.Source
 
-//scalastyle:off line.size.limit
 private[tensorflow] object TFSavedSpec {
   case class Iris(
     sepalLength: Option[Double],
@@ -56,7 +55,7 @@ object TFSavedRawJob {
       .tags(Collections.singletonList("serve"))
       .build
     val settings =
-      sc.parallelize(List(Source.fromURL(args("settings")).getLines.mkString))
+      sc.parallelize(List(Source.fromURL(args("settings")).getLines().mkString))
 
     val collection =
       sc.parallelize(
@@ -87,7 +86,7 @@ object TFSavedTensorsMapInputDefaultSigDefJob {
       .tags(Collections.singletonList("serve"))
       .build
     val settings =
-      sc.parallelize(List(Source.fromURL(args("settings")).getLines.mkString))
+      sc.parallelize(List(Source.fromURL(args("settings")).getLines().mkString))
 
     val collection =
       sc.parallelize(
@@ -122,7 +121,7 @@ object TFSavedTensorsMapInputPredictSigDefJob {
       .tags(Collections.singletonList("serve"))
       .build
     val settings =
-      sc.parallelize(List(Source.fromURL(args("settings")).getLines.mkString))
+      sc.parallelize(List(Source.fromURL(args("settings")).getLines().mkString))
 
     val collection =
       sc.parallelize(
@@ -154,7 +153,7 @@ object TFSavedTensorsMapInputPredictSigDefSpecifiedFetchOpsJob {
       .tags(Collections.singletonList("serve"))
       .build
     val settings =
-      sc.parallelize(List(Source.fromURL(args("settings")).getLines.mkString))
+      sc.parallelize(List(Source.fromURL(args("settings")).getLines().mkString))
 
     val collection =
       sc.parallelize(
@@ -189,7 +188,7 @@ object TFSavedExampleInputDefaultSigDefJob {
       .tags(Collections.singletonList("serve"))
       .build
     val settings =
-      sc.parallelize(List(Source.fromURL(args("settings")).getLines.mkString))
+      sc.parallelize(List(Source.fromURL(args("settings")).getLines().mkString))
 
     val collection =
       sc.parallelize(
@@ -225,7 +224,7 @@ object TFSavedExampleInputPredictSigDefJob {
       .tags(Collections.singletonList("serve"))
       .build
     val settings =
-      sc.parallelize(List(Source.fromURL(args("settings")).getLines.mkString))
+      sc.parallelize(List(Source.fromURL(args("settings")).getLines().mkString))
 
     val collection =
       sc.parallelize(
@@ -259,7 +258,7 @@ object TFSavedExampleInputPredictSigDefSpecifiedFetchOpsJob {
       .tags(Collections.singletonList("serve"))
       .build
     val settings =
-      sc.parallelize(List(Source.fromURL(args("settings")).getLines.mkString))
+      sc.parallelize(List(Source.fromURL(args("settings")).getLines().mkString))
 
     val collection =
       sc.parallelize(
@@ -362,4 +361,3 @@ class TensorflowSpec extends PipelineSpec {
       .run()
   }
 }
-//scalastyle:one line.size.limit

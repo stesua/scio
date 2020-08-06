@@ -26,7 +26,7 @@ import com.spotify.scio.avro.types.MacroUtil._
 import org.apache.avro.{JsonProperties, Schema}
 import org.apache.avro.Schema.Field
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.runtime.universe
 import scala.reflect.runtime.universe._
 
@@ -41,9 +41,12 @@ private[types] object SchemaProvider {
       throw new RuntimeException(s"Unsupported type $tpe.erasure")
     }
 
-    m.computeIfAbsent(tpe, new function.Function[Type, Schema] {
-      override def apply(t: universe.Type): Schema = toSchema(tpe)._1
-    })
+    m.computeIfAbsent(
+      tpe,
+      new function.Function[Type, Schema] {
+        override def apply(t: universe.Type): Schema = toSchema(tpe)._1
+      }
+    )
   }
 
   private def toSchema(tpe: Type): (Schema, Any) = tpe match {
@@ -90,7 +93,7 @@ private[types] object SchemaProvider {
   }
 
   private def toFields(t: Type): List[Field] =
-    getFields(t).map(toField)(scala.collection.breakOut)
+    getFields(t).iterator.map(toField).toList
 
   private def getFields(t: Type): Iterable[(Symbol, Option[String])] =
     t.decls.filter(isField) zip fieldDoc(t)

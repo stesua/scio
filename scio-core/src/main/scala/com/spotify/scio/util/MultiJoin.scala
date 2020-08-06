@@ -17,13 +17,6 @@
 
 // generated with multijoin.py
 
-
-
-
-
-
-
-
 package com.spotify.scio.util
 
 import com.spotify.scio.coders.Coder
@@ -32,7 +25,7 @@ import com.spotify.scio.values.SCollection
 import org.apache.beam.sdk.transforms.join.{CoGroupByKey, KeyedPCollectionTuple}
 import org.apache.beam.sdk.values.TupleTag
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 trait MultiJoin extends Serializable {
 
@@ -2709,7 +2702,6 @@ trait MultiJoin extends Serializable {
 
 }
 
-
 object MultiJoin extends MultiJoin {
   def withName(name: String): MultiJoin = new NamedMultiJoin(name)
 }
@@ -2717,10 +2709,3 @@ object MultiJoin extends MultiJoin {
 private class NamedMultiJoin(val name: String) extends MultiJoin {
   override def tfName: String = name
 }
-
-
-
-
-
-
-

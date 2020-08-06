@@ -22,9 +22,9 @@ import org.scalacheck._
 import org.scalatest._
 
 class CollectionsSpec extends PropertySpec {
-  val posInts = Gen.posNum[Int]
-  val intLists = Arbitrary.arbitrary[List[Int]]
-  val tupleLists = Arbitrary.arbitrary[List[(String, Int)]]
+  val posInts: Gen[Int] = Gen.posNum[Int]
+  val intLists: Gen[List[Int]] = Arbitrary.arbitrary[List[Int]]
+  val tupleLists: Gen[List[(String, Int)]] = Arbitrary.arbitrary[List[(String, Int)]]
 
   property("top") {
     forAll(intLists, posInts) { (xs, num) =>
@@ -48,11 +48,17 @@ class CollectionsSpec extends PropertySpec {
   property("topByKey") {
     forAll(tupleLists, posInts) { (xs, num) =>
       val maxExpected =
-        xs.groupBy(_._1).mapValues(_.map(_._2).sorted.reverse.take(num).sorted)
+        xs.groupBy(_._1)
+          .iterator
+          .map { case (k, v) => k -> v.map(_._2).sorted.reverse.take(num).sorted }
+          .toMap
       val minExpected =
-        xs.groupBy(_._1).mapValues(_.map(_._2).sorted.take(num).sorted)
+        xs.groupBy(_._1)
+          .iterator
+          .map { case (k, v) => k -> v.map(_._2).sorted.take(num).sorted }
+          .toMap
       def verify(actual: Map[String, Iterable[Int]], expected: Map[String, List[Int]]): Assertion =
-        actual.mapValues(_.toList.sorted) shouldBe expected
+        actual.iterator.map { case (k, v) => k -> v.toList.sorted }.toMap shouldBe expected
       verify(xs.topByKey(num), maxExpected)
       verify(xs.topByKey(num)(Ordering[Int].reverse), minExpected)
       verify(xs.toArray.topByKey(num), maxExpected)

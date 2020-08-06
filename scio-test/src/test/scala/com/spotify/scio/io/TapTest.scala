@@ -30,13 +30,15 @@ import com.spotify.scio.proto.SimpleV2.{SimplePB => SimplePBV2}
 import com.spotify.scio.proto.SimpleV3.{SimplePB => SimplePBV3}
 import com.spotify.scio.testing.PipelineSpec
 import com.spotify.scio.util.ScioUtil
-import org.apache.avro.Schema
 import org.apache.beam.sdk.util.SerializableUtils
 import org.apache.commons.compress.compressors.CompressorStreamFactory
 import org.apache.commons.io.{FileUtils, IOUtils}
 
 import com.spotify.scio.coders.Coder
 import com.spotify.scio.options.ScioOptions
+import org.apache.avro.generic.GenericRecord
+import org.apache.avro.generic.GenericData
+import org.apache.avro.Schema
 
 trait TapSpec extends PipelineSpec {
   def verifyTap[T: Coder](tap: Tap[T], expected: Set[T]): Unit = {
@@ -65,14 +67,14 @@ trait TapSpec extends PipelineSpec {
 }
 
 class TapTest extends TapSpec {
-  val schema = newGenericRecord(1).getSchema
-  implicit val coder = Coder.avroGenericRecordCoder(schema)
+  val schema: Schema = newGenericRecord(1).getSchema
+  implicit def coder: Coder[GenericRecord] = Coder.avroGenericRecordCoder(schema)
 
   private def makeRecords(sc: ScioContext) =
     sc.parallelize(Seq(1, 2, 3))
       .map(i => (newSpecificRecord(i), newGenericRecord(i)))
 
-  val expectedRecords =
+  val expectedRecords: Set[(TestRecord, GenericRecord)] =
     Set(1, 2, 3).map(i => (newSpecificRecord(i), newGenericRecord(i)))
 
   "Future" should "support saveAsInMemoryTap" in {
@@ -108,13 +110,27 @@ class TapTest extends TapSpec {
   }
 
   it should "support saveAsAvroFile with reflect record" in {
+    import com.spotify.scio.coders.AvroBytesUtil
+    implicit val coder = Coder.avroGenericRecordCoder(AvroBytesUtil.schema)
+
     val dir = tmpDir
-    val t = runWithFileFuture {
+    val tap = runWithFileFuture {
       _.parallelize(Seq("a", "b", "c"))
-        .map(s => ByteBuffer.wrap(s.getBytes))
-        .saveAsAvroFile(dir.getPath, schema = new Schema.Parser().parse("\"bytes\""))
-    }.map(bb => new String(bb.array(), bb.position(), bb.limit()))
-    verifyTap(t, Set("a", "b", "c"))
+        .map { s =>
+          val record: GenericRecord = new GenericData.Record(AvroBytesUtil.schema)
+          record.put("bytes", ByteBuffer.wrap(s.getBytes))
+          record
+        }
+        .saveAsAvroFile(dir.getPath, schema = AvroBytesUtil.schema)
+    }
+
+    val result = tap
+      .map { gr =>
+        val bb = gr.get("bytes").asInstanceOf[ByteBuffer]
+        new String(bb.array(), bb.position(), bb.limit())
+      }
+
+    verifyTap(result, Set("a", "b", "c"))
     FileUtils.deleteDirectory(dir)
   }
 
@@ -202,7 +218,7 @@ class TapTest extends TapSpec {
     verifyTap(t, expected)
 
     val sc = ScioContext()
-    sc.protobufFile[SimplePBV3](dir + "/*.avro") should containInAnyOrder(expected)
+    sc.protobufFile[SimplePBV3](s"$dir/*.avro") should containInAnyOrder(expected)
     sc.run()
 
     FileUtils.deleteDirectory(dir)
@@ -221,7 +237,7 @@ class TapTest extends TapSpec {
 
     val sc = ScioContext()
     sc.optionsAs[ScioOptions].setNullableCoders(true)
-    sc.protobufFile[SimplePBV3](dir + "/*.avro") should containInAnyOrder(expected)
+    sc.protobufFile[SimplePBV3](s"$dir/*.avro") should containInAnyOrder(expected)
     sc.run()
 
     FileUtils.deleteDirectory(dir)

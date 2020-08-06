@@ -17,12 +17,9 @@
 
 package com.spotify.scio
 
-import scala.language.experimental.macros
 import scala.reflect.macros._
 
-/**
- * Proof that a type is implemented in Java
- */
+/** Proof that a type is implemented in Java */
 sealed trait IsJavaBean[T]
 
 object IsJavaBean {

@@ -26,7 +26,7 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import scala.util.Random
 
@@ -39,8 +39,8 @@ object SpannerIOIT {
     .withDatabaseId(s"io_it_${Random.nextInt}")
     .withInstanceId("spanner-it")
 
-  private val adminClient = Spanner.adminClient(projectId)
-  private val dbClient = Spanner.databaseClient(config)
+  private lazy val adminClient = Spanner.adminClient(projectId)
+  private lazy val dbClient = Spanner.databaseClient(config)
 
   final private case class FakeSpannerData(asMutations: Seq[Mutation], asStructs: Seq[Struct])
   private def fakeData(tableName: String) = FakeSpannerData(

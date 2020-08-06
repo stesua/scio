@@ -84,7 +84,8 @@ an optimal number of output files. With SMB, you must specify the number of buck
 - If your job gets stuck in the sorting phase (since the `GroupByKey` and `SortValues` transforms
   may get fused--you can reference the @javadoc[Counter](org.apache.beam.sdk.metrics.Counter)s
   `SortedBucketSink-bucketsInitiatedSorting` and `SortedBucketSink-bucketsCompletedSorting`
-  to get an idea of where your job fails), you can increase sorter memory (default is 128MB):
+  to get an idea of where your job fails), you can increase sorter memory
+  (default is 1024MB, or 128MB for Scio <= 0.9.0):
 
 ```scala
 data.saveAsSortedBucket(
@@ -95,9 +96,46 @@ data.saveAsSortedBucket(
 )
 ```
 
-  You can also tweak the `--workerMachineType` pipeline option [see: machine specs for Google Cloud
-  Dataflow](https://cloud.google.com/compute/docs/machine-types)--although even the smallest
-  machine type has several GB of RAM.
+The amount of data each external sorter instance needs to handle is `total output size / numBuckets
+/ numShards`, and when this exceeds sorter memory, the sorter will spill to disk. `n1-standard`
+workers has 3.75GB RAM per CPU, so 1GB sorter memory is a decent default, especially if the output
+files are kept under that size. If you have to spill to disk, note that worker disk IO depends on
+disk type, size, and worker number of CPUs.
+
+See [specifying pipeline execution
+parameters](https://cloud.google.com/dataflow/docs/guides/specifying-exec-params) for more details,
+e.g. `--workerMachineType`, `--workerDiskType`, and `--diskSizeGb`. Also read more about [machine
+types](https://cloud.google.com/compute/docs/machine-types) and [block storage
+performance](https://cloud.google.com/compute/docs/disks/performance)
+
+### Parallelism
+The `SortedBucketSource` API accepts an optional
+@javadoc[TargetParallelism](org.apache.beam.sdk.extensions.smb.TargetParallelism) parameter to set the
+desired parallelism of the SMB read operation. For a given set of sources, `targetParallelism` can be
+set to any number between the least and greatest numbers of buckets among sources. This can be
+dynamically configured using `TargetParallelism.min()` or `TargetParallelism.max()`, which at graph
+construction time will determine the least or greatest amount of parallelism based on sources.
+Alternately, `TargetParallelism.of(Integer value)` can be used to statically configure a custom value,
+or `{@link TargetParallelism#auto()}` can be used to let the runner decide how to split the SMB read
+at runtime based on the combined byte size of the inputs.
+
+If no value is specified, SMB read operations will use Auto parallelism.
+
+When selecting a target parallelism for your SMB operation, there are tradeoffs to consider:
+
+  - Minimal parallelism means a fewer number of workers merging data from potentially many
+    buckets. For example, if source A has 4 buckets and source B has 64, a minimally parallel
+    SMB read would have 4 workers, each one merging 1 bucket from source A and 16 buckets from
+    source B. This read may have low throughput.
+  - Maximal parallelism means that each bucket is read by at least one worker. For example, if
+    source A has 4 buckets and source B has 64, a maximally parallel SMB read would have 64 workers,
+    each one merging 1 bucket from source B and 1 bucket from source A, replicated 16 times. This
+    may have better throughput than the minimal example, but more expensive because every key group
+    from the replicated sources must be re-hashed to avoid emitting duplicate records.
+  - A custom parallelism in the middle of these bounds may be the best balance of speed and
+    computing cost.
+  - Auto parallelism is more likely to pick an ideal value for most use cases. When using this option,
+    you can check the worker logs to find out which value was selected.
 
 ## Testing
 Currently, mocking data for SMB transforms is not supported in the `com.spotify.scio.testing.JobTest` framework. See

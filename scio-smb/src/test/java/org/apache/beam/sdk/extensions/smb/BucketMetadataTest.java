@@ -17,6 +17,7 @@
 
 package org.apache.beam.sdk.extensions.smb;
 
+import static org.apache.beam.sdk.extensions.smb.SortedBucketIO.DEFAULT_FILENAME_PREFIX;
 import static org.apache.beam.sdk.transforms.display.DisplayDataMatchers.hasDisplayItem;
 
 import com.google.api.services.bigquery.model.TableRow;
@@ -24,6 +25,7 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.beam.sdk.coders.Coder.NonDeterministicException;
 import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.extensions.smb.BucketMetadata.HashType;
+import org.apache.beam.sdk.io.AvroGeneratedUser;
 import org.apache.beam.sdk.transforms.display.DisplayData;
 import org.hamcrest.MatcherAssert;
 import org.junit.Assert;
@@ -35,7 +37,7 @@ public class BucketMetadataTest {
   @Test
   public void testCoding() throws Exception {
     final BucketMetadata<String, String> metadata =
-        new TestBucketMetadata(1, 16, 4, HashType.MURMUR3_32);
+        new TestBucketMetadata(1, 16, 4, HashType.MURMUR3_32, DEFAULT_FILENAME_PREFIX);
     final BucketMetadata<String, String> copy = BucketMetadata.from(metadata.toString());
 
     Assert.assertEquals(metadata.getVersion(), copy.getVersion());
@@ -43,6 +45,7 @@ public class BucketMetadataTest {
     Assert.assertEquals(metadata.getNumShards(), copy.getNumShards());
     Assert.assertEquals(metadata.getKeyClass(), copy.getKeyClass());
     Assert.assertEquals(metadata.getHashType(), copy.getHashType());
+    Assert.assertEquals(metadata.getFilenamePrefix(), copy.getFilenamePrefix());
   }
 
   @SuppressWarnings("unchecked")
@@ -52,7 +55,12 @@ public class BucketMetadataTest {
         NonDeterministicException.class,
         () ->
             new BucketMetadata(
-                BucketMetadata.CURRENT_VERSION, 1, 1, Double.class, HashType.MURMUR3_32) {
+                BucketMetadata.CURRENT_VERSION,
+                1,
+                1,
+                Double.class,
+                HashType.MURMUR3_32,
+                DEFAULT_FILENAME_PREFIX) {
               @Override
               public Object extractKey(Object value) {
                 return null;
@@ -67,11 +75,20 @@ public class BucketMetadataTest {
 
   @Test
   public void testSubTyping() throws Exception {
-    final BucketMetadata<String, String> test = new TestBucketMetadata(16, 4, HashType.MURMUR3_32);
+    final BucketMetadata<String, String> test =
+        new TestBucketMetadata(16, 4, HashType.MURMUR3_32, DEFAULT_FILENAME_PREFIX);
     final BucketMetadata<String, GenericRecord> avro =
-        new AvroBucketMetadata<>(16, 4, String.class, HashType.MURMUR3_32, "keyField");
+        new AvroBucketMetadata<>(
+            16,
+            4,
+            String.class,
+            HashType.MURMUR3_32,
+            "favorite_color",
+            DEFAULT_FILENAME_PREFIX,
+            AvroGeneratedUser.SCHEMA$);
     final BucketMetadata<String, TableRow> json =
-        new JsonBucketMetadata<>(16, 4, String.class, HashType.MURMUR3_32, "keyField");
+        new JsonBucketMetadata<>(
+            16, 4, String.class, HashType.MURMUR3_32, "keyField", DEFAULT_FILENAME_PREFIX);
 
     Assert.assertEquals(TestBucketMetadata.class, BucketMetadata.from(test.toString()).getClass());
     Assert.assertEquals(AvroBucketMetadata.class, BucketMetadata.from(avro.toString()).getClass());
@@ -80,11 +97,16 @@ public class BucketMetadataTest {
 
   @Test
   public void testCompatibility() throws Exception {
-    final TestBucketMetadata m1 = new TestBucketMetadata(0, 1, 1, HashType.MURMUR3_32);
-    final TestBucketMetadata m2 = new TestBucketMetadata(0, 1, 1, HashType.MURMUR3_32);
-    final TestBucketMetadata m3 = new TestBucketMetadata(0, 1, 2, HashType.MURMUR3_32);
-    final TestBucketMetadata m4 = new TestBucketMetadata(0, 1, 1, HashType.MURMUR3_128);
-    final TestBucketMetadata m5 = new TestBucketMetadata(1, 1, 1, HashType.MURMUR3_32);
+    final TestBucketMetadata m1 =
+        new TestBucketMetadata(0, 1, 1, HashType.MURMUR3_32, DEFAULT_FILENAME_PREFIX);
+    final TestBucketMetadata m2 =
+        new TestBucketMetadata(0, 1, 1, HashType.MURMUR3_32, DEFAULT_FILENAME_PREFIX);
+    final TestBucketMetadata m3 =
+        new TestBucketMetadata(0, 1, 2, HashType.MURMUR3_32, DEFAULT_FILENAME_PREFIX);
+    final TestBucketMetadata m4 =
+        new TestBucketMetadata(0, 1, 1, HashType.MURMUR3_128, DEFAULT_FILENAME_PREFIX);
+    final TestBucketMetadata m5 =
+        new TestBucketMetadata(1, 1, 1, HashType.MURMUR3_32, DEFAULT_FILENAME_PREFIX);
 
     Assert.assertTrue(m1.isCompatibleWith(m2));
     Assert.assertTrue(m1.isCompatibleWith(m3));
@@ -92,9 +114,32 @@ public class BucketMetadataTest {
     Assert.assertFalse(m1.isCompatibleWith(m5));
   }
 
+  // Test that old BucketMetadata file format missing filenamePrefix will default to "bucket"
+  @Test
+  public void testFilenamePrefixDefault() throws Exception {
+    final String serializedAvro =
+        "{\"type\":\"org.apache.beam.sdk.extensions.smb.AvroBucketMetadata\",\"version\":0,\"numBuckets\":2,\"numShards\":1,\"keyClass\":\"java.lang.String\",\"hashType\":\"MURMUR3_32\",\"keyField\":\"user_id\"}";
+    Assert.assertEquals(
+        DEFAULT_FILENAME_PREFIX,
+        ((AvroBucketMetadata) BucketMetadata.from(serializedAvro)).getFilenamePrefix());
+
+    final String serializedJson =
+        "{\"type\":\"org.apache.beam.sdk.extensions.smb.JsonBucketMetadata\",\"version\":0,\"numBuckets\":2,\"numShards\":1,\"keyClass\":\"java.lang.String\",\"hashType\":\"MURMUR3_32\",\"keyField\":\"user_id\"}";
+    Assert.assertEquals(
+        DEFAULT_FILENAME_PREFIX,
+        ((JsonBucketMetadata) BucketMetadata.from(serializedJson)).getFilenamePrefix());
+
+    final String serializedTensorflow =
+        "{\"type\":\"org.apache.beam.sdk.extensions.smb.TensorFlowBucketMetadata\",\"version\":0,\"numBuckets\":2,\"numShards\":1,\"keyClass\":\"java.lang.String\",\"hashType\":\"MURMUR3_32\",\"keyField\":\"user_id\"}";
+    Assert.assertEquals(
+        DEFAULT_FILENAME_PREFIX,
+        ((TensorFlowBucketMetadata) BucketMetadata.from(serializedTensorflow)).getFilenamePrefix());
+  }
+
   @Test
   public void testNullKeyEncoding() throws Exception {
-    final TestBucketMetadata m = new TestBucketMetadata(0, 1, 1, HashType.MURMUR3_32);
+    final TestBucketMetadata m =
+        new TestBucketMetadata(0, 1, 1, HashType.MURMUR3_32, DEFAULT_FILENAME_PREFIX);
 
     Assert.assertNull(m.extractKey(""));
     Assert.assertNull(m.getKeyBytes(""));
@@ -102,7 +147,8 @@ public class BucketMetadataTest {
 
   @Test
   public void testDisplayData() throws Exception {
-    final TestBucketMetadata m = new TestBucketMetadata(3, 2, 1, HashType.MURMUR3_32);
+    final TestBucketMetadata m =
+        new TestBucketMetadata(3, 2, 1, HashType.MURMUR3_32, DEFAULT_FILENAME_PREFIX);
 
     final DisplayData displayData = DisplayData.from(m);
     MatcherAssert.assertThat(displayData, hasDisplayItem("numBuckets", 2));

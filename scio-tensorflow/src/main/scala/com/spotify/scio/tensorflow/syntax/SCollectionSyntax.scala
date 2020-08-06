@@ -17,7 +17,6 @@
 
 package com.spotify.scio.tensorflow.syntax
 
-import scala.language.implicitConversions
 import scala.reflect.ClassTag
 
 import org.apache.beam.sdk.io.Compression
@@ -35,9 +34,7 @@ import com.spotify.scio.tensorflow.{
 import com.spotify.scio.values.SCollection
 import com.spotify.zoltar.tf.TensorFlowModel
 
-/**
- * Enhanced version of [[com.spotify.scio.values.SCollection SCollection]] with TensorFlow methods.
- */
+/** Enhanced version of [[com.spotify.scio.values.SCollection SCollection]] with TensorFlow methods. */
 final class PredictSCollectionOps[T: ClassTag](private val self: SCollection[T]) {
 
   /**
@@ -142,20 +139,6 @@ final class ExampleSCollectionOps[T <: Example](private val self: SCollection[T]
    *
    * @return
    */
-  @deprecated("saveAsTfExampleFile is deprecated: use saveAsTfRecordFile instead", "0.7.4")
-  def saveAsTfExampleFile(
-    path: String,
-    suffix: String = TFExampleIO.WriteParam.DefaultSuffix,
-    compression: Compression = TFExampleIO.WriteParam.DefaultCompression,
-    numShards: Int = TFExampleIO.WriteParam.DefaultNumShards
-  ): ClosedTap[Example] =
-    saveAsTfRecordFile(path, suffix = suffix, compression = compression, numShards = numShards)
-
-  /**
-   * Saves this SCollection of `org.tensorflow.example.Example` as a TensorFlow TFRecord file.
-   *
-   * @return
-   */
   def saveAsTfRecordFile(
     path: String,
     suffix: String = TFExampleIO.WriteParam.DefaultSuffix,
@@ -163,7 +146,7 @@ final class ExampleSCollectionOps[T <: Example](private val self: SCollection[T]
     numShards: Int = TFExampleIO.WriteParam.DefaultNumShards
   ): ClosedTap[Example] = {
     val param = TFExampleIO.WriteParam(suffix, compression, numShards)
-    self.asInstanceOf[SCollection[Example]].write(TFExampleIO(path))(param)
+    self.covary[Example].write(TFExampleIO(path))(param)
   }
 }
 
@@ -175,21 +158,6 @@ object SeqExampleSCollectionOps {
 final class SeqExampleSCollectionOps[T <: Example](private val self: SCollection[Seq[T]])
     extends AnyVal {
   def mergeExamples(e: Seq[Example]): Example = SeqExampleSCollectionOps.mergeExamples(e)
-
-  /**
-   * Merge each [[Seq]] of [[Example]] and save them as TensorFlow TFRecord files.
-   * Caveat: if some feature names are repeated in different feature specs, they will be collapsed.
-   *
-   * @group output
-   */
-  @deprecated("saveAsTfExampleFile is deprecated: use saveAsTfRecordFile instead", "0.7.4")
-  def saveAsTfExampleFile(
-    path: String,
-    suffix: String = TFExampleIO.WriteParam.DefaultSuffix,
-    compression: Compression = TFExampleIO.WriteParam.DefaultCompression,
-    numShards: Int = TFExampleIO.WriteParam.DefaultNumShards
-  ): ClosedTap[Example] =
-    saveAsTfRecordFile(path, suffix = suffix, compression = compression, numShards = numShards)
 
   /**
    * Merge each [[Seq]] of [[Example]] and save them as TensorFlow TFRecord files.
@@ -224,7 +192,7 @@ final class TFRecordSCollectionOps[T <: Array[Byte]](private val self: SCollecti
     numShards: Int = TFRecordIO.WriteParam.DefaultNumShards
   )(implicit ev: T <:< Array[Byte]): ClosedTap[Array[Byte]] = {
     val param = TFRecordIO.WriteParam(suffix, compression, numShards)
-    self.asInstanceOf[SCollection[Array[Byte]]].write(TFRecordIO(path))(param)
+    self.covary[Array[Byte]].write(TFRecordIO(path))(param)
   }
 }
 
@@ -244,7 +212,7 @@ final class SequenceExampleSCollectionOps[T <: SequenceExample](private val self
     numShards: Int = TFExampleIO.WriteParam.DefaultNumShards
   ): ClosedTap[SequenceExample] = {
     val param = TFExampleIO.WriteParam(suffix, compression, numShards)
-    self.asInstanceOf[SCollection[SequenceExample]].write(TFSequenceExampleIO(path))(param)
+    self.covary[SequenceExample].write(TFSequenceExampleIO(path))(param)
   }
 }
 

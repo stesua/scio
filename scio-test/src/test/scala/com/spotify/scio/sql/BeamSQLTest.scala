@@ -29,14 +29,15 @@ import org.apache.beam.sdk.schemas.{Schema => BSchema}
 import org.apache.beam.sdk.transforms.Combine.CombineFn
 import org.apache.beam.sdk.transforms.SerializableFunction
 import org.apache.beam.sdk.values.{Row, TupleTag}
-import org.joda.time.{DateTime, Instant}
-import org.joda.time.DateTimeZone.UTC
+import org.joda.time.Instant
 import org.scalatest.Assertion
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import com.spotify.scio.avro
 import com.spotify.scio.avro.MessageRecord
 import org.apache.avro.generic.GenericRecord
+import java.time.LocalDate
+import com.spotify.scio.schemas.Record
 
 object Schemas {
   // test logical type support
@@ -56,52 +57,57 @@ object TestData {
   case class Result(x: Int)
 
   case class User(username: String, email: String, age: Int)
-  val users =
+  val users: List[User] =
     (1 to 10).map(i => User(s"user$i", s"user$i@spotify.com", 20 + i)).toList
 
   case class UserId(id: Long)
   case class UserWithId(id: UserId, username: String, email: String, age: Int)
 
-  val usersWithIds =
+  val usersWithIds: List[UserWithId] =
     (1 to 10).map(i => UserWithId(UserId(i), s"user$i", s"user$i@spotify.com", 20 + i)).toList
 
   case class UserWithLogicalType(id: Long, username: String, locale: Locale)
   object UserWithLogicalType {
-    implicit def userWithLogicalTypeSchema = Schema.gen[UserWithLogicalType]
+    implicit def userWithLogicalTypeSchema: Record[UserWithLogicalType] =
+      Schema.gen[UserWithLogicalType]
   }
-  val usersWithLocale =
+  val usersWithLocale: List[UserWithLogicalType] =
     (1 to 10).map(i => UserWithLogicalType(i, s"user$i", Locale.FRANCE)).toList
 
   case class UserWithOption(username: String, email: String, age: Option[Int])
-  val usersWithOption =
+  val usersWithOption: List[UserWithOption] =
     (1 to 10).map { i =>
       UserWithOption(s"user$i", s"user$i@spotify.com", if (i > 5) Option(20 + i) else None)
     }.toList
 
   case class UserWithList(username: String, emails: List[String])
-  val usersWithList =
+  val usersWithList: List[UserWithList] =
     (1 to 10)
       .map(i => UserWithList(s"user$i", List(s"user$i@spotify.com", s"user$i@yolo.com")))
       .toList
 
-  val javaUsers =
+  val javaUsers: IndexedSeq[UserBean] =
     (1 to 10).map(i => new UserBean(s"user$i", 20 + i))
 
   case class UserWithJList(username: String, emails: java.util.List[String])
-  val usersWithJList =
+  val usersWithJList: List[UserWithJList] =
     (1 to 10).map { i =>
       UserWithJList(s"user$i", java.util.Arrays.asList(s"user$i@spotify.com", s"user$i@yolo.com"))
     }.toList
 
   case class UserWithMap(username: String, contacts: Map[String, String])
-  val usersWithMap =
+  val usersWithMap: List[UserWithMap] =
     (1 to 10).map { i =>
       UserWithMap(s"user$i", Map("work" -> s"user$i@spotify.com", "personal" -> s"user$i@yolo.com"))
     }.toList
 
   case class UserWithInstant(username: String, created: Instant, dateString: String)
-  val usersWithJoda =
+  val usersWithJoda: List[UserWithInstant] =
     (1 to 10).map(i => UserWithInstant(s"user$i", Instant.now(), "19851026")).toList
+
+  case class UserWithLocalDate(username: String, created: LocalDate, dateString: String)
+  val usersWithLocalDate: List[UserWithLocalDate] =
+    (1 to 10).map(i => UserWithLocalDate(s"user$i", LocalDate.now(), "19851026")).toList
 
   class IsOver18UdfFn extends SerializableFunction[Integer, Boolean] {
     override def apply(input: Integer): Boolean = input >= 18
@@ -138,7 +144,8 @@ object TestData {
     }.toList
 
   case class Order(order_id: Long, price: Long, site_id: Long)
-  val orders = List(Order(1, 2, 2), Order(2, 2, 1), Order(1, 4, 3), Order(3, 2, 1), Order(3, 3, 1))
+  val orders: List[Order] =
+    List(Order(1, 2, 2), Order(2, 2, 1), Order(1, 4, 3), Order(3, 2, 1), Order(3, 3, 1))
 
   // Coders
   implicit def coderLocale: Coder[Locale] = Coder.kryo[Locale]
@@ -302,9 +309,11 @@ class BeamSQLTest extends PipelineSpec {
       .queryAs[(String, Instant)]("select username, created from SCOLLECTION")
 
     r should containInAnyOrder(expected)
+  }
 
-    val expectedCast = usersWithJoda.map { u =>
-      (u.username, new DateTime(1985, 10, 26, 0, 0, UTC).toInstant())
+  it should "support cast" in runWithContext { sc =>
+    val expectedCast = usersWithLocalDate.map { u =>
+      (u.username, LocalDate.of(1985, 10, 26))
     }
 
     val query = """
@@ -319,8 +328,8 @@ class BeamSQLTest extends PipelineSpec {
     """.stripMargin
 
     val cast = sc
-      .parallelize(usersWithJoda)
-      .queryAs[(String, Instant)](query)
+      .parallelize(usersWithLocalDate)
+      .queryAs[(String, LocalDate)](query)
 
     cast should containInAnyOrder(expectedCast)
   }
@@ -423,26 +432,26 @@ class BeamSQLTest extends PipelineSpec {
   it should "provide a typecheck method for tests" in {
     object checkOK {
       def apply[A: Schema, B: Schema](q: String): Assertion =
-        Query1.typecheck(Query1[A, B](q, Sql.defaultTag)) should be('right)
+        Query1.typecheck(Query1[A, B](q, Sql.defaultTag)) should be(Symbol("right"))
 
       def apply[A: Schema, B: Schema, C: Schema](
         q: String,
         a: TupleTag[A],
         b: TupleTag[B]
       ): Assertion =
-        Query2.typecheck(Query2[A, B, C](q, a, b)) should be('right)
+        Query2.typecheck(Query2[A, B, C](q, a, b)) should be(Symbol("right"))
     }
 
     object checkNOK {
       def apply[A: Schema, B: Schema](q: String): Assertion =
-        Query1.typecheck(Query1[A, B](q, Sql.defaultTag)) should be('left)
+        Query1.typecheck(Query1[A, B](q, Sql.defaultTag)) should be(Symbol("left"))
 
       def apply[A: Schema, B: Schema, C: Schema](
         q: String,
         a: TupleTag[A],
         b: TupleTag[B]
       ): Assertion =
-        Query2.typecheck(Query2[A, B, C](q, a, b)) should be('left)
+        Query2.typecheck(Query2[A, B, C](q, a, b)) should be(Symbol("left"))
     }
 
     checkOK[Bar, Long]("select l from SCOLLECTION")
@@ -725,33 +734,33 @@ object TypeConvertionsTestData {
 
   case class TinyTo(s: String, i: Int)
 
-  val from =
+  val from: List[From0] =
     (1 to 10).map { i =>
       From0(1, s"from0_$i", From1((20 to 30).toList.map(_.toLong), s"from1_$i"))
     }.toList
 
-  val to =
+  val to: List[To1] =
     from.map {
       case From0(i, s, From1(xs, q)) =>
         To1(s, To0(q, xs), i)
     }
 
-  val tinyTo = to.map {
+  val tinyTo: List[TinyTo] = to.map {
     case To1(s, _, i) => TinyTo(s, i)
   }
 
   case class JavaCompatibleUser(name: String, age: Int)
-  val expectedJavaCompatUsers =
+  val expectedJavaCompatUsers: IndexedSeq[JavaCompatibleUser] =
     javaUsers.map(j => JavaCompatibleUser(j.getName, j.getAge))
 
   case class AvroCompatibleUser(id: Int, first_name: String, last_name: String)
 
-  val avroWithNullable =
+  val avroWithNullable: List[avro.TestRecord] =
     (1 to 10).map { i =>
       new avro.TestRecord(i, i, null, null, false, null, List[CharSequence](s"value_$i").asJava)
     }.toList
 
-  val expectedAvro =
+  val expectedAvro: List[CompatibleAvroTestRecord] =
     avroWithNullable.map { r =>
       CompatibleAvroTestRecord(
         Option(r.getIntField.toInt),

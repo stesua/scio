@@ -65,7 +65,7 @@ object Iterators {
       while (bi.hasNext && timestampFn(bi.head) < end) {
         buf.append(bi.next())
       }
-      buf
+      buf.toSeq
     }
   }
 
@@ -82,7 +82,7 @@ object Iterators {
         buf.append(n)
         last = timestampFn(n)
       }
-      buf
+      buf.toSeq
     }
   }
 
@@ -99,7 +99,7 @@ object Iterators {
 
     override def hasNext: Boolean = queue.nonEmpty
     override def next(): Seq[T] = {
-      val result = Seq(queue: _*)
+      val result = Seq(queue.toSeq: _*)
       val start = timestampFn(queue.head)
       val upper = upperBound(start, period, offset)
       while (queue.nonEmpty && start < upper) {
@@ -114,7 +114,7 @@ object Iterators {
 
     private def fill(): Unit = {
       if (queue.isEmpty && bi.hasNext) {
-        queue.enqueue(bi.next)
+        queue.enqueue(bi.next())
       }
       if (queue.nonEmpty) {
         val start = timestampFn(queue.head)
@@ -148,9 +148,7 @@ object Iterators {
       new FixedIterator[T](self, timestampFn, size, offset)
     }
 
-    /**
-     * Iterator of sessions separated by `gapDuration`-long periods with no elements.
-     */
+    /** Iterator of sessions separated by `gapDuration`-long periods with no elements. */
     def session(gapDuration: Long): Iterator[Seq[T]] = {
       require(gapDuration > 0, "size must be > 0")
       new SessionIterator(self, timestampFn, gapDuration)

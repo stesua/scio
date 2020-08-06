@@ -26,7 +26,7 @@ import org.apache.beam.sdk.transforms.{DoFn, View}
 import org.apache.beam.sdk.values.PCollectionView
 import org.slf4j.LoggerFactory
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 /**
  * Main package for Annoy side input APIs. Import all.
@@ -94,7 +94,7 @@ import scala.collection.JavaConverters._
  * }}}
  */
 package object annoy {
-  sealed trait AnnoyMetric
+  sealed abstract class AnnoyMetric
   case object Angular extends AnnoyMetric
   case object Euclidean extends AnnoyMetric
 
@@ -121,21 +121,15 @@ package object annoy {
       new ANNIndex(dim, path, indexType)
     }
 
-    /**
-     * Gets vector associated with item i.
-     */
+    /** Gets vector associated with item i. */
     def getItemVector(i: Int): Array[Float] = index.getItemVector(i)
 
-    /**
-     * Copies vector associated with item i into vector v.
-     */
+    /** Copies vector associated with item i into vector v. */
     def getItemVector(i: Int, v: Array[Float]): Unit = index.getItemVector(i, v)
 
-    /**
-     * Gets maxNumResults nearest neighbors for vector v.
-     */
+    /** Gets maxNumResults nearest neighbors for vector v. */
     def getNearest(v: Array[Float], maxNumResults: Int): Seq[Int] =
-      index.getNearest(v, maxNumResults).asScala.asInstanceOf[Seq[Int]]
+      index.getNearest(v, maxNumResults).asScala.toSeq.asInstanceOf[Seq[Int]]
   }
 
   /** Enhanced version of [[ScioContext]] with Annoy methods. */
@@ -238,9 +232,7 @@ package object annoy {
       self.asAnnoy(metric, dim, nTrees).asAnnoySideInput(metric, dim)
   }
 
-  /**
-   * Enhanced version of [[com.spotify.scio.values.SCollection SCollection]] with Annoy methods
-   */
+  /** Enhanced version of [[com.spotify.scio.values.SCollection SCollection]] with Annoy methods */
   implicit class AnnoySCollection(@transient private val self: SCollection[AnnoyUri])
       extends AnyVal {
 

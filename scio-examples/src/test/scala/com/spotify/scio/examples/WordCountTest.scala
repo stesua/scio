@@ -21,8 +21,8 @@ import com.spotify.scio.io._
 import com.spotify.scio.testing._
 
 class WordCountTest extends PipelineSpec {
-  val inData = Seq("a b c d e", "a b a b", "")
-  val expected = Seq("a: 3", "b: 3", "c: 1", "d: 1", "e: 1")
+  val inData: Seq[String] = Seq("a b c d e", "a b a b", "")
+  val expected: Seq[String] = Seq("a: 3", "b: 3", "c: 1", "d: 1", "e: 1")
 
   // #WordCountTest_example
   "WordCount" should "work" in {
@@ -36,14 +36,6 @@ class WordCountTest extends PipelineSpec {
 
   "MinimalWordCount" should "work" in {
     JobTest[com.spotify.scio.examples.MinimalWordCount.type]
-      .args("--input=in.txt", "--output=out.txt")
-      .input(TextIO("in.txt"), inData)
-      .output(TextIO("out.txt"))(coll => coll should containInAnyOrder(expected))
-      .run()
-  }
-
-  "MinimalWordCountTypedArguments" should "work" in {
-    JobTest[com.spotify.scio.examples.MinimalWordCountTypedArguments.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), inData)
       .output(TextIO("out.txt"))(coll => coll should containInAnyOrder(expected))
@@ -72,6 +64,22 @@ class WordCountTest extends PipelineSpec {
     JobTest[com.spotify.scio.examples.DebuggingWordCount.type]
       .args("--input=in.txt", "--output=out.txt")
       .input(TextIO("in.txt"), in)
+      .run()
+  }
+
+  "MinimalWordCounCaseAppExample" should "work" in {
+    JobTest[com.spotify.scio.examples.MinimalWordCounCaseAppExample.type]
+      .args("--input=in.txt", "--output=out.txt")
+      .input(TextIO("in.txt"), inData)
+      .output(TextIO("out.txt"))(coll => coll should containInAnyOrder(expected))
+      .run()
+  }
+
+  "MinimalWordCounPipelineOptionsExample" should "work" in {
+    JobTest[com.spotify.scio.examples.MinimalWordCounPipelineOptionsExample.type]
+      .args("--input=in.txt", "--output=out.txt")
+      .input(TextIO("in.txt"), inData)
+      .output(TextIO("out.txt"))(coll => coll should containInAnyOrder(expected))
       .run()
   }
 }

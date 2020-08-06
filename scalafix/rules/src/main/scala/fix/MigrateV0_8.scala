@@ -150,6 +150,7 @@ final class ConsistenceJoinNames extends SemanticRule("ConsistenceJoinNames") {
   private val pairedHashScol = "com/spotify/scio/values/PairHashSCollectionFunctions#"
   private val pairedSkewedScol = "com/spotify/scio/values/PairSkewedSCollectionFunctions#"
   private val pairedScol = "com/spotify/scio/values/PairSCollectionFunctions#"
+  private val scoll = "com/spotify/scio/values/SCollection#"
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     doc.tree.collect {
@@ -157,23 +158,23 @@ final class ConsistenceJoinNames extends SemanticRule("ConsistenceJoinNames") {
         fun match {
           case Term.Select(qual, name) =>
             name match {
-              case t @ Term.Name("hashLeftJoin") if (expectedType(qual, pairedHashScol)) =>
+              case t @ Term.Name("hashLeftJoin") if expectedType(qual, pairedHashScol) =>
                 Patch.replaceTree(t, "hashLeftOuterJoin") + renameNamedArgs(args)
-              case t @ Term.Name("skewedLeftJoin") if (expectedType(qual, pairedSkewedScol)) =>
+              case t @ Term.Name("skewedLeftJoin") if expectedType(qual, pairedSkewedScol) =>
                 Patch.replaceTree(t, "skewedLeftOuterJoin") + renameNamedArgs(args)
-              case t @ Term.Name("sparseOuterJoin") if (expectedType(qual, pairedScol)) =>
+              case t @ Term.Name("sparseOuterJoin") if expectedType(qual, pairedScol) =>
                 Patch.replaceTree(t, "sparseFullOuterJoin") + renameNamedArgs(args)
               case _ @(Term.Name("join") | Term.Name("fullOuterJoin") | Term.Name("leftOuterJoin") |
                   Term.Name("rightOuterJoin") | Term.Name("sparseLeftOuterJoin") |
                   Term.Name("sparseRightOuterJoin") | Term.Name("cogroup") |
                   Term.Name("groupWith") | Term.Name("sparseLookup"))
-                  if (expectedType(qual, pairedScol)) =>
+                  if expectedType(qual, pairedScol) =>
                 renameNamedArgs(args)
               case _ @(Term.Name("skewedJoin") | Term.Name("skewedFullOuterJoin"))
-                  if (expectedType(qual, pairedSkewedScol)) =>
+                  if expectedType(qual, pairedSkewedScol) =>
                 renameNamedArgs(args)
               case _ @(Term.Name("hashJoin") | Term.Name("hashFullOuterJoin") |
-                  Term.Name("hashIntersectByKey")) if (expectedType(qual, pairedHashScol)) =>
+                  Term.Name("hashIntersectByKey")) if expectedType(qual, pairedHashScol) =>
                 renameNamedArgs(args)
               case _ => Patch.empty
             }
@@ -185,10 +186,13 @@ final class ConsistenceJoinNames extends SemanticRule("ConsistenceJoinNames") {
   private def expectedType(qual: Term, typStr: String)(implicit doc: SemanticDocument): Boolean =
     qual.symbol.info.get.signature match {
       case MethodSignature(_, _, TypeRef(_, typ, _)) =>
-        typ == Symbol(typStr)
+        SymbolMatcher.exact(typStr).matches(typ)
       case ValueSignature(AnnotatedType(_, TypeRef(_, typ, _))) =>
-        typ == Symbol(typStr)
-      case _ => false
+        SymbolMatcher.exact(typStr).matches(typ)
+      case ValueSignature(TypeRef(_, typ, _)) =>
+        SymbolMatcher.exact(scoll).matches(typ)
+      case t =>
+        false
     }
 
   private def renameNamedArgs(args: List[Term]): Patch =
@@ -200,9 +204,7 @@ final class ConsistenceJoinNames extends SemanticRule("ConsistenceJoinNames") {
           case t2 @ Term.Name("that2")       => Patch.replaceTree(t2, "rhs2")
           case t2 @ Term.Name("that3")       => Patch.replaceTree(t2, "rhs3")
           case t2 @ Term.Name("thatNumKeys") => Patch.replaceTree(t2, "rhsNumKeys")
-          case s =>
-            println(s)
-            Patch.empty
+          case s                             => Patch.empty
         }
       case _ => Patch.empty
     }.asPatch

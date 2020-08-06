@@ -28,7 +28,7 @@ import org.apache.beam.sdk.transforms.DoFn.{ProcessElement, Setup, Teardown}
 import org.slf4j.LoggerFactory
 import org.tensorflow._
 import org.tensorflow.example.Example
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import com.spotify.scio.transforms.DoFnWithResource
 import com.spotify.scio.transforms.DoFnWithResource.ResourceType
@@ -71,9 +71,7 @@ sealed trait PredictDoFn[T, V, M <: Model[_]]
     ()
   }
 
-  /**
-   * Process an element asynchronously.
-   */
+  /** Process an element asynchronously. */
   @ProcessElement
   def processElement(c: DoFn[T, V]#ProcessContext): Unit = {
     val result = withRunner { runner =>
@@ -181,10 +179,13 @@ object SavedBundlePredictDoFn {
     }
 
     override def extractOutput(input: T, out: Map[String, Tensor[_]]): V =
-      outFn(input, requestedFetchOps.iterator.map {
-        case (tensorId, opName) =>
-          tensorId -> out(opName)
-      }.toMap)
+      outFn(
+        input,
+        requestedFetchOps.iterator.map {
+          case (tensorId, opName) =>
+            tensorId -> out(opName)
+        }.toMap
+      )
 
     override def outputTensorNames: Seq[String] = requestedFetchOps.values.toSeq
 
@@ -220,9 +221,12 @@ object SavedBundlePredictDoFn {
       }
 
       override def extractOutput(input: T, out: Map[String, Tensor[_]]): V =
-        outFn(input, requestedFetchOps.iterator.map {
-          case (tensorId, opName) => tensorId -> out(opName)
-        }.toMap)
+        outFn(
+          input,
+          requestedFetchOps.iterator.map {
+            case (tensorId, opName) => tensorId -> out(opName)
+          }.toMap
+        )
 
       override def modelId: String = s"${super.modelId}:${fetchOps.toList.mkString(":")}"
     }

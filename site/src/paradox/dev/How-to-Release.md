@@ -28,14 +28,22 @@ credentials ++= Seq(
 - Bump version in the internal `scio-cookie` and monorepo
 - Send internal announcement to scio-users@spotify.com and flatmap-announce@spotify.com
 - Send external announcement to scio-users@googlegroups.com and user@beam.apache.org
-- Announce on internal Slack and public Gitter [room](https://gitter.im/spotify/scio)
+- Announce on internal and public [Slack](https://slackin.spotify.com/)
 - Announce on Twitter
 
 <sup>*</sup>Starting with `0.4.0` all release names are scientific names of animals with genus and species starting with the same letter, in ascending alphabetical order. Starting with `0.8.0` all release names are Harry Potter spells.
 
 ## Past release names
 
+### 0.9.x
+- [v0.9.3](https://github.com/spotify/scio/releases/tag/v0.9.3) - _"Petrificus Totalus"_
+- [v0.9.2](https://github.com/spotify/scio/releases/tag/v0.9.2) - _"Alohomora"_
+- [v0.9.1](https://github.com/spotify/scio/releases/tag/v0.9.1) - _"Aberto"_
+- [v0.9.0](https://github.com/spotify/scio/releases/tag/v0.9.0) - _"Furnunculus"_
+
 ### 0.8.x
+- [v0.8.4](https://github.com/spotify/scio/releases/tag/v0.8.4) - _"Expecto Patronum"_
+- [v0.8.3](https://github.com/spotify/scio/releases/tag/v0.8.3) - _"Draconifors"_
 - [v0.8.2](https://github.com/spotify/scio/releases/tag/v0.8.2) - _"Capacious Extremis"_
 - [v0.8.1](https://github.com/spotify/scio/releases/tag/v0.8.1) - _"Bombarda Maxima"_
 - [v0.8.0](https://github.com/spotify/scio/releases/tag/v0.8.0) - _"Amato Animo Animato Animagus"_

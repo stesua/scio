@@ -42,24 +42,24 @@ private[scio] object MagnoliaMacros {
       override def transform(tree: Tree): c.universe.Tree =
         tree match {
           case Apply(
-              AppliedTypeTree(Select(pack, TypeName("CaseClass")), ps),
-              List(typeName, isObject, isValueClass, params, annotations)
+                AppliedTypeTree(Select(pack, TypeName("CaseClass")), ps),
+                List(typeName, isObject, isValueClass, params, annotations @ _)
               ) =>
             val t2 = Apply(
               AppliedTypeTree(Select(pack, TypeName("CaseClass")), ps),
               List(typeName, isObject, isValueClass, params, q"""Array()""")
             )
             super.transform(t2)
-          case q"""magnolia.Magnolia.param[$tc, $t, $p]($name, $idx, $repeated, $tcParam, $defaultVal, $annotations)""" =>
+          case q"""magnolia.Param.apply[$tc, $t, $p]($name, $idx, $repeated, $tcParam, $defaultVal, ${annotations @ _})""" =>
             val t2 =
-              q"""_root_.magnolia.Magnolia.param[$tc, $t, $p]($name, $idx, $repeated, $tcParam, $defaultVal, Array())"""
+              q"""_root_.magnolia.Param.apply[$tc, $t, $p]($name, $idx, $repeated, $tcParam, $defaultVal, Array())"""
             super.transform(t2)
-          case q"""new magnolia.SealedTrait($typeName, $subtypes, $annotations)""" =>
+          case q"""new magnolia.SealedTrait($typeName, $subtypes, ${annotations @ _})""" =>
             val t2 = q"""new _root_.magnolia.SealedTrait($typeName, $subtypes, Array())"""
             super.transform(t2)
-          case q"""magnolia.Magnolia.subtype[$tc, $t, $p]($typeName, $id, $annotations, $coder, $cast0, $cast1)""" =>
+          case q"""magnolia.Subtype.apply[$tc, $t, $p]($typeName, $id, ${annotations @ _}, $coder, $cast0, $cast1)""" =>
             val t2 =
-              q"""_root_.magnolia.Magnolia.subtype[$tc, $t, $p]($typeName, $id, Array(), $coder, $cast0, $cast1)"""
+              q"""_root_.magnolia.Subtype.apply[$tc, $t, $p]($typeName, $id, Array(), $coder, $cast0, $cast1)"""
             super.transform(t2)
           case t =>
             super.transform(t)

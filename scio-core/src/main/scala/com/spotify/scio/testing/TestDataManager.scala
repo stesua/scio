@@ -36,14 +36,14 @@ sealed private[scio] trait JobInputSource[T] {
 final private[scio] case class TestStreamInputSource[T](
   stream: TestStream[T]
 ) extends JobInputSource[T] {
-  override val asIterable = Failure(
+  override val asIterable: Try[Iterable[T]] = Failure(
     new UnsupportedOperationException(
       s"Test input $this can't be converted to Iterable[T] to test this ScioIO type"
     )
   )
 
   override def toSCollection(sc: ScioContext)(implicit coder: Coder[T]): SCollection[T] =
-    sc.wrap(sc.applyInternal(stream))
+    sc.applyTransform(stream)
 
   override def toString: String = s"TestStream(${stream.getEvents})"
 }
@@ -51,7 +51,7 @@ final private[scio] case class TestStreamInputSource[T](
 final private[scio] case class IterableInputSource[T](
   iterable: Iterable[T]
 ) extends JobInputSource[T] {
-  override val asIterable = Success(iterable)
+  override val asIterable: Success[Iterable[T]] = Success(iterable)
   override def toSCollection(sc: ScioContext)(implicit coder: Coder[T]): SCollection[T] =
     sc.parallelize(iterable)
   override def toString: String = iterable.toString

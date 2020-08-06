@@ -27,7 +27,7 @@ import org.apache.beam.sdk.io._
 import org.apache.beam.sdk.io.FileIO.Write.FileNaming
 import org.apache.beam.sdk.io.fs.MatchResult.Metadata
 import org.apache.commons.compress.compressors.CompressorStreamFactory
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import scala.util.Try
 
@@ -39,7 +39,7 @@ import scala.util.Try
 final case class BinaryIO(path: String) extends ScioIO[Array[Byte]] {
   override type ReadP = Nothing
   override type WriteP = BinaryIO.WriteParam
-  final override val tapT = EmptyTapOf[Array[Byte]]
+  final override val tapT: TapT.Aux[Array[Byte], Nothing] = EmptyTapOf[Array[Byte]]
 
   override def testId: String = s"BinaryIO($path)"
 
@@ -83,7 +83,7 @@ object BinaryIO {
   }
 
   private def listFiles(path: String): Seq[Metadata] =
-    FileSystems.`match`(path).metadata().asScala
+    FileSystems.`match`(path).metadata().iterator.asScala.toSeq
 
   private def getObjectInputStream(meta: Metadata): InputStream =
     Channels.newInputStream(FileSystems.open(meta.resourceId()))

@@ -33,7 +33,6 @@ import org.apache.beam.sdk.options.PipelineOptions
 import org.apache.beam.sdk.transforms.windowing._
 import org.apache.beam.sdk.transforms.{PTransform, Sum}
 import org.apache.beam.sdk.values._
-import org.apache.beam.sdk.{Pipeline, PipelineResult}
 import org.joda.time.Duration
 
 object BeamExample {
@@ -84,17 +83,17 @@ object BeamExample {
     val sc = ScioContext(opts)
 
     // Underlying Beam `Pipeline`
-    val pipeline: Pipeline = sc.pipeline
+    sc.pipeline
 
     // Custom input with a Beam source `PTransform`
     val accounts: SCollection[Account] =
       sc.customInput("Input", pubsubIn(args("inputTopic")))
 
-    // Underlying Beam `PCollection`
-    val p: PCollection[Account] = accounts.internal
+    // Underlying Beam `PCollection[Account]`
+    val p: PCollection[Account] = accounts.internal // scalafix:ok
 
     accounts
-    // Beam `PTransform`
+      // Beam `PTransform`
       .applyTransform(window)
       // Scio `map` transform
       .map(a => KV.of(a.getName.toString, a.getAmount))
@@ -108,7 +107,9 @@ object BeamExample {
     // This calls sc.pipeline.run() under the hood
     val executedContext = sc.run()
 
-    // Underlying Beam pipeline result
-    val pipelineResult: PipelineResult = executedContext.pipelineResult
+    // Underlying Beam pipeline result `PipelineResult`
+    executedContext.pipelineResult
+
+    ()
   }
 }

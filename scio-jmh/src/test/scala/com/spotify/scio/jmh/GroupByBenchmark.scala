@@ -30,7 +30,7 @@ import org.apache.avro.Schema
 import org.apache.avro.generic.GenericRecord
 import org.openjdk.jmh.annotations._
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Thread)
@@ -54,7 +54,7 @@ class GroupByBenchmark {
       }
     """
 
-  val avroSchema =
+  val avroSchema: Schema =
     new Schema.Parser().parse(schema)
 
   private def runWithContext[T](fn: ScioContext => T): ScioExecutionContext = {
@@ -68,14 +68,14 @@ class GroupByBenchmark {
   implicit val coderGenericRecord: Coder[GenericRecord] =
     Coder.avroGenericRecordCoder(avroSchema)
 
-  val charCoder = CoderMaterializer.beamWithDefault(Coder[Char])
-  val doubleCoder = CoderMaterializer.beamWithDefault(Coder[Double])
+  val charCoder: BCoder[Char] = CoderMaterializer.beamWithDefault(Coder[Char])
+  val doubleCoder: BCoder[Double] = CoderMaterializer.beamWithDefault(Coder[Double])
   val kvCoder: BCoder[KV[Char, Double]] = KvCoder.of(charCoder, doubleCoder)
 
   @Benchmark
   def testScioGroupByKey: ScioExecutionContext =
     runWithContext { sc =>
-      sc.avroFile[GenericRecord](source, schema = avroSchema)
+      sc.avroFile(source, schema = avroSchema)
         .map(rec => (rec.get("id").toString.head, rec.get("value").asInstanceOf[Double]))
         .groupByKey
     }
@@ -84,14 +84,13 @@ class GroupByBenchmark {
   def testBeamGroupByKey: ScioExecutionContext =
     runWithContext { sc =>
       sc.wrap {
-          sc.avroFile[GenericRecord](source, schema = avroSchema)
-            .map { rec =>
-              KV.of(rec.get("id").toString.head, rec.get("value").asInstanceOf[Double])
-            }
-            .internal
-            .setCoder(kvCoder)
-            .apply(GroupByKey.create[Char, Double])
-        }
-        .map(kv => (kv.getKey, kv.getValue.asScala))
+        sc.avroFile(source, schema = avroSchema)
+          .map { rec =>
+            KV.of(rec.get("id").toString.head, rec.get("value").asInstanceOf[Double])
+          }
+          .internal
+          .setCoder(kvCoder)
+          .apply(GroupByKey.create[Char, Double])
+      }.map(kv => (kv.getKey, kv.getValue.asScala))
     }
 }

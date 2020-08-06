@@ -67,8 +67,10 @@ final private class SlowGenericRecordCoder extends AtomicCoder[GenericRecord] {
     AvroCoder.of(value.getSchema).registerByteSizeObserver(value, observer)
 }
 
-/** Implementation is legit only for SpecificFixed, not GenericFixed
- * @see [[org.apache.beam.sdk.coders.AvroCoder]] */
+/**
+ * Implementation is legit only for SpecificFixed, not GenericFixed
+ * @see [[org.apache.beam.sdk.coders.AvroCoder]]
+ */
 final private class SpecificFixedCoder[A <: SpecificFixed](cls: Class[A]) extends AtomicCoder[A] {
   // lazy because AVRO Schema isn't serializable
   @transient private[this] lazy val schema: Schema = SpecificData.get().getSchema(cls)

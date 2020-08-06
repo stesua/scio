@@ -19,7 +19,11 @@ package com.spotify.scio.values
 
 import com.spotify.scio.testing.PipelineSpec
 import com.spotify.scio.util.random.RandomSamplerUtils
+import com.spotify.scio.hash._
 import com.twitter.algebird.Aggregator
+import magnolify.guava.auto._
+
+import scala.collection.mutable
 
 class PairSCollectionFunctionsTest extends PipelineSpec {
   "PairSCollection" should "support cogroup()" in {
@@ -210,6 +214,28 @@ class PairSCollectionFunctionsTest extends PipelineSpec {
     }
   }
 
+  it should "support aggregateByKey() with mutation" in {
+    runWithContext { sc =>
+      val p1 = sc.parallelize(1 to 100).map(("a", _))
+      val p2 = sc.parallelize(1 to 10).map(("b", _))
+      val r = (p1 ++ p2)
+        .aggregateByKey(mutable.Buffer.empty[Int])(
+          (xs, x) => {
+            xs.append(x)
+            xs
+          },
+          (xs, ys) => {
+            xs.appendAll(ys)
+            xs
+          }
+        )
+        .mapValues(_.sorted)
+      r should containInAnyOrder(
+        Seq(("a", mutable.Buffer(1 to 100: _*)), ("b", mutable.Buffer(1 to 10: _*)))
+      )
+    }
+  }
+
   it should "support approxQuantilesByKey()" in {
     runWithContext { sc =>
       val p1 = sc.parallelize(0 to 100).map(("a", _))
@@ -225,6 +251,25 @@ class PairSCollectionFunctionsTest extends PipelineSpec {
       val p2 = sc.parallelize(1 to 10).map(("b", _))
       val p = (p1 ++ p2).combineByKey(_.toDouble)(_ + _)(_ + _)
       p should containInAnyOrder(Seq(("a", 5050.0), ("b", 55.0)))
+    }
+  }
+
+  it should "support combineByKey() with mutation" in {
+    runWithContext { sc =>
+      val p1 = sc.parallelize(1 to 100).map(("a", _))
+      val p2 = sc.parallelize(1 to 10).map(("b", _))
+      val r = (p1 ++ p2)
+        .combineByKey(mutable.Buffer(_)) { (xs, x) =>
+          xs.append(x)
+          xs
+        } { (xs, ys) =>
+          xs.appendAll(ys)
+          xs
+        }
+        .mapValues(_.sorted)
+      r should containInAnyOrder(
+        Seq(("a", mutable.Buffer(1 to 100: _*)), ("b", mutable.Buffer(1 to 10: _*)))
+      )
     }
   }
 
@@ -300,6 +345,23 @@ class PairSCollectionFunctionsTest extends PipelineSpec {
       val r2 = (p1 ++ p2).foldByKey
       r1 should containInAnyOrder(Seq(("a", 5050), ("b", 55)))
       r2 should containInAnyOrder(Seq(("a", 5050), ("b", 55)))
+    }
+  }
+
+  it should "support foldByKey() with mutation" in {
+    runWithContext { sc =>
+      val p1 = sc.parallelize(1 to 100).map(("a", _))
+      val p2 = sc.parallelize(1 to 10).map(("b", _))
+      val r = (p1 ++ p2)
+        .mapValues(mutable.Buffer(_))
+        .foldByKey(mutable.Buffer.empty) { (xs, ys) =>
+          xs.appendAll(ys)
+          xs
+        }
+        .mapValues(_.sorted)
+      r should containInAnyOrder(
+        Seq(("a", mutable.Buffer(1 to 100: _*)), ("b", mutable.Buffer(1 to 10: _*)))
+      )
     }
   }
 
@@ -417,10 +479,26 @@ class PairSCollectionFunctionsTest extends PipelineSpec {
     }
   }
 
+  it should "support sparseIntersectByKey() with SideInput[ApproxFilter]" in {
+    runWithContext { sc =>
+      val p1 = sc.parallelize(Seq(("a", 1), ("b", 2), ("c", 3), ("b", 4)))
+      val p2 = sc.parallelize(Seq("a", "b", "d")).asApproxFilterSideInput(BloomFilter)
+      val p = p1.sparseIntersectByKey(p2)
+      p should containInAnyOrder(Seq(("a", 1), ("b", 2), ("b", 4)))
+    }
+  }
+
   it should "support keys()" in {
     runWithContext { sc =>
       val p = sc.parallelize(Seq(("a", 1), ("b", 2), ("c", 3))).keys
       p should containInAnyOrder(Seq("a", "b", "c"))
+    }
+  }
+
+  it should "support mapKeys()" in {
+    runWithContext { sc =>
+      val p = sc.parallelize(Seq((1, "a"), (2, "b"))).mapKeys(_ + 10.0)
+      p should containInAnyOrder(Seq((11.0, "a"), (12.0, "b")))
     }
   }
 
@@ -581,9 +659,9 @@ class PairSCollectionFunctionsTest extends PipelineSpec {
     }
   }
 
-  val sparseLhs = Seq(("a", 1), ("a", 2), ("b", 3), ("c", 4))
-  val sparseRhs = Seq(("a", 11), ("d", 5))
-  val sparseFullOuterJoinExpected = Seq(
+  val sparseLhs: Seq[(String, Int)] = Seq(("a", 1), ("a", 2), ("b", 3), ("c", 4))
+  val sparseRhs: Seq[(String, Int)] = Seq(("a", 11), ("d", 5))
+  val sparseFullOuterJoinExpected: Seq[(String, (Option[Int], Option[Int]))] = Seq(
     ("a", (Some(1), Some(11))),
     ("a", (Some(2), Some(11))),
     ("b", (Some(3), None)),
@@ -591,12 +669,12 @@ class PairSCollectionFunctionsTest extends PipelineSpec {
     ("d", (None, Some(5)))
   )
 
-  val sparseJoinExpected =
+  val sparseJoinExpected: Seq[(String, (Int, Int))] =
     Seq(("a", (1, 11)), ("a", (2, 11)))
 
-  val sparseRightOuterJoinExpected =
+  val sparseRightOuterJoinExpected: Seq[(String, (Option[Int], Int))] =
     Seq(("a", (Some(1), 11)), ("a", (Some(2), 11)), ("d", (None, 5)))
-  val sparseLeftOuterJoinExpected =
+  val sparseLeftOuterJoinExpected: Seq[(String, (Int, Option[Int]))] =
     Seq(("a", (1, Some(11))), ("a", (2, Some(11))), ("b", (3, None)), ("c", (4, None)))
 
   it should "support sparseFullOuterJoin()" in {
@@ -734,8 +812,8 @@ class PairSCollectionFunctionsTest extends PipelineSpec {
     }
   }
 
-  val sparseLookup1 = Seq(("a", 11), ("a", 12), ("b", 13), ("d", 15), ("e", 16))
-  val sparseLookup2 = Seq(("a", 21), ("a", 22), ("b", 23), ("d", 25), ("e", 26))
+  val sparseLookup1: Seq[(String, Int)] = Seq(("a", 11), ("a", 12), ("b", 13), ("d", 15), ("e", 16))
+  val sparseLookup2: Seq[(String, Int)] = Seq(("a", 21), ("a", 22), ("b", 23), ("d", 25), ("e", 26))
   val expected1: Seq[(String, (Int, Set[Int]))] =
     Seq(("a", (1, Set(11, 12))), ("a", (2, Set(11, 12))), ("b", (3, Set(13))), ("c", (4, Set())))
   val expected12: Seq[(String, (Int, Set[Int], Set[Int]))] =

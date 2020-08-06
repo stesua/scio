@@ -21,11 +21,11 @@ import com.google.api.services.bigquery.model.{TableFieldSchema, TableSchema}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
-class ToTableSchemaTest extends AnyFlatSpec with Matchers with ToTableSchema {
+class ToTableSchemaTest extends AnyFlatSpec with Matchers {
   "toTableSchema" should "convert an Avro Schema to a BigQuery TableSchema" in {
-    toTableSchema(AvroExample.SCHEMA$) shouldEqual
+    AvroConverters.toTableSchema(AvroExample.SCHEMA$) shouldEqual
       new TableSchema().setFields(
         List(
           new TableFieldSchema()
@@ -102,7 +102,7 @@ class ToTableSchemaTest extends AnyFlatSpec with Matchers with ToTableSchema {
   }
 
   "toTableSchema" should "convert an Avro Schema with Logical Types to a BigQuery TableSchema" in {
-    toTableSchema(AvroExampleWithLogicalType.SCHEMA$) shouldEqual
+    AvroConverters.toTableSchema(AvroExampleWithLogicalType.SCHEMA$) shouldEqual
       new TableSchema().setFields(
         List(
           new TableFieldSchema()

@@ -22,7 +22,6 @@ import org.apache.avro.Schema
 import org.apache.avro.generic.GenericRecord
 
 import scala.annotation.{compileTimeOnly, StaticAnnotation}
-import scala.language.experimental.macros
 import scala.reflect.runtime.universe._
 import scala.util.Try
 
@@ -128,8 +127,18 @@ object BigQueryType {
    */
   trait HasQuery {
 
-    /** SELECT query for case class schema. */
+    /**
+     * SELECT query for case class schema.
+     * @return unformatted query
+     */
+    @deprecated("use queryRaw instead", "0.9.0")
     def query: String
+
+    /**
+     * SELECT query for case class schema.
+     * @return unformatted query
+     */
+    def queryRaw: String
   }
 
   /**
@@ -183,7 +192,9 @@ object BigQueryType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
-  @compileTimeOnly("enable macro paradise to expand macro annotations")
+  @compileTimeOnly(
+    "enable macro paradise (2.12) or -Ymacro-annotations (2.13) to expand macro annotations"
+  )
   class fromTable(tableSpec: String, args: String*) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.tableImpl
   }
@@ -211,7 +222,9 @@ object BigQueryType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
-  @compileTimeOnly("enable macro paradise to expand macro annotations")
+  @compileTimeOnly(
+    "enable macro paradise (2.12) or -Ymacro-annotations (2.13) to expand macro annotations"
+  )
   class fromSchema(schema: String) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.schemaImpl
   }
@@ -256,7 +269,9 @@ object BigQueryType {
    * Also generate a companion object with convenience methods.
    * @group annotation
    */
-  @compileTimeOnly("enable macro paradise to expand macro annotations")
+  @compileTimeOnly(
+    "enable macro paradise (2.12) or -Ymacro-annotations (2.13) to expand macro annotations"
+  )
   class fromStorage(
     tableSpec: String,
     args: List[Any] = Nil,
@@ -300,7 +315,9 @@ object BigQueryType {
    * behavior, start the query string with `#legacysql` or `#standardsql`.
    * @group annotation
    */
-  @compileTimeOnly("enable macro paradise to expand macro annotations")
+  @compileTimeOnly(
+    "enable macro paradise (2.12) or -Ymacro-annotations (2.13) to expand macro annotations"
+  )
   class fromQuery(query: String, args: Any*) extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.queryImpl
   }
@@ -318,19 +335,17 @@ object BigQueryType {
    * }}}
    * @group annotation
    */
-  @compileTimeOnly("enable macro paradise to expand macro annotations")
+  @compileTimeOnly(
+    "enable macro paradise (2.12) or -Ymacro-annotations (2.13) to expand macro annotations"
+  )
   class toTable extends StaticAnnotation {
     def macroTransform(annottees: Any*): Any = macro TypeProvider.toTableImpl
   }
 
-  /**
-   * Generate [[org.apache.avro.Schema Schema]] for a case class.
-   */
+  /** Generate [[org.apache.avro.Schema Schema]] for a case class. */
   def avroSchemaOf[T: TypeTag]: Schema = SchemaProvider.avroSchemaOf[T]
 
-  /**
-   * Generate [[com.google.api.services.bigquery.model.TableSchema TableSchema]] for a case class.
-   */
+  /** Generate [[com.google.api.services.bigquery.model.TableSchema TableSchema]] for a case class. */
   def schemaOf[T: TypeTag]: TableSchema = SchemaProvider.schemaOf[T]
 
   /**

@@ -41,8 +41,8 @@ class SortMergeBucketExampleTest extends AnyFlatSpec with Matchers {
     (userDir, accountDir, joinOutputDir) =>
       SortMergeBucketWriteExample.main(
         Array(
-          s"--userOutput=$userDir",
-          s"--accountOutput=$accountDir"
+          s"--users=$userDir",
+          s"--accounts=$accountDir"
         )
       )
 
@@ -55,28 +55,29 @@ class SortMergeBucketExampleTest extends AnyFlatSpec with Matchers {
 
       SortMergeBucketJoinExample.main(
         Array(
-          s"--lhsInput=$userDir",
-          s"--rhsInput=$accountDir",
+          s"--users=$userDir",
+          s"--accounts=$accountDir",
           s"--output=$joinOutputDir"
         )
       )
 
       TextTap(s"$joinOutputDir/*.txt").value.size shouldBe 250
+      ()
   }
 
   it should "transform user and account data" in withTempFolders {
     (userDir, accountDir, joinOutputDir) =>
       SortMergeBucketWriteExample.main(
         Array(
-          s"--userOutput=$userDir",
-          s"--accountOutput=$accountDir"
+          s"--users=$userDir",
+          s"--accounts=$accountDir"
         )
       )
 
       SortMergeBucketTransformExample.main(
         Array(
-          s"--lhsInput=$userDir",
-          s"--rhsInput=$accountDir",
+          s"--users=$userDir",
+          s"--accounts=$accountDir",
           s"--output=$joinOutputDir"
         )
       )
@@ -84,5 +85,6 @@ class SortMergeBucketExampleTest extends AnyFlatSpec with Matchers {
       SpecificRecordTap[Account](s"$joinOutputDir/*.avro").value
         .map(account => (account.getId, account.getType.toString))
         .toList should contain theSameElementsAs (0 until 500).map((_, "combinedAmount"))
+      ()
   }
 }

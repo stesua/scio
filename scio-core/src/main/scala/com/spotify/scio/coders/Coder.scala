@@ -30,7 +30,7 @@ import org.apache.beam.sdk.util.common.ElementByteSizeObserver
 import org.apache.beam.sdk.values.KV
 
 import scala.annotation.implicitNotFound
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection.{BitSet, SortedSet, TraversableOnce, mutable => m}
 import scala.reflect.ClassTag
 import scala.util.Try
@@ -77,6 +77,9 @@ private[scio] object Ref {
   def unapply[T](c: Ref[T]): Option[(String, Coder[T])] = Option((c.typeName, c.value))
 }
 
+final case class RawBeam[T] private (beam: BCoder[T]) extends Coder[T] {
+  override def toString: String = s"RawBeam($beam)"
+}
 final case class Beam[T] private (beam: BCoder[T]) extends Coder[T] {
   override def toString: String = s"Beam($beam)"
 }
@@ -259,12 +262,15 @@ final private[scio] case class RecordCoder[T](
   construct: Seq[Any] => T,
   destruct: T => Array[Any]
 ) extends AtomicCoder[T] {
+  private[this] val materializationStackTrace: Array[StackTraceElement] = CoderStackTrace.prepare
+
   @inline def onErrorMsg[A](msg: => String)(f: => A): A =
     try {
       f
     } catch {
       case e: Exception =>
-        throw new RuntimeException(msg, e)
+        // allow Flink memory management, see WrappedBCoder#catching comment.
+        throw CoderStackTrace.append(e, Some(msg), materializationStackTrace)
     }
 
   override def encode(value: T, os: OutputStream): Unit = {
@@ -388,13 +394,12 @@ final private[scio] case class RecordCoder[T](
  *   a Coder is known, use [[Coder.xmap]]
  *
  * - To explicitly use kryo Coder use [[Coder.kryo]]
- *
  */
 sealed trait CoderGrammar {
 
-  /**
-   * Create a ScioCoder from a Beam Coder
-   */
+  /** Create a ScioCoder from a Beam Coder */
+  def raw[T](beam: BCoder[T]): Coder[T] =
+    RawBeam(beam)
   def beam[T](beam: BCoder[T]): Coder[T] =
     Beam(beam)
   def kv[K, V](koder: Coder[K], voder: Coder[V]): Coder[KV[K, V]] =
@@ -513,8 +518,8 @@ object Coder
   implicit def listBufferCoder[T: Coder]: Coder[m.ListBuffer[T]] = ScalaCoders.listBufferCoder
   implicit def arrayCoder[T: Coder: ClassTag]: Coder[Array[T]] = ScalaCoders.arrayCoder
   implicit val arrayByteCoder: Coder[Array[Byte]] = ScalaCoders.arrayByteCoder
-  implicit def wrappedArrayCoder[T: Coder: ClassTag](
-    implicit wrap: Array[T] => m.WrappedArray[T]
+  implicit def wrappedArrayCoder[T: Coder: ClassTag](implicit
+    wrap: Array[T] => m.WrappedArray[T]
   ): Coder[m.WrappedArray[T]] = ScalaCoders.wrappedArrayCoder
   implicit def mutableMapCoder[K: Coder, V: Coder]: Coder[m.Map[K, V]] = ScalaCoders.mutableMapCoder
   implicit def mapCoder[K: Coder, V: Coder]: Coder[Map[K, V]] = ScalaCoders.mapCoder
@@ -541,6 +546,7 @@ object Coder
   implicit val jBigDecimalCoder: Coder[JBigDecimal] = JavaCoders.jBigDecimalCoder
   implicit val serializableCoder: Coder[Serializable] = Coder.kryo[Serializable]
   implicit val jInstantCoder: Coder[Instant] = JavaCoders.jInstantCoder
+  implicit val jSqlTimestamp: Coder[java.sql.Timestamp] = JavaCoders.jSqlTimestamp
   implicit def coderJEnum[E <: java.lang.Enum[E]: ClassTag]: Coder[E] = JavaCoders.coderJEnum
 }
 

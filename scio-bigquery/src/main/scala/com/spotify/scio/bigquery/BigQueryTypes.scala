@@ -30,7 +30,7 @@ import org.apache.beam.sdk.io.gcp.bigquery.{BigQueryHelpers, BigQueryInsertError
 import org.apache.avro.Conversions.DecimalConversion
 import org.apache.avro.LogicalTypes
 import org.joda.time.format.{DateTimeFormat, DateTimeFormatterBuilder}
-import org.joda.time.{DateTimeZone, Instant, LocalDate, LocalDateTime, LocalTime}
+import org.joda.time.DateTimeZone
 import org.joda.time.{Instant, LocalDate, LocalDateTime, LocalTime}
 
 sealed trait Source
@@ -205,9 +205,7 @@ object DateTime {
     Parser.parseLocalDateTime(datetime)
 }
 
-/**
- * Scala wrapper for [[com.google.api.services.bigquery.model.TimePartitioning]].
- */
+/** Scala wrapper for [[com.google.api.services.bigquery.model.TimePartitioning]]. */
 case class TimePartitioning(
   `type`: String,
   field: String = null,

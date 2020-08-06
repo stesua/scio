@@ -28,7 +28,7 @@ import com.spotify.scio.bigquery._
 import com.spotify.scio._
 import com.spotify.scio.examples.common.ExampleData
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 // Intermediate record type
 case class Record(year: Long, month: Long, day: Long, meanTemp: Double)
@@ -67,7 +67,7 @@ object FilterExamples {
     val globalMeanTemp = pipe.map(_.meanTemp).mean
 
     pipe
-    // Filter by month
+      // Filter by month
       .filter(_.month == monthFilter)
       // Cross product of elements in the two `SCollection`s, and since the right hand side is a
       // singleton, effectively decorate each `Record` as `(Record, Double)`

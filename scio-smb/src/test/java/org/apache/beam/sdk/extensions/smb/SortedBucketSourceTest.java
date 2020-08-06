@@ -18,6 +18,7 @@
 package org.apache.beam.sdk.extensions.smb;
 
 import static org.apache.beam.sdk.extensions.smb.SortedBucketSource.BucketedInput;
+import static org.apache.beam.sdk.extensions.smb.SortedBucketSource.DESIRED_SIZE_BYTES_ADJUSTMENT_FACTOR;
 import static org.apache.beam.sdk.extensions.smb.TestUtils.fromFolder;
 
 import java.io.File;
@@ -25,6 +26,7 @@ import java.io.OutputStream;
 import java.nio.channels.Channels;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -33,6 +35,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import org.apache.beam.sdk.PipelineResult;
@@ -40,9 +43,11 @@ import org.apache.beam.sdk.extensions.smb.FileOperations.Writer;
 import org.apache.beam.sdk.extensions.smb.SMBFilenamePolicy.FileAssignment;
 import org.apache.beam.sdk.io.FileSystems;
 import org.apache.beam.sdk.io.LocalResources;
+import org.apache.beam.sdk.io.Read;
 import org.apache.beam.sdk.io.fs.ResourceId;
 import org.apache.beam.sdk.metrics.DistributionResult;
 import org.apache.beam.sdk.metrics.MetricResult;
+import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.testing.NeedsRunner;
 import org.apache.beam.sdk.testing.PAssert;
 import org.apache.beam.sdk.testing.TestPipeline;
@@ -71,10 +76,13 @@ public class SortedBucketSourceTest {
   private SMBFilenamePolicy lhsPolicy;
   private SMBFilenamePolicy rhsPolicy;
 
+  private static final String LHS_FILENAME_PREFIX = "lhs-filename-prefix"; // Custom prefix
+  private static final String RHS_FILENAME_PREFIX = "bucket"; // Default prefix
+
   @Before
   public void setup() {
-    lhsPolicy = new SMBFilenamePolicy(fromFolder(lhsFolder), ".txt");
-    rhsPolicy = new SMBFilenamePolicy(fromFolder(rhsFolder), ".txt");
+    lhsPolicy = new SMBFilenamePolicy(fromFolder(lhsFolder), LHS_FILENAME_PREFIX, ".txt");
+    rhsPolicy = new SMBFilenamePolicy(fromFolder(rhsFolder), RHS_FILENAME_PREFIX, ".txt");
   }
 
   @Test
@@ -235,7 +243,7 @@ public class SortedBucketSourceTest {
     int numBuckets = maxId(input.keySet(), BucketShardId::getBucketId) + 1;
     int numShards = maxId(input.keySet(), BucketShardId::getShardId) + 1;
 
-    TestBucketMetadata metadata = TestBucketMetadata.of(numBuckets, numShards);
+    TestBucketMetadata metadata = TestBucketMetadata.of(numBuckets, numShards, LHS_FILENAME_PREFIX);
 
     write(lhsPolicy.forDestination(), metadata, input);
 
@@ -246,7 +254,8 @@ public class SortedBucketSourceTest {
 
     PCollection<KV<String, CoGbkResult>> output =
         pipeline.apply(
-            new SortedBucketSource<>(String.class, Collections.singletonList(bucketedInput)));
+            Read.from(
+                new SortedBucketSource<>(String.class, Collections.singletonList(bucketedInput))));
 
     final Map<String, List<String>> expected = groupByKey(input, metadata::extractKey);
 
@@ -304,8 +313,185 @@ public class SortedBucketSourceTest {
                 BucketShardId.of(1, 0), Lists.newArrayList("c7", "c8"))));
   }
 
+  @Test
+  @Category(NeedsRunner.class)
+  public void testMixedBucketsMixedShardMaxParallelism() throws Exception {
+    test(
+        ImmutableMap.of(
+            BucketShardId.of(0, 0), Lists.newArrayList("e1", "e2"),
+            BucketShardId.of(1, 0), Lists.newArrayList("c1", "c2", "c3"),
+            BucketShardId.of(2, 0), Lists.newArrayList("i1", "i2", "i1", "i2"),
+            BucketShardId.of(3, 0), Lists.newArrayList("k1", "k2", "k1", "k2")),
+        ImmutableMap.of(
+            BucketShardId.of(0, 0), Lists.newArrayList("e3", "e3"),
+            BucketShardId.of(0, 1), Lists.newArrayList("m4", "m4"),
+            BucketShardId.of(1, 0), Lists.newArrayList("t3", "t3"),
+            BucketShardId.of(1, 1), Lists.newArrayList("h4", "h4")),
+        TargetParallelism.max());
+  }
+
+  @Test
+  @Category(NeedsRunner.class)
+  public void testMixedBucketsMixedShardCustomParallelism() throws Exception {
+    test(
+        ImmutableMap.of(
+            BucketShardId.of(0, 0), Lists.newArrayList("e1", "e2"),
+            BucketShardId.of(1, 0), Lists.newArrayList("c1", "c2", "c3"),
+            BucketShardId.of(2, 0), Lists.newArrayList("i1", "i2", "i1", "i2"),
+            BucketShardId.of(3, 0), Lists.newArrayList("k1", "k2", "k1", "k2")),
+        ImmutableMap.of(
+            BucketShardId.of(0, 0), Lists.newArrayList("e3", "e3"),
+            BucketShardId.of(0, 1), Lists.newArrayList("m4", "m4")),
+        TargetParallelism.of(2));
+  }
+
+  @Test
+  @Category(NeedsRunner.class)
+  public void testMixedBucketsMixedShardAutoParallelism() throws Exception {
+    test(
+        ImmutableMap.of(
+            BucketShardId.of(0, 0), Lists.newArrayList("e1", "e2"),
+            BucketShardId.of(1, 0), Lists.newArrayList("c1", "c2", "c3"),
+            BucketShardId.of(2, 0), Lists.newArrayList("i1", "i2", "i1", "i2"),
+            BucketShardId.of(3, 0), Lists.newArrayList("k1", "k2", "k1", "k2")),
+        ImmutableMap.of(
+            BucketShardId.of(0, 0), Lists.newArrayList("e3", "e3"),
+            BucketShardId.of(0, 1), Lists.newArrayList("m4", "m4")),
+        TargetParallelism.auto());
+  }
+
+  // For non-minimal parallelism, test input keys *must* hash to their corresponding bucket IDs,
+  // since a rehash is required in the merge step
+  @Test
+  @Category(NeedsRunner.class)
+  public void testPartitionedInputsMixedBucketsAutoParallelism() throws Exception {
+    Map<BucketShardId, List<String>> partition1Map = new HashMap<>();
+    partition1Map.put(BucketShardId.of(0, 0), Lists.newArrayList("w9"));
+    partition1Map.put(BucketShardId.of(0, 1), Lists.newArrayList("p1"));
+    partition1Map.put(BucketShardId.of(1, 0), Lists.newArrayList("c9"));
+    partition1Map.put(BucketShardId.of(1, 1), Lists.newArrayList("c2"));
+    partition1Map.put(BucketShardId.of(2, 0), Lists.newArrayList("u1"));
+    partition1Map.put(BucketShardId.of(2, 1), Lists.newArrayList("u2"));
+    partition1Map.put(BucketShardId.of(3, 0), Lists.newArrayList("b1"));
+    partition1Map.put(BucketShardId.of(3, 1), Lists.newArrayList());
+
+    testPartitioned(
+        ImmutableList.of(
+            partition1Map, ImmutableMap.of(BucketShardId.of(0, 0), Lists.newArrayList("w3", "w4"))),
+        ImmutableList.of(
+            ImmutableMap.of(BucketShardId.of(0, 0), Lists.newArrayList("w5", "w6")),
+            ImmutableMap.of(
+                BucketShardId.of(0, 0), Lists.newArrayList(),
+                BucketShardId.of(1, 0), Lists.newArrayList("c7", "c8"))),
+        TargetParallelism.auto());
+  }
+
+  @Test
+  @Category(NeedsRunner.class)
+  public void testPartitionedInputsMixedBucketsMaxParallelism() throws Exception {
+    testPartitioned(
+        ImmutableList.of(
+            ImmutableMap.of(BucketShardId.of(0, 0), Lists.newArrayList("c1", "w1", "x1", "z1")),
+            ImmutableMap.of(BucketShardId.of(0, 0), Lists.newArrayList("w1", "w2"))),
+        ImmutableList.of(
+            ImmutableMap.of(
+                BucketShardId.of(0, 0), Lists.newArrayList("w5", "w6"),
+                BucketShardId.of(1, 0), Lists.newArrayList("t1", "t2", "x1")),
+            ImmutableMap.of(
+                BucketShardId.of(0, 0), Lists.newArrayList("w3", "w4"),
+                BucketShardId.of(1, 0), Lists.newArrayList("c1", "c2"),
+                BucketShardId.of(2, 0), Lists.newArrayList("u1", "u2"),
+                BucketShardId.of(3, 0), Lists.newArrayList("r1", "r2"))),
+        TargetParallelism.max());
+  }
+
+  @Test
+  @Category(NeedsRunner.class)
+  public void testPartitionedInputsMixedBucketsCustomParallelism() throws Exception {
+    testPartitioned(
+        ImmutableList.of(
+            ImmutableMap.of(BucketShardId.of(0, 0), Lists.newArrayList("c1", "w1", "x1", "z1")),
+            ImmutableMap.of(BucketShardId.of(0, 0), Lists.newArrayList("w1", "w2"))),
+        ImmutableList.of(
+            ImmutableMap.of(
+                BucketShardId.of(0, 0), Lists.newArrayList("w5", "w6"),
+                BucketShardId.of(1, 0), Lists.newArrayList("t1", "t2", "x1")),
+            ImmutableMap.of(
+                BucketShardId.of(0, 0), Lists.newArrayList("w3", "w4"),
+                BucketShardId.of(1, 0), Lists.newArrayList("c1", "c2"),
+                BucketShardId.of(2, 0), Lists.newArrayList("u1", "u2"),
+                BucketShardId.of(3, 0), Lists.newArrayList("r1", "r2"))),
+        TargetParallelism.of(2));
+  }
+
+  @SuppressWarnings("unchecked")
+  @Test
+  public void testSourceSplit() throws Exception {
+    writeSmbSourceWithBytes(120, 4, 1, lhsPolicy);
+    writeSmbSourceWithBytes(60, 1, 2, rhsPolicy);
+
+    final List<BucketedInput<?, ?>> inputs =
+        Lists.newArrayList(
+            new BucketedInput<String, String>(
+                new TupleTag<>("lhs"),
+                lhsPolicy.forDestination().getDirectory(),
+                ".txt",
+                new TestFileOperations()),
+            new BucketedInput<>(
+                new TupleTag<>("rhs"),
+                rhsPolicy.forDestination().getDirectory(),
+                ".txt",
+                new TestFileOperations()));
+
+    final SortedBucketSource source =
+        new SortedBucketSource(String.class, inputs, TargetParallelism.auto());
+
+    Assert.assertEquals(180, source.getEstimatedSizeBytes(PipelineOptionsFactory.create()));
+
+    final List<SortedBucketSource<String>> splitSources =
+        source.split(
+            (long) (50 / DESIRED_SIZE_BYTES_ADJUSTMENT_FACTOR), PipelineOptionsFactory.create());
+    splitSources.sort(Comparator.comparingInt(SortedBucketSource::getBucketOffset));
+
+    Assert.assertEquals(4, splitSources.size());
+    Assert.assertEquals(0, splitSources.get(0).getBucketOffset());
+    Assert.assertEquals(1, splitSources.get(1).getBucketOffset());
+    Assert.assertEquals(2, splitSources.get(2).getBucketOffset());
+    Assert.assertEquals(3, splitSources.get(3).getBucketOffset());
+  }
+
+  private void writeSmbSourceWithBytes(
+      int desiredByteSize, int numBuckets, int numShards, SMBFilenamePolicy filenamePolicy)
+      throws Exception {
+    final TestBucketMetadata metadata = TestBucketMetadata.of(numBuckets, numShards);
+
+    // Create string input with desired size in bytes
+    final List<String> inputPerBucketShard =
+        IntStream.range(0, desiredByteSize / (numBuckets * numShards * 2))
+            .boxed()
+            .map(i -> "x")
+            .collect(Collectors.toList());
+
+    final Map<BucketShardId, List<String>> inputMap = new HashMap<>();
+    for (int bucketId = 0; bucketId < numBuckets; bucketId++) {
+      for (int shardId = 0; shardId < numShards; shardId++) {
+        inputMap.put(BucketShardId.of(bucketId, shardId), inputPerBucketShard);
+      }
+    }
+
+    write(filenamePolicy.forDestination(), metadata, inputMap);
+  }
+
   private void test(
       Map<BucketShardId, List<String>> lhsInput, Map<BucketShardId, List<String>> rhsInput)
+      throws Exception {
+    test(lhsInput, rhsInput, TargetParallelism.min());
+  }
+
+  private void test(
+      Map<BucketShardId, List<String>> lhsInput,
+      Map<BucketShardId, List<String>> rhsInput,
+      TargetParallelism targetParallelism)
       throws Exception {
     int lhsNumBuckets = maxId(lhsInput.keySet(), BucketShardId::getBucketId) + 1;
     int lhsNumShards = maxId(lhsInput.keySet(), BucketShardId::getShardId) + 1;
@@ -313,8 +499,10 @@ public class SortedBucketSourceTest {
     int rhsNumBuckets = maxId(rhsInput.keySet(), BucketShardId::getBucketId) + 1;
     int rhsNumShards = maxId(rhsInput.keySet(), BucketShardId::getShardId) + 1;
 
-    TestBucketMetadata lhsMetadata = TestBucketMetadata.of(lhsNumBuckets, lhsNumShards);
-    TestBucketMetadata rhsMetadata = TestBucketMetadata.of(rhsNumBuckets, rhsNumShards);
+    TestBucketMetadata lhsMetadata =
+        TestBucketMetadata.of(lhsNumBuckets, lhsNumShards, LHS_FILENAME_PREFIX);
+    TestBucketMetadata rhsMetadata =
+        TestBucketMetadata.of(rhsNumBuckets, rhsNumShards, RHS_FILENAME_PREFIX);
 
     write(lhsPolicy.forDestination(), lhsMetadata, lhsInput);
     write(rhsPolicy.forDestination(), rhsMetadata, rhsInput);
@@ -324,7 +512,8 @@ public class SortedBucketSourceTest {
         Collections.singletonList(fromFolder(lhsFolder)),
         Collections.singletonList(fromFolder(rhsFolder)),
         lhsInput,
-        rhsInput);
+        rhsInput,
+        targetParallelism);
 
     final PipelineResult result = pipeline.run();
 
@@ -339,7 +528,6 @@ public class SortedBucketSourceTest {
 
     verifyMetrics(
         result,
-        ImmutableMap.of("SortedBucketSource-ElementsRead", elementsRead),
         ImmutableMap.of(
             "SortedBucketSource-KeyGroupSize",
             DistributionResult.create(
@@ -353,6 +541,14 @@ public class SortedBucketSourceTest {
       List<Map<BucketShardId, List<String>>> lhsInputs,
       List<Map<BucketShardId, List<String>>> rhsInputs)
       throws Exception {
+    testPartitioned(lhsInputs, rhsInputs, TargetParallelism.min());
+  }
+
+  private void testPartitioned(
+      List<Map<BucketShardId, List<String>>> lhsInputs,
+      List<Map<BucketShardId, List<String>>> rhsInputs,
+      TargetParallelism targetParallelism)
+      throws Exception {
 
     List<ResourceId> lhsPaths = new ArrayList<>();
     Map<BucketShardId, List<String>> allLhsValues = new HashMap<>();
@@ -360,11 +556,13 @@ public class SortedBucketSourceTest {
     for (Map<BucketShardId, List<String>> input : lhsInputs) {
       int numBuckets = maxId(input.keySet(), BucketShardId::getBucketId) + 1;
       int numShards = maxId(input.keySet(), BucketShardId::getShardId) + 1;
-      TestBucketMetadata metadata = TestBucketMetadata.of(numBuckets, numShards);
+      TestBucketMetadata metadata =
+          TestBucketMetadata.of(numBuckets, numShards, LHS_FILENAME_PREFIX);
       ResourceId destination =
           LocalResources.fromFile(
               partitionedInputFolder.newFolder("lhs" + lhsInputs.indexOf(input)), true);
-      FileAssignment fileAssignment = new SMBFilenamePolicy(destination, ".txt").forDestination();
+      FileAssignment fileAssignment =
+          new SMBFilenamePolicy(destination, metadata.getFilenamePrefix(), ".txt").forDestination();
       write(fileAssignment, metadata, input);
       lhsPaths.add(destination);
       input.forEach(
@@ -384,11 +582,13 @@ public class SortedBucketSourceTest {
     for (Map<BucketShardId, List<String>> input : rhsInputs) {
       int numBuckets = maxId(input.keySet(), BucketShardId::getBucketId) + 1;
       int numShards = maxId(input.keySet(), BucketShardId::getShardId) + 1;
-      TestBucketMetadata metadata = TestBucketMetadata.of(numBuckets, numShards);
+      TestBucketMetadata metadata =
+          TestBucketMetadata.of(numBuckets, numShards, RHS_FILENAME_PREFIX);
       ResourceId destination =
           LocalResources.fromFile(
               partitionedInputFolder.newFolder("rhs" + rhsInputs.indexOf(input)), true);
-      FileAssignment fileAssignment = new SMBFilenamePolicy(destination, ".txt").forDestination();
+      FileAssignment fileAssignment =
+          new SMBFilenamePolicy(destination, metadata.getFilenamePrefix(), ".txt").forDestination();
       write(fileAssignment, metadata, input);
       rhsPaths.add(destination);
       input.forEach(
@@ -403,7 +603,7 @@ public class SortedBucketSourceTest {
                   }));
     }
 
-    checkJoin(pipeline, lhsPaths, rhsPaths, allLhsValues, allRhsValues);
+    checkJoin(pipeline, lhsPaths, rhsPaths, allLhsValues, allRhsValues, targetParallelism);
     pipeline.run();
   }
 
@@ -412,7 +612,8 @@ public class SortedBucketSourceTest {
       List<ResourceId> lhsPaths,
       List<ResourceId> rhsPaths,
       Map<BucketShardId, List<String>> lhsValues,
-      Map<BucketShardId, List<String>> rhsValues)
+      Map<BucketShardId, List<String>> rhsValues,
+      TargetParallelism targetParallelism)
       throws Exception {
     final TupleTag<String> lhsTag = new TupleTag<>("LHS");
     final TupleTag<String> rhsTag = new TupleTag<>("RHS");
@@ -423,7 +624,8 @@ public class SortedBucketSourceTest {
             new BucketedInput<>(rhsTag, rhsPaths, ".txt", fileOperations));
 
     PCollection<KV<String, CoGbkResult>> output =
-        pipeline.apply(new SortedBucketSource<>(String.class, inputs));
+        pipeline.apply(
+            Read.from(new SortedBucketSource<>(String.class, inputs, targetParallelism)));
 
     Function<String, String> extractKeyFn = TestBucketMetadata.of(2, 1)::extractKey;
 
@@ -500,21 +702,13 @@ public class SortedBucketSourceTest {
   }
 
   static void verifyMetrics(
-      PipelineResult result,
-      Map<String, Long> expectedCounters,
-      Map<String, DistributionResult> expectedDistributions) {
-    final Map<String, Long> actualCounters =
-        ImmutableList.copyOf(result.metrics().allMetrics().getCounters().iterator()).stream()
-            .filter(metric -> !metric.getName().getName().equals(PAssert.SUCCESS_COUNTER))
-            .collect(
-                Collectors.toMap(metric -> metric.getName().getName(), MetricResult::getCommitted));
-
-    Assert.assertEquals(expectedCounters, actualCounters);
-
+      PipelineResult result, Map<String, DistributionResult> expectedDistributions) {
     final Map<String, DistributionResult> actualDistributions =
         ImmutableList.copyOf(result.metrics().allMetrics().getDistributions().iterator()).stream()
             .collect(
-                Collectors.toMap(metric -> metric.getName().getName(), MetricResult::getCommitted));
+                Collectors.toMap(
+                    metric -> metric.getName().getName().replaceAll("\\{\\d+}", ""),
+                    MetricResult::getCommitted));
 
     Assert.assertEquals(expectedDistributions, actualDistributions);
   }

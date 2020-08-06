@@ -37,7 +37,7 @@ import org.joda.time.Instant
 import org.joda.time.format.DateTimeFormat
 import org.slf4j.LoggerFactory
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import scala.util.control.NonFatal
@@ -75,9 +75,7 @@ final private[client] class TableOps(client: Client) {
       .newBuilder()
       .setDatasetId(table.ref.getDatasetId)
       .setTableId(table.ref.getTableId)
-    if (table.ref.getProjectId != null) {
-      tableRefProto.setProjectId(table.ref.getProjectId)
-    }
+      .setProjectId(Option(table.ref.getProjectId).getOrElse(client.project))
 
     val request = CreateReadSessionRequest
       .newBuilder()
@@ -112,7 +110,7 @@ final private[client] class TableOps(client: Client) {
         res += reader.read(null, decoder)
       }
 
-      res.toIterator
+      res.iterator
     }
   }
 
@@ -132,21 +130,21 @@ final private[client] class TableOps(client: Client) {
     selectedFields: List[String] = Nil,
     rowRestriction: Option[String] = None
   ): Schema =
-    Cache.getOrElse(s"""$tableSpec;${selectedFields
-      .mkString(",")};$rowRestriction""", Cache.SchemaCache) {
+    Cache.getOrElse(
+      s"""$tableSpec;${selectedFields
+        .mkString(",")};$rowRestriction""",
+      Cache.SchemaCache
+    ) {
       val tableRef = bq.BigQueryHelpers.parseTableSpec(tableSpec)
-      val tableRefProto = TableReferenceProto.TableReference.newBuilder()
-      if (tableRef.getProjectId != null) {
-        tableRefProto.setProjectId(tableRef.getProjectId)
-      }
-      tableRefProto
+      val tableRefProto = TableReferenceProto.TableReference
+        .newBuilder()
+        .setProjectId(Option(tableRef.getProjectId).getOrElse(client.project))
         .setDatasetId(tableRef.getDatasetId)
         .setTableId(tableRef.getTableId)
-        .build()
 
       val request = CreateReadSessionRequest
         .newBuilder()
-        .setTableReference(tableRefProto.build())
+        .setTableReference(tableRefProto)
         .setReadOptions(StorageUtil.tableReadOptions(selectedFields, rowRestriction))
         .setParent(s"projects/${client.project}")
         .build()
@@ -165,9 +163,13 @@ final private[client] class TableOps(client: Client) {
   }
 
   /** Get list of tables in a dataset. */
-  def tableReferences(projectId: String, datasetId: String): Seq[TableReference] = {
+  def tableReferences(projectId: String, datasetId: String): Seq[TableReference] =
+    tableReferences(Option(projectId), datasetId)
+
+  /** Get list of tables in a dataset. */
+  def tableReferences(projectId: Option[String], datasetId: String): Seq[TableReference] = {
     val b = Seq.newBuilder[TableReference]
-    val req = client.underlying.tables().list(projectId, datasetId)
+    val req = client.underlying.tables().list(projectId.getOrElse(client.project), datasetId)
     var rep = req.execute()
     Option(rep.getTables).foreach(_.asScala.foreach(b += _.getTableReference))
     while (rep.getNextPageToken != null) {
@@ -268,7 +270,11 @@ final private[client] class TableOps(client: Client) {
   private[bigquery] def delete(table: TableReference): Unit = {
     client.underlying
       .tables()
-      .delete(table.getProjectId, table.getDatasetId, table.getTableId)
+      .delete(
+        Option(table.getProjectId).getOrElse(client.project),
+        table.getDatasetId,
+        table.getTableId
+      )
       .execute()
     ()
   }

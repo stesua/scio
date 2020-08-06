@@ -27,7 +27,7 @@ import org.apache.parquet.filter2.predicate.FilterApi
 import org.scalatest.BeforeAndAfterAll
 import org.tensorflow.example.{BytesList, Example, Feature, Features, FloatList, Int64List}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 class ParquetExampleIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAll {
   private val dir = tmpDir
@@ -136,7 +136,7 @@ class ParquetExampleIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAl
 
   it should "read Examples" in {
     val sc = ScioContext()
-    val data = sc.parquetExampleFile(dir + "/*.parquet")
+    val data = sc.parquetExampleFile(s"$dir/*.parquet")
     data should containInAnyOrder(examples)
     sc.run()
     ()
@@ -144,7 +144,7 @@ class ParquetExampleIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAl
 
   it should "read Examples with projection" in {
     val sc = ScioContext()
-    val data = sc.parquetExampleFile(dir + "/*.parquet", projection)
+    val data = sc.parquetExampleFile(s"$dir/*.parquet", projection)
     data should containInAnyOrder(examples.map(projectFields(projection)))
     sc.run()
     ()
@@ -152,7 +152,7 @@ class ParquetExampleIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAl
 
   it should "read Examples with predicate" in {
     val sc = ScioContext()
-    val data = sc.parquetExampleFile(dir + "/*.parquet", predicate = predicate)
+    val data = sc.parquetExampleFile(s"$dir/*.parquet", predicate = predicate)
     val expected = examples.filter { e =>
       e.getFeatures.getFeatureOrThrow("int64_req_1").getInt64List.getValue(0) <= 5L &&
       e.getFeatures.getFeatureOrThrow("float_req_2").getFloatList.getValue(0) >= 2.5f
@@ -164,7 +164,7 @@ class ParquetExampleIOTest extends ScioIOSpec with TapSpec with BeforeAndAfterAl
 
   it should "read Examples with projection and predicate" in {
     val sc = ScioContext()
-    val data = sc.parquetExampleFile(dir + "/*.parquet", projection, predicate)
+    val data = sc.parquetExampleFile(s"$dir/*.parquet", projection, predicate)
     val expected = examples
       .filter { e =>
         e.getFeatures.getFeatureOrThrow("int64_req_1").getInt64List.getValue(0) <= 5L &&

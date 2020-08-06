@@ -19,14 +19,13 @@ package com.spotify.scio.values
 
 import com.spotify.annoy.{ANNIndex, AnnoyIndex}
 import com.spotify.scio._
-import com.spotify.scio.avro._
 import com.spotify.scio.io._
 import com.spotify.scio.testing._
 import com.spotify.scio.avro._
 import com.spotify.sparkey.SparkeyReader.Entry
 import com.spotify.sparkey.{IndexHeader, LogHeader, Sparkey, SparkeyReader}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.io.Source
 
 // =======================================================================
@@ -47,13 +46,14 @@ object SimpleDistCacheJob {
 }
 
 class NonSerializable(val noDefaultCntr: String) extends Serializable {
-  private val t = new Thread() // make sure it's not kryo/java serializable
+  // make sure it's not kryo/java serializable
+  private val t = new Thread() // scalafix:ok
 }
 
 object NonSerializableDistCacheJob {
   def main(cmdlineArgs: Array[String]): Unit = {
     val (sc, args) = ContextAndArgs(cmdlineArgs)
-    val dc = sc.distCache(args("distCache"))(f => new NonSerializable("foobar"))
+    val dc = sc.distCache(args("distCache"))(_ => new NonSerializable("foobar"))
     sc.textFile(args("input"))
       .map(_ => dc().noDefaultCntr)
       .saveAsTextFile(args("output"))
@@ -102,7 +102,7 @@ object DistCacheTest {
     in.map { x =>
       val id = x.toInt
       val ann = dc()
-      ann.getNearest(ann.getItemVector(id), 5).asScala.asInstanceOf[Seq[Int]]
+      ann.getNearest(ann.getItemVector(id), 5).iterator().asScala.map(_.toInt).toSeq
     }
 
   def sparkeyTransform(in: SCollection[String], dc: DistCache[SparkeyReader]): SCollection[String] =
@@ -149,7 +149,7 @@ class DistCacheTest extends PipelineSpec {
   it should "work with runWithData and non-serializable dist cache" in {
     val dc = MockDistCache(() => new NonSerializable("foobar"))
     runWithData(Seq("a", "b")) {
-      _.map(x => dc().noDefaultCntr)
+      _.map(_ => dc().noDefaultCntr)
     } should contain theSameElementsAs Seq("foobar", "foobar")
   }
 
@@ -203,7 +203,7 @@ class DistCacheTest extends PipelineSpec {
       _.map { x =>
         val id = x.toInt
         val ann = dc()
-        ann.getNearest(ann.getItemVector(id), 5).asScala.asInstanceOf[Seq[Int]]
+        ann.getNearest(ann.getItemVector(id), 5).iterator().asScala.map(_.toInt).toSeq
       }
     } should contain theSameElementsAs expected
   }

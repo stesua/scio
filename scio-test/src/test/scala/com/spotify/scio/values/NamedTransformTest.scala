@@ -102,7 +102,7 @@ class NamedTransformTest extends PipelineSpec {
       val s = p1
         .withSideInputs(p2)
         .withName("GetX")
-        .filter((x, s) => x == "a")
+        .filter((x, _) => x == "a")
       assertTransformNameStartsWith(s, "GetX")
     }
   }
@@ -207,6 +207,16 @@ class NamedTransformTest extends PipelineSpec {
     }
   }
 
+  it should "support fall back to default transform names" in {
+    runWithContext { sc =>
+      val defaultName = sc.tfName(default = Some("default"))
+      defaultName should be("default")
+
+      val userNamed = sc.withName("UserNamed").tfName(default = Some("default"))
+      userNamed should be("UserNamed")
+    }
+  }
+
   private def assertTransformNameStartsWith(p: PCollectionWrapper[_], tfName: String) = {
     val visitor = new AssertTransformNameVisitor(p.internal, tfName)
     p.context.pipeline.traverseTopologically(visitor)
@@ -215,7 +225,7 @@ class NamedTransformTest extends PipelineSpec {
 
   private class AssertTransformNameVisitor(pcoll: PCollection[_], tfName: String)
       extends Pipeline.PipelineVisitor.Defaults {
-    val prefix = tfName.split("[(/]").toList
+    val prefix: List[String] = tfName.split("[(/]").toList
     var success = false
     var nodeFullName = "<unknown>"
 

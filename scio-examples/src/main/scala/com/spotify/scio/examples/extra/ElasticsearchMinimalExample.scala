@@ -60,13 +60,15 @@ object ElasticsearchMinimalExample {
         // Split input lines, filter out empty tokens and expand into a collection of tokens
         _.flatMap(_.split("[^a-zA-Z']+").filter(_.nonEmpty))
         // Count occurrences of each unique `String` to get `(String, Long)`
-        .countByValue
+          .countByValue
       }
       // Save each collection as an ES document
       .saveAsElasticsearch(clusterOpts)(indexRequestBuilder)
 
     // Run pipeline
-    val result = sc.run().waitUntilFinish()
+    sc.run().waitUntilFinish()
+
+    ()
   }
 
   private val indexer = (index: String) =>

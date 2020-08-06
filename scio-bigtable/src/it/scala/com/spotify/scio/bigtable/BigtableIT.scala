@@ -28,7 +28,7 @@ import com.spotify.scio._
 import com.spotify.scio.testing._
 import org.joda.time.Duration
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 object BigtableIT {
   val projectId = "data-integration-test"
@@ -36,10 +36,11 @@ object BigtableIT {
   val clusterId = "scio-bigtable-it-cluster"
   val zoneId = "us-east1-b"
   val tableId = "scio-bigtable-it-counts"
-  val uuid = UUID.randomUUID().toString.substring(0, 8)
-  val testData = Seq((s"$uuid-key1", 1L), (s"$uuid-key2", 2L), (s"$uuid-key3", 3L))
+  val uuid: String = UUID.randomUUID().toString.substring(0, 8)
+  val testData: Seq[(String, Long)] =
+    Seq((s"$uuid-key1", 1L), (s"$uuid-key2", 2L), (s"$uuid-key3", 3L))
 
-  val bigtableOptions = BigtableOptions
+  val bigtableOptions: BigtableOptions = BigtableOptions
     .builder()
     .setProjectId(projectId)
     .setInstanceId(instanceId)

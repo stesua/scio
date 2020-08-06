@@ -20,7 +20,7 @@ package com.spotify.scio.avro
 import org.apache.avro.Schema
 import org.apache.avro.generic.{GenericData, GenericRecord}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 object AvroUtils {
   private def f(name: String, tpe: Schema.Type) =
@@ -34,7 +34,7 @@ object AvroUtils {
   private def fArr(name: String, tpe: Schema.Type) =
     new Schema.Field(name, Schema.createArray(Schema.create(tpe)), null: String, null: AnyRef)
 
-  val schema = Schema.createRecord("GenericTestRecord", null, null, false)
+  val schema: Schema = Schema.createRecord("GenericTestRecord", null, null, false)
   schema.setFields(
     List(
       f("int_field", Schema.Type.INT),

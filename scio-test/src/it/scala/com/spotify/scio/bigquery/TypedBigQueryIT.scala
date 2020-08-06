@@ -22,7 +22,6 @@ import com.spotify.scio._
 import com.spotify.scio.bigquery.client.BigQuery
 import com.spotify.scio.testing._
 import magnolify.scalacheck.auto._
-import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers
 import org.apache.beam.sdk.options.PipelineOptionsFactory
 import org.joda.time.format.DateTimeFormat
 import org.joda.time.{Instant, LocalDate, LocalDateTime, LocalTime}
@@ -48,12 +47,14 @@ object TypedBigQueryIT {
   )
 
   // Workaround for millis rounding error
-  val epochGen = Gen.chooseNum[Long](0L, 1000000000000L).map(x => x / 1000 * 1000)
-  implicit val arbByteString = Arbitrary(Gen.alphaStr.map(ByteString.copyFromUtf8))
-  implicit val arbInstant = Arbitrary(epochGen.map(new Instant(_)))
-  implicit val arbDate = Arbitrary(epochGen.map(new LocalDate(_)))
-  implicit val arbTime = Arbitrary(epochGen.map(new LocalTime(_)))
-  implicit val arbDatetime = Arbitrary(epochGen.map(new LocalDateTime(_)))
+  val epochGen: Gen[Long] = Gen.chooseNum[Long](0L, 1000000000000L).map(x => x / 1000 * 1000)
+  implicit val arbByteString: Arbitrary[ByteString] = Arbitrary(
+    Gen.alphaStr.map(ByteString.copyFromUtf8)
+  )
+  implicit val arbInstant: Arbitrary[Instant] = Arbitrary(epochGen.map(new Instant(_)))
+  implicit val arbDate: Arbitrary[LocalDate] = Arbitrary(epochGen.map(new LocalDate(_)))
+  implicit val arbTime: Arbitrary[LocalTime] = Arbitrary(epochGen.map(new LocalTime(_)))
+  implicit val arbDatetime: Arbitrary[LocalDateTime] = Arbitrary(epochGen.map(new LocalDateTime(_)))
 
   private val recordGen = {
     implicitly[Arbitrary[Record]].arbitrary
@@ -62,7 +63,9 @@ object TypedBigQueryIT {
   private val table = {
     val TIME_FORMATTER = DateTimeFormat.forPattern("yyyyMMddHHmmss")
     val now = Instant.now().toString(TIME_FORMATTER)
-    "data-integration-test:bigquery_avro_it.records_" + now + "_" + Random.nextInt(Int.MaxValue)
+    val spec =
+      "data-integration-test:bigquery_avro_it.records_" + now + "_" + Random.nextInt(Int.MaxValue)
+    Table.Spec(spec)
   }
   private val records = Gen.listOfN(1000, recordGen).sample.get
   private val options = PipelineOptionsFactory
@@ -78,18 +81,28 @@ class TypedBigQueryIT extends PipelineSpec with BeforeAndAfterAll {
 
   override protected def beforeAll(): Unit = {
     val sc = ScioContext(options)
-    sc.parallelize(records).saveAsTypedBigQuery(table)
+    sc.parallelize(records).saveAsTypedBigQueryTable(table)
 
     sc.run()
     ()
   }
 
   override protected def afterAll(): Unit =
-    BigQuery.defaultInstance().tables.delete(BigQueryHelpers.parseTableSpec(table))
+    BigQuery.defaultInstance().tables.delete(table.ref)
 
   "TypedBigQuery" should "read records" in {
     val sc = ScioContext(options)
     sc.typedBigQuery[Record](table) should containInAnyOrder(records)
+    sc.run()
+  }
+
+  it should "convert to avro format" in {
+    val sc = ScioContext(options)
+    sc.typedBigQuery[Record](table)
+      .map(Record.toAvro)
+      .map(Record.fromAvro) should containInAnyOrder(
+      records
+    )
     sc.run()
   }
 }

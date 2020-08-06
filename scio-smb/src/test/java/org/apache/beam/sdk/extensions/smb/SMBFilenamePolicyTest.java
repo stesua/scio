@@ -39,6 +39,7 @@ public class SMBFilenamePolicyTest {
   @Rule public final TemporaryFolder tmpDestination = new TemporaryFolder();
 
   private static final String SUFFIX = ".foo";
+  private static final String PREFIX = "bar";
 
   @Test
   public void testInvalidConstructor() {
@@ -46,7 +47,7 @@ public class SMBFilenamePolicyTest {
         IllegalArgumentException.class,
         () ->
             new SMBFilenamePolicy(
-                LocalResources.fromFile(destination.newFile("foo.txt"), false), SUFFIX));
+                LocalResources.fromFile(destination.newFile("foo.txt"), false), PREFIX, SUFFIX));
   }
 
   @Test
@@ -57,27 +58,27 @@ public class SMBFilenamePolicyTest {
     Assert.assertEquals(
         fileAssignment.forMetadata(), resolveFile(destination, "metadata", ".json"));
 
-    final BucketMetadata metadata = new TestBucketMetadata(8, 3, HashType.MURMUR3_32);
+    final BucketMetadata metadata = TestBucketMetadata.of(8, 3);
 
     // Test valid shard-bucket combination
     Assert.assertEquals(
         fileAssignment.forBucket(BucketShardId.of(5, 1), metadata),
-        resolveFile(destination, "bucket-00005-of-00008-shard-00001-of-00003", SUFFIX));
+        resolveFile(destination, PREFIX + "-00005-of-00008-shard-00001-of-00003", SUFFIX));
 
     Assert.assertEquals(
         fileAssignment.forBucket(BucketShardId.ofNullKey(1), metadata),
-        resolveFile(destination, "bucket-null-keys-shard-00001-of-00003", SUFFIX));
+        resolveFile(destination, PREFIX + "-null-keys-shard-00001-of-00003", SUFFIX));
 
     // Test single-shard combinations
-    final BucketMetadata singleShardMetadata = new TestBucketMetadata(8, 1, HashType.MURMUR3_32);
+    final BucketMetadata singleShardMetadata = TestBucketMetadata.of(8, 1);
 
     Assert.assertEquals(
         fileAssignment.forBucket(BucketShardId.of(5, 0), singleShardMetadata),
-        resolveFile(destination, "bucket-00005-of-00008", SUFFIX));
+        resolveFile(destination, PREFIX + "-00005-of-00008", SUFFIX));
 
     Assert.assertEquals(
         fileAssignment.forBucket(BucketShardId.ofNullKey(0), singleShardMetadata),
-        resolveFile(destination, "bucket-null-keys", SUFFIX));
+        resolveFile(destination, PREFIX + "-null-keys", SUFFIX));
 
     // Test invalid shard-bucket combinations
     Assert.assertThrows(
@@ -94,7 +95,6 @@ public class SMBFilenamePolicyTest {
     final ResourceId tmpDstResource = TestUtils.fromFolder(tmpDestination);
 
     SMBFilenamePolicy policy = testFilenamePolicy(destination);
-    final Long oldTempId = policy.getTempId();
 
     Assert.assertTrue(
         policy
@@ -103,13 +103,10 @@ public class SMBFilenamePolicyTest {
             .toString()
             .matches(tmpFileRegex(tmpDstResource, "metadata", ".json")));
 
-    final BucketMetadata metadata = new TestBucketMetadata(8, 3, HashType.MURMUR3_32);
+    final BucketMetadata metadata = TestBucketMetadata.of(8, 3);
 
     // Recreate the policy to test tempId is incremented
     policy = testFilenamePolicy(destination);
-    final Long newTempId = policy.getTempId();
-
-    Assert.assertEquals(1, newTempId - oldTempId);
 
     // Test valid shard-bucket combination
     Assert.assertTrue(
@@ -119,17 +116,17 @@ public class SMBFilenamePolicyTest {
             .toString()
             .matches(
                 tmpFileRegex(
-                    tmpDstResource, "bucket-00005-of-00008-shard-00001-of-00003", SUFFIX)));
+                    tmpDstResource, PREFIX + "-00005-of-00008-shard-00001-of-00003", SUFFIX)));
 
     // Test single-shard combination
-    final BucketMetadata singleShardMetadata = new TestBucketMetadata(8, 1, HashType.MURMUR3_32);
+    final BucketMetadata singleShardMetadata = TestBucketMetadata.of(8, 1);
 
     Assert.assertTrue(
         policy
             .forTempFiles(tmpDstResource)
             .forBucket(BucketShardId.of(5, 0), singleShardMetadata)
             .toString()
-            .matches(tmpFileRegex(tmpDstResource, "bucket-00005-of-00008", SUFFIX)));
+            .matches(tmpFileRegex(tmpDstResource, PREFIX + "-00005-of-00008", SUFFIX)));
 
     // Test invalid shard-bucket combinations
     Assert.assertThrows(
@@ -158,7 +155,7 @@ public class SMBFilenamePolicyTest {
   }
 
   private static SMBFilenamePolicy testFilenamePolicy(TemporaryFolder folder) {
-    return new SMBFilenamePolicy(TestUtils.fromFolder(folder), SUFFIX);
+    return new SMBFilenamePolicy(TestUtils.fromFolder(folder), PREFIX, SUFFIX);
   }
 
   private static ResourceId resolveFile(TemporaryFolder parent, String filename, String suffix) {
@@ -169,9 +166,10 @@ public class SMBFilenamePolicyTest {
   private static String tmpFileRegex(ResourceId directory, String filename, String suffix) {
     final String timestampMinutePrefix =
         Instant.now().toString(DateTimeFormat.forPattern("yyyy-MM-dd_HH-mm-"));
+    final String uuidPattern = "([a-f0-9]{8}(-[a-f0-9]{4}){4}[a-f0-9]{8})";
 
     return String.format(
-        "%s.temp-beam-%s\\d{2}-\\d{8}/%s\\d{2}-%s%s",
-        directory.toString(), timestampMinutePrefix, timestampMinutePrefix, filename, suffix);
+        "%s.temp-beam-%s/%s\\d{2}-%s%s",
+        directory.toString(), uuidPattern, timestampMinutePrefix, filename, suffix);
   }
 }

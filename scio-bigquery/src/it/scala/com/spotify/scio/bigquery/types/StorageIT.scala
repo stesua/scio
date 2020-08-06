@@ -29,7 +29,7 @@ import org.joda.time.{DateTimeZone, Duration, Instant}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 // scio-test/it:runMain PopulateTestData to re-populate data for integration tests
 class StorageIT extends AnyFlatSpec with Matchers {
@@ -163,7 +163,7 @@ class StorageIT extends AnyFlatSpec with Matchers {
       Array("--project=data-integration-test", "--tempLocation=gs://data-integration-test-eu/temp")
     )
     val p = sc
-      .typedBigQuery[NestedWithAll](NestedWithAll.table.format("nested"))
+      .typedBigQuery[NestedWithAll](Table.Spec(NestedWithAll.table.format("nested")))
       .map(r => (r.required.int, r.required.string, r.optional.get.int))
       .internal
     PAssert.that(p).containsInAnyOrder(expected)
@@ -315,6 +315,9 @@ object StorageIT {
 
   @BigQueryType.fromStorage("data-integration-test:partition_a.table_%s", List("$LATEST"))
   class StorageLatest
+
+  @BigQueryType.fromStorage("partition_a.table_%s", List("$LATEST"))
+  class StorageEnvProject
 
   @BigQueryType.fromTable("data-integration-test:storage.required")
   class FromTable

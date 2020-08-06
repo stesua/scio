@@ -28,7 +28,7 @@ import com.spotify.scio.ContextAndArgs
 import com.spotify.scio.examples.common.ExampleData
 import com.google.api.services.bigquery.model.{TableFieldSchema, TableSchema}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 object StorageBigQueryTornadoes {
   def main(cmdlineArgs: Array[String]): Unit = {
@@ -46,11 +46,10 @@ object StorageBigQueryTornadoes {
     // Open a BigQuery table as a `SCollection[TableRow]`
     val table = Table.Spec(args.getOrElse("input", ExampleData.WEATHER_SAMPLES_TABLE))
     sc.bigQueryStorage(
-        table,
-        selectedFields = List("tornado", "month"),
-        rowRestriction = "tornado = true"
-      )
-      .map(_.getLong("month"))
+      table,
+      selectedFields = List("tornado", "month"),
+      rowRestriction = "tornado = true"
+    ).map(_.getLong("month"))
       // Count occurrences of each unique month to get `(Long, Long)`
       .countByValue
       // Map `(Long, Long)` tuples into result `TableRow`s

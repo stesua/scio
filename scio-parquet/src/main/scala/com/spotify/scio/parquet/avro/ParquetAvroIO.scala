@@ -40,13 +40,14 @@ import org.apache.parquet.filter2.predicate.FilterPredicate
 import org.apache.parquet.hadoop.ParquetInputFormat
 import org.apache.parquet.hadoop.metadata.CompressionCodecName
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
+import com.spotify.scio.io.TapT
 
 final case class ParquetAvroIO[T: ClassTag: Coder](path: String) extends ScioIO[T] {
   override type ReadP = ParquetAvroIO.ReadParam[_, T]
   override type WriteP = ParquetAvroIO.WriteParam
-  override val tapT = TapOf[T]
+  override val tapT: TapT.Aux[T, T] = TapOf[T]
 
   private val cls = ScioUtil.classOf[T]
 
@@ -69,7 +70,7 @@ final case class ParquetAvroIO[T: ClassTag: Coder](path: String) extends ScioIO[
     sc.pipeline.getCoderRegistry.registerCoderForClass(ScioUtil.classOf[T], coder)
 
     val source = params.read.withConfiguration(job.getConfiguration)
-    sc.wrap(sc.applyInternal(source)).map(_.getValue)
+    sc.applyTransform(source).map(_.getValue)
   }
 
   override protected def write(data: SCollection[T], params: WriteP): Tap[T] = {

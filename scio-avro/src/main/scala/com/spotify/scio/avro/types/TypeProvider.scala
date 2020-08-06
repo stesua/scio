@@ -38,7 +38,7 @@ import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.hash.Hashing
 import org.apache.beam.vendor.guava.v26_0_jre.com.google.common.io.Files
 import org.slf4j.LoggerFactory
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.reflect.macros._
 import scala.util.Try
 
@@ -145,7 +145,7 @@ private[types] object TypeProvider {
 
     val r = annottees.map(_.tree) match {
       case l @ List(
-            q"$mods class $name[..$tparams] $ctorMods(..$fields) extends { ..$earlydefns } with ..$parents { $self => ..$body }"
+            q"$mods class $name[..$_] $_(..$fields) extends { ..$_ } with ..$parents { $_ => ..$body }"
           ) if mods.asInstanceOf[Modifiers].hasFlag(Flag.CASE) =>
         if (parents.map(_.toString()).toSet != Set("scala.Product", "scala.Serializable")) {
           c.abort(c.enclosingPosition, s"Invalid annotation, don't extend the case class $l")
@@ -282,14 +282,13 @@ private[types] object TypeProvider {
         // note that if there are conflicting definitions of a nested record type, the Avro schema
         // parser itself will catch it before getting to this step.
         .map { case (_, cDefs) => cDefs.head } // Don't generate duplicate case classes
-        .toSeq
 
-      (fields, recordClasses)
+      (fields.toSeq, recordClasses.toSeq)
     }
 
     val r = annottees.map(_.tree) match {
       case l @ List(
-            q"$mods class $name[..$tparams] $ctorMods(..$cfields) extends { ..$earlydefns } with ..$parents { $self => ..$body }"
+            q"$mods class $name[..$_] $_(..$cfields) extends { ..$_ } with ..$parents { $_ => ..$_ }"
           ) if mods.asInstanceOf[Modifiers].flags == NoFlags =>
         if (parents.map(_.toString()).toSet != Set("scala.AnyRef")) {
           c.abort(c.enclosingPosition, s"Invalid annotation, don't extend the case class $l")
@@ -430,17 +429,17 @@ private[types] object TypeProvider {
     // in scala plugin.
     import c.universe._
     (Seq(caseClass) ++ records).map {
-      case q"case class $name(..$fields) { ..$body }" =>
+      case q"case class $name(..$fields) { ..$_ }" =>
         s"case class $name(${fields
           .map {
-            case ValDef(mods, fname, ftpt, _) =>
+            case ValDef(_, fname, ftpt, _) =>
               s"${SchemaUtil.escapeNameIfReserved(fname.toString)} : $ftpt"
           }
           .mkString(", ")})"
-      case q"case class $name(..$fields) extends $annotation { ..$body }" =>
+      case q"case class $name(..$fields) extends $annotation { ..$_ }" =>
         s"case class $name(${fields
           .map {
-            case ValDef(mods, fname, ftpt, _) =>
+            case ValDef(_, fname, ftpt, _) =>
               s"${SchemaUtil.escapeNameIfReserved(fname.toString)} : $ftpt"
           }
           .mkString(", ")}) extends $annotation"
